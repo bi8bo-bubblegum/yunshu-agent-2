@@ -1742,6 +1742,12 @@ def test_short_text_not_split():
 
 def test_parse_markdown():
     assert "标题" in parse_text("# 标题\n正文", "md")
+
+def test_markdown_header_split():
+    text = "# 第一章\n## 第一节\n内容A\n## 第二节\n内容B"
+    chunks = split_chunks(text, ext="md")
+    assert len(chunks) >= 2
+    assert "第一章" in chunks[0]
 ```
 
 - [ ] **步骤 2：运行测试确认失败**
@@ -1749,14 +1755,14 @@ def test_parse_markdown():
 运行：`cd backend && pytest tests/test_document_parser.py -v`
 预期：FAIL，ImportError
 
-- [ ] **步骤 3：实现解析与切分（RecursiveCharacterTextSplitter）**
+- [ ] **步骤 3：实现解析与切分（RecursiveCharacterTextSplitter + MarkdownHeaderTextSplitter）**
 
 ```python
 # backend/app/services/document_parser.py
 import io
 from pypdf import PdfReader
 from docx import Document as DocxDocument
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter, MarkdownHeaderTextSplitter
 
 def parse_text(content: bytes, ext: str) -> str:
     ext = ext.lower().lstrip(".")
@@ -1766,11 +1772,19 @@ def parse_text(content: bytes, ext: str) -> str:
     if ext in ("docx", "doc"):
         doc = DocxDocument(io.BytesIO(content))
         return "\n".join(p.text for p in doc.paragraphs)
-    # md/txt
+    # md/txt：文本原样返回，标题结构由 split_chunks 按格式处理
     return content.decode("utf-8", errors="ignore")
 
-def split_chunks(text: str, chunk_size: int = 500, overlap: int = 50) -> list[str]:
-    """按中文语义边界递归切分（优先段落/句子，退化为字符）。"""
+def split_chunks(text: str, chunk_size: int = 500, overlap: int = 50, ext: str = "txt") -> list[str]:
+    if ext in ("md", "markdown"):
+        # Markdown 按标题层级切分，标题链作为上下文注入每个 chunk
+        splitter = MarkdownHeaderTextSplitter(headers_to_split_on=[("#", "H1"), ("##", "H2"), ("###", "H3")])
+        docs = splitter.split_text(text)
+        return [
+            (" ".join(f"{k}: {v}" for k, v in d.metadata.items()) + "\n" + d.page_content) if d.metadata else d.page_content
+            for d in docs
+        ]
+    # 其他格式按中文语义边界递归切分（优先段落/句子，退化为字符）
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=chunk_size,
         chunk_overlap=overlap,
@@ -1873,7 +1887,7 @@ async def upload_document(
     await db.commit()
     try:
         text = parse_text(content, ext)
-        chunks = split_chunks(text)
+        chunks = split_chunks(text, ext=ext)
         vecs = await embed_texts(chunks)
         for i, (chunk_text, vec) in enumerate(zip(chunks, vecs)):
             db.add(Chunk(document_id=doc_id, seq=i, content=chunk_text, embedding=vec))
