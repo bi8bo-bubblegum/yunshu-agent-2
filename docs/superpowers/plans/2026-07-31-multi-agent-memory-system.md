@@ -49,11 +49,12 @@ backend/
 │   │   ├── summary.py          # 对话滚动摘要
 │   │   └── seed.py             # 种子数据
 │   ├── agents/
-│   │   ├── state.py            # AgentState 定义
-│   │   ├── graph.py            # 主图装配 + Supervisor 循环
+│   │   ├── state.py            # AgentState（含 messages 工作状态）
+│   │   ├── graph.py            # 主图装配 + Supervisor 循环（子图嵌入）
 │   │   ├── supervisor.py       # 路由节点（结构化输出）
+│   │   ├── subagent.py         # 子 Agent 子图构造器（ToolNode ReAct + 风险包装）
 │   │   ├── registry.py         # AgentRegistry 动态装配
-│   │   ├── marketing/agent.py  # 营销助手子图
+│   │   ├── marketing/agent.py  # 营销助手子图（TOOL_NAMES 声明）
 │   │   ├── sales_analysis/agent.py
 │   │   └── scheduling/agent.py
 │   ├── memory/
@@ -1486,6 +1487,7 @@ async def test_chat_sse_streams():
 # backend/app/agents/state.py
 from typing import Annotated, TypedDict
 from operator import add
+from langchain_core.messages import BaseMessage
 
 class AgentState(TypedDict, total=False):
     conversation_id: str
@@ -1493,8 +1495,10 @@ class AgentState(TypedDict, total=False):
     user_message: str
     history: str
     memory_context: str          # 记忆装配结果
+    messages: Annotated[list[BaseMessage], add]  # 子图 ReAct 循环的工作消息
     agent_response: str
     route_history: Annotated[list[str], add]  # 已路由过的 agent，防死循环
+    pending_agent: str           # supervisor 本次路由目标
     hitl_decision: str | None    # approved/rejected
     trace_id: str
 ```
@@ -2670,18 +2674,12 @@ git commit -m "feat: Supervisor 循环路由"
 ```python
 # backend/tests/test_marketing_agent.py
 import pytest
-from app.agents.marketing.agent import build_marketing_node
+from app.agents.marketing.agent import build_marketing_agent, TOOL_NAMES
 
-@pytest.mark.asyncio
-async def test_marketing_node_returns(monkeypatch):
-    async def fake_llm(prompt):
-        class R:
-            content = "营销方案：满减+直播"
-        return R()
-    monkeypatch.setattr("app.agents.marketing.agent.ModelFactory.get_llm", lambda k: Fake())
-    node = build_marketing_node()
-    result = await node({"user_message": "策划国庆营销", "memory_context": "【经验】去年满减效果好"})
-    assert "营销方案" in result["agent_response"]
+def test_marketing_agent_subgraph():
+    """营销助手模块声明自己的工具并构建编译子图（供父图嵌入）。"""
+    assert TOOL_NAMES == ["calc", "http_get"]
+    assert build_marketing_agent() is not None
 ```
 
 - [ ] **步骤 2：运行测试确认失败**
@@ -2689,13 +2687,13 @@ async def test_marketing_node_returns(monkeypatch):
 运行：`cd backend && pytest tests/test_marketing_agent.py -v`
 预期：FAIL，ImportError
 
-- [ ] **步骤 3：实现营销助手子图节点（基础版单次调用）**
+- [ ] **步骤 3：实现营销助手子图（声明工具 + 构建 ReAct 子图）**
 
-> 工具调用循环由任务 32.5（tool_runner.py）提供，本任务先实现单次 LLM 调用版本，任务 33.5 升级为工具循环版。
+> 子图构造器 `build_subagent_graph` 在任务 32.5 实现，本任务组装营销助手的专属子图。
 
 ```python
 # backend/app/agents/marketing/agent.py
-from app.llm.factory import ModelFactory
+from app.agents.subagent import build_subagent_graph
 
 SYSTEM_PROMPT = (
     "你是营销助手。结合【记忆上下文】中的个人偏好、历史经验、知识库与企业数据，"
@@ -2705,14 +2703,9 @@ SYSTEM_PROMPT = (
 # 营销助手声明自己需要的工具（工具实现在 DataFacade 统一注册）
 TOOL_NAMES = ["calc", "http_get"]
 
-def build_marketing_node():
-    async def node(state: dict) -> dict:
-        llm = ModelFactory.get_llm("marketing")
-        prompt = f"{SYSTEM_PROMPT}\n\n{state.get('memory_context', '')}\n\n用户：{state.get('user_message', '')}"
-        resp = await llm.ainvoke(prompt)
-        text = resp.content if hasattr(resp, "content") else str(resp)
-        return {"agent_response": text, "route_history": ["marketing"]}
-    return node
+def build_marketing_agent():
+    """营销助手子图：agent ↔ ToolNode 的 ReAct 循环，编译后作为节点嵌入父图。"""
+    return build_subagent_graph("marketing", TOOL_NAMES, SYSTEM_PROMPT)
 ```
 
 - [ ] **步骤 4：运行测试验证通过**
@@ -2739,20 +2732,16 @@ git commit -m "feat: 营销助手 agent 子图"
 
 ```python
 # backend/tests/test_agents_extra.py
-import pytest
-from app.agents.sales_analysis.agent import build_sales_node
-from app.agents.scheduling.agent import build_scheduling_node
+from app.agents.sales_analysis.agent import build_sales_agent, TOOL_NAMES as SALES_TOOLS
+from app.agents.scheduling.agent import build_scheduling_agent, TOOL_NAMES as SCHEDULING_TOOLS
 
-@pytest.mark.asyncio
-async def test_sales_node(monkeypatch):
-    async def fake_llm(prompt):
-        class R:
-            content = "经营分析：Q3 营收同比 +15%"
-        return R()
-    monkeypatch.setattr("app.agents.sales_analysis.agent.ModelFactory.get_llm", lambda k: Fake())
-    result = await build_sales_node()({"user_message": "分析今年 Q3 经营情况", "memory_context": ""})
-    assert "经营分析" in result["agent_response"]
-    assert result["route_history"] == ["sales_analysis"]
+def test_sales_agent_subgraph():
+    assert SALES_TOOLS == ["sql_query", "calc"]
+    assert build_sales_agent() is not None
+
+def test_scheduling_agent_subgraph():
+    assert SCHEDULING_TOOLS == ["sql_query", "calc"]
+    assert build_scheduling_agent() is not None
 ```
 
 - [ ] **步骤 2：运行测试确认失败**
@@ -2764,7 +2753,7 @@ async def test_sales_node(monkeypatch):
 
 ```python
 # backend/app/agents/sales_analysis/agent.py
-from app.llm.factory import ModelFactory
+from app.agents.subagent import build_subagent_graph
 
 SYSTEM_PROMPT = (
     "你是经营分析专家。结合记忆上下文与企业数据（可调用 SQL 工具查询），"
@@ -2774,19 +2763,14 @@ SYSTEM_PROMPT = (
 # 经营分析声明自己需要的工具
 TOOL_NAMES = ["sql_query", "calc"]
 
-def build_sales_node():
-    async def node(state: dict) -> dict:
-        llm = ModelFactory.get_llm("sales_analysis")
-        prompt = f"{SYSTEM_PROMPT}\n\n{state.get('memory_context', '')}\n\n用户：{state.get('user_message', '')}"
-        resp = await llm.ainvoke(prompt)
-        text = resp.content if hasattr(resp, "content") else str(resp)
-        return {"agent_response": text, "route_history": ["sales_analysis"]}
-    return node
+def build_sales_agent():
+    """经营分析子图：agent ↔ ToolNode 的 ReAct 循环，编译后作为节点嵌入父图。"""
+    return build_subagent_graph("sales_analysis", TOOL_NAMES, SYSTEM_PROMPT)
 ```
 
 ```python
 # backend/app/agents/scheduling/agent.py
-from app.llm.factory import ModelFactory
+from app.agents.subagent import build_subagent_graph
 
 SYSTEM_PROMPT = (
     "你是调度优化专家。结合记忆上下文与资源约束，给出排期/调度优化建议，"
@@ -2796,14 +2780,9 @@ SYSTEM_PROMPT = (
 # 调度优化声明自己需要的工具
 TOOL_NAMES = ["sql_query", "calc"]
 
-def build_scheduling_node():
-    async def node(state: dict) -> dict:
-        llm = ModelFactory.get_llm("scheduling")
-        prompt = f"{SYSTEM_PROMPT}\n\n{state.get('memory_context', '')}\n\n用户：{state.get('user_message', '')}"
-        resp = await llm.ainvoke(prompt)
-        text = resp.content if hasattr(resp, "content") else str(resp)
-        return {"agent_response": text, "route_history": ["scheduling"]}
-    return node
+def build_scheduling_agent():
+    """调度优化子图：agent ↔ ToolNode 的 ReAct 循环，编译后作为节点嵌入父图。"""
+    return build_subagent_graph("scheduling", TOOL_NAMES, SYSTEM_PROMPT)
 ```
 
 - [ ] **步骤 4：运行测试验证通过**
@@ -2865,19 +2844,19 @@ class AgentRegistry:
 ```
 
 ```python
-# backend/app/agents/graph.py 重写：Supervisor 循环主图
+# backend/app/agents/graph.py 重写：Supervisor 循环主图，子 agent 子图作为节点嵌入
 from langgraph.graph import StateGraph, END
 from app.agents.state import AgentState
 from app.agents.registry import AgentRegistry
-from app.agents.supervisor import route_decision, decide_done
-from app.agents.marketing.agent import build_marketing_node
-from app.agents.sales_analysis.agent import build_sales_node
-from app.agents.scheduling.agent import build_scheduling_node
+from app.agents.supervisor import route_decision
+from app.agents.marketing.agent import build_marketing_agent
+from app.agents.sales_analysis.agent import build_sales_agent
+from app.agents.scheduling.agent import build_scheduling_agent
 
 registry = AgentRegistry()
-registry.register("marketing", build_marketing_node())
-registry.register("sales_analysis", build_sales_node())
-registry.register("scheduling", build_scheduling_node())
+registry.register("marketing", build_marketing_agent())       # 编译后的子图直接作节点
+registry.register("sales_analysis", build_sales_agent())
+registry.register("scheduling", build_scheduling_agent())
 
 MAX_ROUTES = 4
 
@@ -2885,23 +2864,24 @@ def build_graph():
     g = StateGraph(AgentState)
 
     async def supervisor_node(state: AgentState) -> dict:
-        agents = registry.list()
-        decision = await route_decision(state.get("user_message", ""), agents)
-        state["pending_agent"] = decision["agent"]
-        return {"pending_agent": decision["agent"]}
+        decision = await route_decision(state.get("user_message", ""), registry.list())
+        return {"pending_agent": decision["agent"], "route_history": [decision["agent"]]}
 
     def router(state: AgentState) -> str:
-        agent = state.get("pending_agent", "general")
+        agent = state.get("pending_agent", "done")
         if len(state.get("route_history", [])) >= MAX_ROUTES:
             return "done"
         return agent if agent in registry.list() else "done"
 
     async def done_node(state: AgentState) -> dict:
-        return {"agent_response": state.get("agent_response", "") or "已完成"}
+        # 子图将最终回答写入 state.messages，取最后一条作为 agent_response
+        msgs = state.get("messages", [])
+        text = msgs[-1].content if msgs else state.get("agent_response", "")
+        return {"agent_response": text or "已完成"}
 
     g.add_node("supervisor", supervisor_node)
     for code in registry.list():
-        g.add_node(code, registry.get(code))
+        g.add_node(code, registry.get(code))  # 子图嵌入父图
     g.add_node("done", done_node)
     g.set_entry_point("supervisor")
     g.add_conditional_edges("supervisor", router, {**{c: c for c in registry.list()}, "done": "done"})
@@ -2985,7 +2965,7 @@ async def event_stream():
     mem = await assemble_memory(db, user.id, conv.id, user.department_id, body.message)
     result = await graph.ainvoke({
         "conversation_id": conv.id, "user_id": user.id,
-        "user_message": body.message, "memory_context": mem,
+        "user_message": body.message, "memory_context": mem, "messages": [],
     })
     text = result.get("agent_response", "")
     db.add(Message(conversation_id=conv.id, role="assistant", content=text))
@@ -3187,25 +3167,15 @@ def test_request_hitl_records():
 # backend/app/tools/risk.py
 from langgraph.types import interrupt
 
-async def execute_with_risk(facade, tool_name: str, kwargs: dict, trace_id: str) -> object:
-    tool = facade.get(tool_name)
-    if tool.risk == "high":
-        approved = interrupt({
-            "tool": tool_name, "args": kwargs, "reason": f"高风险操作：{tool.description}",
-        })
-        if approved is not True:
-            return {"error": "操作被驳回"}
-    return await _maybe_await(facade.execute(tool_name, kwargs))
+def needs_hitl(risk: str) -> bool:
+    return risk == "high"
 
 def request_hitl(trace_id: str, node_id: str, reason: str, context: dict) -> dict:
     # 实际实现写入 hitl_tasks 表（见任务 33 的 API 层）；此处返回内存占位
     return {"trace_id": trace_id, "node_id": node_id, "reason": reason, "context": context, "status": "pending"}
 
-def needs_hitl(risk: str) -> bool:
-    return risk == "high"
-
-async def _maybe_await(result):
-    return await result if hasattr(result, "__await__") else result
+# 注：子图方案（任务 32.5）的高风险确认在 to_langchain_tool 内嵌 interrupt() 包装中完成，
+# 本模块保留 needs_hitl（工具风险等级判定）与 request_hitl（HITL 任务占位）供工具注册与任务 33 复用。
 ```
 
 - [ ] **步骤 4：运行测试验证通过**
@@ -3222,57 +3192,49 @@ git commit -m "feat: 风险评估器与 HITL interrupt 机制"
 
 ---
 
-### 任务 32.5：Agent 工具调用循环（ReAct + 风险分级）
+### 任务 32.5：子 Agent 子图（ToolNode ReAct 循环）
 
-> **背景**：任务 27/28 的 agent 节点只有单次 LLM 调用，不会调用工具。本任务实现通用 ReAct 循环：LLM `bind_tools` 决定调什么工具 → 执行（高风险走 `interrupt`）→ 结果回填 → 继续，直到 LLM 给出最终回答。依赖任务 31（DataFacade）与任务 32（execute_with_risk）。
+> **背景**：任务 27/28 的 agent 节点只有单次 LLM 调用。本任务实现**子 agent 自治的工具调用子图**：每个子 agent 用 `StateGraph + ToolNode` 构建自己的 ReAct 循环（LLM 决定工具 → ToolNode 执行 → 回填 → 直到无 tool_calls），编译后的**子图作为节点嵌入父图**。高风险工具在转 `StructuredTool` 时内嵌 `interrupt()` 包装。依赖任务 31（DataFacade）与任务 32（风险等级）。
 
 **文件：**
-- 创建：`backend/app/agents/tool_runner.py`
-- 创建：`backend/tests/test_tool_runner.py`
+- 创建：`backend/app/agents/subagent.py`
+- 创建：`backend/tests/test_subagent.py`
 
-- [ ] **步骤 1：编写失败的测试（mock 两轮 LLM：先调工具、后给答案）**
+- [ ] **步骤 1：编写失败的测试**
 
 ```python
-# backend/tests/test_tool_runner.py
+# backend/tests/test_subagent.py
 import pytest
 from langchain_core.messages import AIMessage
-from app.agents.tool_runner import run_agent
+from app.agents.subagent import build_subagent_graph, to_langchain_tool
 
-class FakeLLM:
-    def __init__(self, calls):
-        self.calls = calls
-    def bind_tools(self, tools):
-        self.calls.append([t.name for t in tools])  # 记录绑定到的工具名
-        self._tools = tools
-        return self
-    async def ainvoke(self, messages):
-        if len(messages) == 2:  # 仅 system+user，尚无工具结果 → 要求调 calc
-            self.calls.append("tool_call")
-            return AIMessage(content="", tool_calls=[{
-                "name": "calc", "args": {"expr": "1+2"}, "id": "call_1", "type": "tool_call",
-            }])
-        return AIMessage(content="结果是 3")  # 已有 ToolMessage → 最终答案
+def test_subagent_graph_compiles():
+    graph = build_subagent_graph("marketing", ["calc", "http_get"], "你是助手")
+    assert graph is not None
+
+def test_to_langchain_tool_has_schema():
+    tool = to_langchain_tool("sql_query")
+    assert tool.name == "sql_query"
+    assert "只读" in tool.description
+    assert "sql" in tool.args_schema.model_fields
 
 @pytest.mark.asyncio
-async def test_agent_calls_tool_then_answers(monkeypatch):
-    """子 agent 声明的 tool_names 决定绑定哪些工具，且工具被正确调用。"""
-    calls = []
-    monkeypatch.setattr("app.agents.tool_runner.ModelFactory.get_llm", lambda key: FakeLLM(calls))
-    text = await run_agent(
-        {"user_message": "1+2等于几", "memory_context": "", "trace_id": "t1"},
-        tool_names=["calc"], agent_code="marketing", system_prompt="你是助手",
-    )
-    assert calls == [["calc"], "tool_call"]  # 只绑定了 calc
-    assert "3" in text
-
-def test_agent_modules_declare_own_tools():
-    """每个子 agent 模块自行声明 TOOL_NAMES（工具绑定在子 agent 处）。"""
-    from app.agents.marketing.agent import TOOL_NAMES as MARKETING_TOOLS
-    from app.agents.sales_analysis.agent import TOOL_NAMES as SALES_TOOLS
-    from app.agents.scheduling.agent import TOOL_NAMES as SCHEDULING_TOOLS
-    assert MARKETING_TOOLS == ["calc", "http_get"]
-    assert SALES_TOOLS == ["sql_query", "calc"]
-    assert SCHEDULING_TOOLS == ["sql_query", "calc"]
+async def test_subagent_react_calls_tool(monkeypatch):
+    """子图内 ReAct：agent 节点要求调用 calc → ToolNode 执行 → 回填 → 最终回答。"""
+    class FakeLLM:
+        def bind_tools(self, tools):
+            self._tools = tools
+            return self
+        async def ainvoke(self, messages):
+            if len(messages) == 2:  # system+user，尚无工具结果
+                return AIMessage(content="", tool_calls=[{
+                    "name": "calc", "args": {"expr": "1+2"}, "id": "c1", "type": "tool_call",
+                }])
+            return AIMessage(content="结果是 3")
+    monkeypatch.setattr("app.agents.subagent.ModelFactory.get_llm", lambda key: FakeLLM())
+    graph = build_subagent_graph("marketing", ["calc"], "你是助手")
+    result = await graph.ainvoke({"user_message": "1+2", "memory_context": "", "messages": []})
+    assert "3" in result["messages"][-1].content
 ```
 
 - [ ] **步骤 2：运行测试确认失败**
@@ -3283,62 +3245,73 @@ def test_agent_modules_declare_own_tools():
 - [ ] **步骤 3：实现 ReAct 工具循环**
 
 ```python
-# backend/app/agents/tool_runner.py
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+# backend/app/agents/subagent.py
+from langgraph.graph import StateGraph, END
+from langgraph.prebuilt import ToolNode
+from langgraph.types import interrupt
+from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import StructuredTool
 from app.llm.factory import ModelFactory
 from app.tools.facade import facade
-from app.tools.risk import execute_with_risk
-
-MAX_TOOL_ROUNDS = 6
+from app.agents.state import AgentState
 
 def to_langchain_tool(name: str) -> StructuredTool:
-    """把 DataFacade 工具转为 LangChain StructuredTool（含描述与参数 schema）。"""
+    """把 DataFacade 工具转为 StructuredTool；高风险工具内嵌 interrupt() 人工确认。"""
     tool = facade.get(name)
+    if tool.risk == "high":
+        async def guarded(**kwargs):
+            approved = interrupt({
+                "tool": name, "args": kwargs,
+                "reason": f"高风险操作：{tool.description}",
+            })
+            if approved is not True:
+                return {"error": "操作被人工驳回"}
+            result = tool.fn(**kwargs)
+            return await result if hasattr(result, "__await__") else result
+        fn = guarded
+    else:
+        fn = tool.fn
     return StructuredTool.from_function(
-        coroutine=tool.fn, name=tool.name, description=tool.description,
+        coroutine=fn, name=tool.name, description=tool.description,
         args_schema=tool.args_schema,
     )
 
-def bind_tools_for(llm, tool_names: list[str]):
-    """由子 agent 声明的 tool_names 完成工具绑定。"""
-    return llm.bind_tools([to_langchain_tool(n) for n in tool_names])
+def should_continue(state: AgentState) -> str:
+    last = state["messages"][-1]
+    return "tools" if getattr(last, "tool_calls", None) else "end"
 
-async def run_agent(state: dict, tool_names: list[str], agent_code: str, system_prompt: str) -> str:
-    """ReAct 循环：LLM 决定工具 → 执行（高风险 interrupt）→ 回填 → 直到无 tool_calls。"""
-    llm = bind_tools_for(ModelFactory.get_llm(agent_code), tool_names)
-    messages = [
-        SystemMessage(system_prompt + "\n" + state.get("memory_context", "")),
-        HumanMessage(state.get("user_message", "")),
-    ]
-    for _ in range(MAX_TOOL_ROUNDS):
-        resp = await llm.ainvoke(messages)
-        messages.append(resp)
-        if not getattr(resp, "tool_calls", None):
-            return resp.content if hasattr(resp, "content") else str(resp)
-        for call in resp.tool_calls:
-            result = await execute_with_risk(facade, call["name"], call["args"], state.get("trace_id", ""))
-            messages.append(ToolMessage(str(result), tool_call_id=call["id"]))
-    return "已达到最大工具轮次，请简化问题后重试"
+def build_subagent_graph(agent_code: str, tool_names: list[str], system_prompt: str):
+    """构建子 agent 的 ReAct 子图：agent 节点 ↔ ToolNode 循环，编译后可作为节点嵌入父图。"""
+    tools = [to_langchain_tool(n) for n in tool_names]
 
-def build_tool_agent_node(agent_code: str, tool_names: list[str], system_prompt: str):
-    """通用 agent 节点工厂：子 agent 传入自己的 TOOL_NAMES，节点内绑定并执行工具循环。"""
-    async def node(state: dict) -> dict:
-        text = await run_agent(state, tool_names, agent_code, system_prompt)
-        return {"agent_response": text, "route_history": [agent_code]}
-    return node
+    async def agent_node(state: AgentState) -> dict:
+        llm = ModelFactory.get_llm(agent_code).bind_tools(tools)
+        msgs = [
+            SystemMessage(system_prompt + "\n" + state.get("memory_context", "")),
+            HumanMessage(state.get("user_message", "")),
+        ] + state.get("messages", [])
+        resp = await llm.ainvoke(msgs)
+        return {"messages": [resp]}
+
+    g = StateGraph(AgentState)
+    g.add_node("agent", agent_node)
+    g.add_node("tools", ToolNode(tools))
+    g.set_entry_point("agent")
+    g.add_edge("tools", "agent")
+    g.add_conditional_edges("agent", should_continue, {"tools": "tools", "end": END})
+    return g.compile()
 ```
 
 - [ ] **步骤 4：运行测试验证通过**
 
-运行：`cd backend && pytest tests/test_tool_runner.py -v`
+运行：`cd backend && pytest tests/test_subagent.py -v`
 预期：PASS
 
 - [ ] **步骤 5：Commit**
 
 ```bash
 git add backend/app backend/tests
-git commit -m "feat: Agent ReAct 工具调用循环（风险分级集成）"
+git commit -m "feat: 子Agent子图(ToolNode ReAct循环)与风险工具interrupt包装"
 ```
 
 ---
@@ -3438,31 +3411,35 @@ git commit -m "feat: HITL 审批 API"
 
 ---
 
-### 任务 33.5：agent 节点升级为工具循环版
+### 任务 33.5：子图嵌入父图 + 端到端验证
 
-> 用任务 32.5 的 `build_tool_agent_node` 替换任务 27/28 的单次 LLM 节点，使营销助手/经营分析/调度优化均具备工具调用能力。
+> 任务 29 已将三个子 agent 的编译子图作为节点嵌入父图。本任务补充验证：父图节点包含各子图，且 mock 路由后能端到端执行（supervisor → 子图 ReAct → 最终回答）。
 
 **文件：**
-- 修改：`backend/app/agents/graph.py`（注册处改用 build_tool_agent_node）
-- 创建：`backend/tests/test_tool_agent_nodes.py`
+- 创建：`backend/tests/test_graph_embed.py`
 
-- [ ] **步骤 1：编写失败的测试**
+- [ ] **步骤 1：编写验证测试**
 
 ```python
-# backend/tests/test_tool_agent_nodes.py
+# backend/tests/test_graph_embed.py
 import pytest
 from langchain_core.messages import AIMessage
-from app.agents.tool_runner import build_tool_agent_node
+from app.agents.graph import graph
+
+def test_main_graph_contains_subagent_nodes():
+    """父图节点应包含 supervisor、各子 agent 子图与 done。"""
+    nodes = set(graph.get_graph().nodes)
+    assert {"supervisor", "marketing", "sales_analysis", "scheduling", "done"} <= nodes
 
 @pytest.mark.asyncio
-async def test_marketing_node_with_tools(monkeypatch):
-    async def fake_llm_factory(key):
-        return FakeLLM()
-    monkeypatch.setattr("app.agents.tool_runner.ModelFactory.get_llm", fake_llm_factory)
-    node = build_tool_agent_node("marketing", ["calc", "http_get"], "你是营销助手")
-    result = await node({"user_message": "算一下 2*3", "memory_context": "", "trace_id": "t1"})
-    assert result["route_history"] == ["marketing"]
-    assert "6" in result["agent_response"]
+async def test_end_to_end_route_and_respond(monkeypatch):
+    """端到端：supervisor 路由到营销子图 → 子图内 ReAct 调用工具 → 最终回答。"""
+    async def fake_route(message, agents):
+        return {"agent": "marketing", "reason": "营销策划", "confidence": 0.9}
+    monkeypatch.setattr("app.agents.graph.route_decision", fake_route)
+    monkeypatch.setattr("app.agents.subagent.ModelFactory.get_llm", lambda key: FakeLLM())
+    result = await graph.ainvoke({"user_message": "策划国庆营销", "memory_context": "", "messages": []})
+    assert result["agent_response"]
 
 class FakeLLM:
     def bind_tools(self, tools):
@@ -3471,43 +3448,21 @@ class FakeLLM:
     async def ainvoke(self, messages):
         if len(messages) == 2:
             return AIMessage(content="", tool_calls=[{
-                "name": "calc", "args": {"expr": "2*3"}, "id": "c1", "type": "tool_call",
+                "name": "calc", "args": {"expr": "100*0.9"}, "id": "c1", "type": "tool_call",
             }])
-        return AIMessage(content="答案是 6")
+        return AIMessage(content="营销方案已生成")
 ```
 
-- [ ] **步骤 2：运行测试确认失败**
+- [ ] **步骤 2：运行测试验证通过（回归验证，任务 29 已装配）**
 
-运行：`cd backend && pytest tests/test_tool_agent_nodes.py -v`
-预期：FAIL，ImportError
+运行：`cd backend && pytest tests/test_graph_embed.py -v`
+预期：PASS（子图已嵌入父图且端到端可执行）
 
-- [ ] **步骤 3：graph.py 注册处改为工具节点**
-
-```python
-# backend/app/agents/graph.py 注册处改造
-from app.agents.tool_runner import build_tool_agent_node
-from app.agents.marketing.agent import SYSTEM_PROMPT as MARKETING_PROMPT, TOOL_NAMES as MARKETING_TOOLS
-from app.agents.sales_analysis.agent import SYSTEM_PROMPT as SALES_PROMPT, TOOL_NAMES as SALES_TOOLS
-from app.agents.scheduling.agent import SYSTEM_PROMPT as SCHEDULING_PROMPT, TOOL_NAMES as SCHEDULING_TOOLS
-
-registry = AgentRegistry()
-registry.register("marketing", build_tool_agent_node("marketing", MARKETING_TOOLS, MARKETING_PROMPT))
-registry.register("sales_analysis", build_tool_agent_node("sales_analysis", SALES_TOOLS, SALES_PROMPT))
-registry.register("scheduling", build_tool_agent_node("scheduling", SCHEDULING_TOOLS, SCHEDULING_PROMPT))
-```
-
-> 任务 27/28 中各 agent 模块的 `SYSTEM_PROMPT` 保留（被此处引用），原 `build_marketing_node` 等单次调用函数保留但不再注册，避免重复逻辑。
-
-- [ ] **步骤 4：运行测试验证通过（含 chat 与 registry 回归）**
-
-运行：`cd backend && pytest tests/test_tool_agent_nodes.py tests/test_registry.py tests/test_chat_api.py -v`
-预期：全部 PASS
-
-- [ ] **步骤 5：Commit**
+- [ ] **步骤 3：Commit**
 
 ```bash
-git add backend/app backend/tests
-git commit -m "feat: agent 节点升级为工具循环版"
+git add backend/tests
+git commit -m "test: 子图嵌入父图与端到端路由执行验证"
 ```
 
 ---
@@ -3712,7 +3667,7 @@ async def event_stream():
     mem = await assemble_memory(db, user.id, conv.id, user.department_id, body.message)
     result = await graph.ainvoke({
         "conversation_id": conv.id, "user_id": user.id,
-        "user_message": body.message, "memory_context": mem, "trace_id": trace.id,
+        "user_message": body.message, "memory_context": mem, "trace_id": trace.id, "messages": [],
     })
     text = result.get("agent_response", "")
     db.add(Message(conversation_id=conv.id, role="assistant", content=text))
@@ -4373,8 +4328,8 @@ git commit -m "feat: docker-compose 联调与冒烟验证"
 | §3.5/3.6 经验中心（三级+审批+向量） | 21, 22, 23, 24 |
 | §3.7 知识中心 RAG | 16, 17, 18, 19 |
 | §4 数据库（全部表 + pgvector + Alembic） | 2, 3, 4, 5, 6 |
-| §5 Agent 注册 / DataFacade / MCP / 风险 | 27, 28, 29, 31, 32, 32.5, 33.5, 37 |
-| §5 工具调用循环（ReAct + 风险分级） | 32.5, 33.5 |
+| §5 子Agent子图（ToolNode ReAct）嵌入父图 | 27, 28, 29, 32.5, 33.5 |
+| §5 Agent 注册 / DataFacade / MCP / 风险 | 31, 32, 37 |
 | §6 API（认证/聊天/HITL/知识/经验/组织/监测/配置） | 7, 8, 10, 14, 15, 18, 23, 24, 33, 35, 38 |
 | §7 技术决策（异步/checkpoint/多模型/部署） | 1, 11, 36, 43 |
 | HITL interrupt | 32, 33 |
