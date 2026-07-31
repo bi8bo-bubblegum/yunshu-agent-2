@@ -1068,10 +1068,11 @@ from app.models.org import Role
 from app.models.configs import AgentConfig
 
 ROLES = [("member", "成员"), ("dept_owner", "部门负责人"), ("admin", "公司管理员")]
+# (code, name, description, tool_whitelist) —— 每个 agent 专属工具白名单
 AGENTS = [
-    ("marketing", "营销助手", "营销方案策划与效果复盘"),
-    ("sales_analysis", "经营分析", "经营数据查询与分析"),
-    ("scheduling", "调度优化", "资源与排期优化"),
+    ("marketing", "营销助手", "营销方案策划与效果复盘", ["calc", "http_get"]),
+    ("sales_analysis", "经营分析", "经营数据查询与分析", ["sql_query", "calc"]),
+    ("scheduling", "调度优化", "资源与排期优化", ["sql_query", "calc"]),
 ]
 
 async def seed_roles(db: AsyncSession) -> None:
@@ -1081,9 +1082,10 @@ async def seed_roles(db: AsyncSession) -> None:
     await db.commit()
 
 async def seed_agents(db: AsyncSession) -> None:
-    for code, name, desc in AGENTS:
+    for code, name, desc, whitelist in AGENTS:
         if not await db.scalar(select(AgentConfig).where(AgentConfig.code == code)):
-            db.add(AgentConfig(code=code, name=name, description=desc, config={"system_prompt": "", "tool_whitelist": []}))
+            db.add(AgentConfig(code=code, name=name, description=desc,
+                               config={"system_prompt": "", "tool_whitelist": whitelist}))
     await db.commit()
 ```
 
@@ -3189,7 +3191,7 @@ git commit -m "feat: 风险评估器与 HITL interrupt 机制"
 # backend/tests/test_tool_runner.py
 import pytest
 from langchain_core.messages import AIMessage
-from app.agents.tool_runner import run_agent
+from app.agents.tool_runner import run_agent, build_agent_tools
 
 class FakeLLM:
     def __init__(self, calls):
@@ -3215,6 +3217,17 @@ async def test_agent_calls_tool_then_answers(monkeypatch):
     )
     assert calls == ["tool_call"]
     assert "3" in text
+
+@pytest.mark.asyncio
+async def test_agent_tool_whitelist(db_session, monkeypatch):
+    """不同 agent 从 agents 表白名单装配各自专属工具集。"""
+    from app.services.seed import seed_agents
+    await seed_agents(db_session)
+    monkeypatch.setattr("app.agents.tool_runner.SessionLocal", lambda: db_session)
+    marketing_tools = await build_agent_tools("marketing")
+    assert {t.name for t in marketing_tools} == {"calc", "http_get"}
+    sales_tools = await build_agent_tools("sales_analysis")
+    assert {t.name for t in sales_tools} == {"sql_query", "calc"}
 ```
 
 - [ ] **步骤 2：运行测试确认失败**
@@ -3228,7 +3241,10 @@ async def test_agent_calls_tool_then_answers(monkeypatch):
 # backend/app/agents/tool_runner.py
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import StructuredTool
+from sqlalchemy import select
+from app.core.database import SessionLocal
 from app.llm.factory import ModelFactory
+from app.models.configs import AgentConfig
 from app.tools.facade import facade
 from app.tools.risk import execute_with_risk
 
@@ -3238,13 +3254,19 @@ def _to_langchain_tool(name: str) -> StructuredTool:
     tool = facade.get(name)
     return StructuredTool.from_function(coroutine=tool.fn, name=tool.name, description=tool.description)
 
-def build_agent_tools(agent_code: str) -> list[StructuredTool]:
-    """按 agent 装配工具（当前返回全部内置工具；白名单过滤后续从 agents 表 config.tool_whitelist 读取）"""
-    return [_to_langchain_tool(name) for name in facade.list_tools()]
+async def build_agent_tools(agent_code: str) -> list[StructuredTool]:
+    """从 agents 表读取 tool_whitelist 过滤工具；无配置/白名单为空时回退为全部内置工具。"""
+    whitelist: list[str] = []
+    async with SessionLocal() as db:
+        row = await db.scalar(select(AgentConfig).where(AgentConfig.code == agent_code))
+        if row:
+            whitelist = (row.config or {}).get("tool_whitelist", [])
+    names = whitelist or facade.list_tools()
+    return [_to_langchain_tool(n) for n in names if n in facade.list_tools()]
 
 async def run_agent(state: dict, agent_code: str, system_prompt: str) -> str:
     """ReAct 循环：LLM 决定工具 → 执行（高风险 interrupt）→ 回填 → 直到无 tool_calls。"""
-    llm = ModelFactory.get_llm(agent_code).bind_tools(build_agent_tools(agent_code))
+    llm = ModelFactory.get_llm(agent_code).bind_tools(await build_agent_tools(agent_code))
     messages = [
         SystemMessage(system_prompt + "\n" + state.get("memory_context", "")),
         HumanMessage(state.get("user_message", "")),
