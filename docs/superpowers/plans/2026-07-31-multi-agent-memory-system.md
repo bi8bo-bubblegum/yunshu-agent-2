@@ -1495,6 +1495,7 @@ class AgentState(TypedDict, total=False):
     history: str
     memory_context: str          # 记忆装配结果
     messages: Annotated[list[BaseMessage], add]  # 子图 ReAct 循环的工作消息
+    tool_rounds: Annotated[int, add]             # 子图工具调用轮次计数（防死循环）
     agent_response: str
     route_history: Annotated[list[str], add]  # 已路由过的 agent，防死循环
     pending_agent: str           # supervisor 本次路由目标
@@ -2673,12 +2674,29 @@ git commit -m "feat: Supervisor 循环路由"
 ```python
 # backend/tests/test_marketing_agent.py
 import pytest
-from app.agents.marketing.agent import build_marketing_agent, TOOL_NAMES
+from langchain_core.messages import AIMessage
+from app.agents.marketing.agent import build_marketing_agent, TOOL_NAMES, MAX_TOOL_ROUNDS
 
 def test_marketing_agent_subgraph():
     """营销助手模块声明自己的工具并构建编译子图（供父图嵌入）。"""
     assert TOOL_NAMES == ["calc", "http_get"]
     assert build_marketing_agent() is not None
+
+@pytest.mark.asyncio
+async def test_marketing_subgraph_stops_after_max_rounds(monkeypatch):
+    """LLM 持续要求调用工具时，子图在 MAX_TOOL_ROUNDS 后强制结束，不抛异常。"""
+    class LoopLLM:
+        def bind_tools(self, tools):
+            return self
+        async def ainvoke(self, messages):
+            return AIMessage(content="", tool_calls=[{
+                "name": "calc", "args": {"expr": "1"}, "id": f"c{len(messages)}", "type": "tool_call",
+            }])
+
+    monkeypatch.setattr("app.agents.marketing.agent.ModelFactory.get_llm", lambda k: LoopLLM())
+    g = build_marketing_agent()
+    result = await g.ainvoke({"user_message": "循环", "memory_context": "", "messages": []})
+    assert result["tool_rounds"] == MAX_TOOL_ROUNDS  # 达到上限强制结束
 ```
 
 - [ ] **步骤 2：运行测试确认失败**
@@ -2707,6 +2725,8 @@ SYSTEM_PROMPT = (
 # 营销助手声明自己需要的工具（工具实现在 DataFacade 统一注册）
 TOOL_NAMES = ["calc", "http_get"]
 
+MAX_TOOL_ROUNDS = 6  # 工具调用最大轮次，防 LLM 死循环（每子 agent 可配置不同值）
+
 def build_marketing_agent():
     """营销助手子图：agent ↔ ToolNode 的 ReAct 循环，编译后作为节点嵌入父图。
     子图在模块内部独立构建，后续可差异化演进（换节点、加记忆节点、改路由等）。"""
@@ -2719,11 +2739,14 @@ def build_marketing_agent():
             HumanMessage(state.get("user_message", "")),
         ] + state.get("messages", [])
         resp = await llm.ainvoke(msgs)
-        return {"messages": [resp]}
+        return {"messages": [resp], "tool_rounds": 1}  # add reducer 自动累加
 
     def should_continue(state: AgentState) -> str:
         last = state["messages"][-1]
-        return "tools" if getattr(last, "tool_calls", None) else "end"
+        if not getattr(last, "tool_calls", None):
+            return "end"
+        # 达到最大轮次即使仍要调工具也强制结束，防死循环
+        return "tools" if state.get("tool_rounds", 0) < MAX_TOOL_ROUNDS else "end"
 
     g = StateGraph(AgentState)
     g.add_node("agent", agent_node)
@@ -2758,7 +2781,9 @@ git commit -m "feat: 营销助手 agent 子图"
 
 ```python
 # backend/tests/test_agents_extra.py
-from app.agents.sales_analysis.agent import build_sales_agent, TOOL_NAMES as SALES_TOOLS
+import pytest
+from langchain_core.messages import AIMessage
+from app.agents.sales_analysis.agent import build_sales_agent, TOOL_NAMES as SALES_TOOLS, MAX_TOOL_ROUNDS
 from app.agents.scheduling.agent import build_scheduling_agent, TOOL_NAMES as SCHEDULING_TOOLS
 
 def test_sales_agent_subgraph():
@@ -2768,6 +2793,21 @@ def test_sales_agent_subgraph():
 def test_scheduling_agent_subgraph():
     assert SCHEDULING_TOOLS == ["sql_query", "calc"]
     assert build_scheduling_agent() is not None
+
+@pytest.mark.asyncio
+async def test_sales_subgraph_stops_after_max_rounds(monkeypatch):
+    """经营分析子图同样具备工具轮次上限保护。"""
+    class LoopLLM:
+        def bind_tools(self, tools):
+            return self
+        async def ainvoke(self, messages):
+            return AIMessage(content="", tool_calls=[{
+                "name": "calc", "args": {"expr": "1"}, "id": f"c{len(messages)}", "type": "tool_call",
+            }])
+
+    monkeypatch.setattr("app.agents.sales_analysis.agent.ModelFactory.get_llm", lambda k: LoopLLM())
+    result = await build_sales_agent().ainvoke({"user_message": "循环", "memory_context": "", "messages": []})
+    assert result["tool_rounds"] == MAX_TOOL_ROUNDS
 ```
 
 - [ ] **步骤 2：运行测试确认失败**
@@ -2794,6 +2834,8 @@ SYSTEM_PROMPT = (
 # 经营分析声明自己需要的工具
 TOOL_NAMES = ["sql_query", "calc"]
 
+MAX_TOOL_ROUNDS = 6  # 工具调用最大轮次，防 LLM 死循环
+
 def build_sales_agent():
     """经营分析子图：agent ↔ ToolNode 的 ReAct 循环，编译后作为节点嵌入父图。
     子图在模块内部独立构建，后续可差异化演进。"""
@@ -2806,11 +2848,13 @@ def build_sales_agent():
             HumanMessage(state.get("user_message", "")),
         ] + state.get("messages", [])
         resp = await llm.ainvoke(msgs)
-        return {"messages": [resp]}
+        return {"messages": [resp], "tool_rounds": 1}
 
     def should_continue(state: AgentState) -> str:
         last = state["messages"][-1]
-        return "tools" if getattr(last, "tool_calls", None) else "end"
+        if not getattr(last, "tool_calls", None):
+            return "end"
+        return "tools" if state.get("tool_rounds", 0) < MAX_TOOL_ROUNDS else "end"
 
     g = StateGraph(AgentState)
     g.add_node("agent", agent_node)
@@ -2838,6 +2882,8 @@ SYSTEM_PROMPT = (
 # 调度优化声明自己需要的工具
 TOOL_NAMES = ["sql_query", "calc"]
 
+MAX_TOOL_ROUNDS = 6  # 工具调用最大轮次，防 LLM 死循环
+
 def build_scheduling_agent():
     """调度优化子图：agent ↔ ToolNode 的 ReAct 循环，编译后作为节点嵌入父图。
     子图在模块内部独立构建，后续可差异化演进。"""
@@ -2850,11 +2896,13 @@ def build_scheduling_agent():
             HumanMessage(state.get("user_message", "")),
         ] + state.get("messages", [])
         resp = await llm.ainvoke(msgs)
-        return {"messages": [resp]}
+        return {"messages": [resp], "tool_rounds": 1}
 
     def should_continue(state: AgentState) -> str:
         last = state["messages"][-1]
-        return "tools" if getattr(last, "tool_calls", None) else "end"
+        if not getattr(last, "tool_calls", None):
+            return "end"
+        return "tools" if state.get("tool_rounds", 0) < MAX_TOOL_ROUNDS else "end"
 
     g = StateGraph(AgentState)
     g.add_node("agent", agent_node)
