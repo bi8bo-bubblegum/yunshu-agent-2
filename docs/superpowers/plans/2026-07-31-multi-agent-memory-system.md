@@ -113,6 +113,7 @@ dependencies = [
     "langchain-core>=0.3.0",
     "langchain-openai>=0.2.0",
     "langchain-mcp-adapters>=0.1.0",
+    "langchain-text-splitters>=0.2.0",
     "pgvector>=0.3.0",
     "pyjwt>=2.9",
     "bcrypt>=4.1",
@@ -1714,9 +1715,12 @@ git commit -m "feat: embedding 服务封装"
 
 ---
 
-### 任务 17：文档解析与切分
+### 任务 17：文档解析与切分（LangChain 现成组件）
+
+> 切分直接用现成 `RecursiveCharacterTextSplitter`（按段落/句子边界递归切分，支持重叠），不手写字符切片。解析保留 pypdf / python-docx（与 langchain loader 底层同源，但免去文件路径接口，便于 bytes 流测试）；若文档为扫描件/图片 PDF，后续可再接入云文档智能 OCR API。
 
 **文件：**
+- 修改：`backend/pyproject.toml`（追加 `langchain-text-splitters>=0.2.0`）
 - 创建：`backend/app/services/document_parser.py`
 - 创建：`backend/tests/test_document_parser.py`
 
@@ -1726,11 +1730,15 @@ git commit -m "feat: embedding 服务封装"
 # backend/tests/test_document_parser.py
 from app.services.document_parser import parse_text, split_chunks
 
-def test_split_chunks_size():
+def test_split_chunks_basic():
     text = "段落一。" * 200
     chunks = split_chunks(text, chunk_size=100)
-    assert all(len(c) <= 120 for c in chunks)
     assert len(chunks) > 1
+    assert "段落一" in chunks[0]
+
+def test_short_text_not_split():
+    chunks = split_chunks("简短文本", chunk_size=500)
+    assert len(chunks) == 1
 
 def test_parse_markdown():
     assert "标题" in parse_text("# 标题\n正文", "md")
@@ -1741,13 +1749,14 @@ def test_parse_markdown():
 运行：`cd backend && pytest tests/test_document_parser.py -v`
 预期：FAIL，ImportError
 
-- [ ] **步骤 3：实现解析与切分**
+- [ ] **步骤 3：实现解析与切分（RecursiveCharacterTextSplitter）**
 
 ```python
 # backend/app/services/document_parser.py
 import io
 from pypdf import PdfReader
 from docx import Document as DocxDocument
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 def parse_text(content: bytes, ext: str) -> str:
     ext = ext.lower().lstrip(".")
@@ -1761,11 +1770,13 @@ def parse_text(content: bytes, ext: str) -> str:
     return content.decode("utf-8", errors="ignore")
 
 def split_chunks(text: str, chunk_size: int = 500, overlap: int = 50) -> list[str]:
-    chunks, i = [], 0
-    while i < len(text):
-        chunks.append(text[i : i + chunk_size])
-        i += chunk_size - overlap
-    return chunks
+    """按中文语义边界递归切分（优先段落/句子，退化为字符）。"""
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=chunk_size,
+        chunk_overlap=overlap,
+        separators=["\n\n", "\n", "。", "！", "？", "；", " ", ""],
+    )
+    return splitter.split_text(text)
 ```
 
 - [ ] **步骤 4：运行测试验证通过**
