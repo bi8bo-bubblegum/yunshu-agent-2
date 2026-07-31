@@ -1068,7 +1068,7 @@ from app.models.org import Role
 from app.models.configs import AgentConfig
 
 ROLES = [("member", "成员"), ("dept_owner", "部门负责人"), ("admin", "公司管理员")]
-# (code, name, description, tool_whitelist) —— 每个 agent 专属工具白名单
+# (code, name, description, tool_whitelist) —— whitelist 仅作管理端展示；运行时工具绑定由各 agent 模块的 TOOL_NAMES 决定（任务 27/28/32.5）
 AGENTS = [
     ("marketing", "营销助手", "营销方案策划与效果复盘", ["calc", "http_get"]),
     ("sales_analysis", "经营分析", "经营数据查询与分析", ["sql_query", "calc"]),
@@ -2702,6 +2702,9 @@ SYSTEM_PROMPT = (
     "为用户策划营销方案。营销策略需包含目标、渠道、预算、预期效果。回答用中文。"
 )
 
+# 营销助手声明自己需要的工具（工具实现在 DataFacade 统一注册）
+TOOL_NAMES = ["calc", "http_get"]
+
 def build_marketing_node():
     async def node(state: dict) -> dict:
         llm = ModelFactory.get_llm("marketing")
@@ -2768,6 +2771,9 @@ SYSTEM_PROMPT = (
     "给出量化分析结论，指出趋势与风险。回答用中文。"
 )
 
+# 经营分析声明自己需要的工具
+TOOL_NAMES = ["sql_query", "calc"]
+
 def build_sales_node():
     async def node(state: dict) -> dict:
         llm = ModelFactory.get_llm("sales_analysis")
@@ -2786,6 +2792,9 @@ SYSTEM_PROMPT = (
     "你是调度优化专家。结合记忆上下文与资源约束，给出排期/调度优化建议，"
     "包含时间线、资源分配、风险点。回答用中文。"
 )
+
+# 调度优化声明自己需要的工具
+TOOL_NAMES = ["sql_query", "calc"]
 
 def build_scheduling_node():
     async def node(state: dict) -> dict:
@@ -3227,12 +3236,13 @@ git commit -m "feat: 风险评估器与 HITL interrupt 机制"
 # backend/tests/test_tool_runner.py
 import pytest
 from langchain_core.messages import AIMessage
-from app.agents.tool_runner import run_agent, build_agent_tools
+from app.agents.tool_runner import run_agent
 
 class FakeLLM:
     def __init__(self, calls):
         self.calls = calls
     def bind_tools(self, tools):
+        self.calls.append([t.name for t in tools])  # 记录绑定到的工具名
         self._tools = tools
         return self
     async def ainvoke(self, messages):
@@ -3245,25 +3255,24 @@ class FakeLLM:
 
 @pytest.mark.asyncio
 async def test_agent_calls_tool_then_answers(monkeypatch):
+    """子 agent 声明的 tool_names 决定绑定哪些工具，且工具被正确调用。"""
     calls = []
     monkeypatch.setattr("app.agents.tool_runner.ModelFactory.get_llm", lambda key: FakeLLM(calls))
     text = await run_agent(
         {"user_message": "1+2等于几", "memory_context": "", "trace_id": "t1"},
-        "marketing", "你是助手",
+        tool_names=["calc"], agent_code="marketing", system_prompt="你是助手",
     )
-    assert calls == ["tool_call"]
+    assert calls == [["calc"], "tool_call"]  # 只绑定了 calc
     assert "3" in text
 
-@pytest.mark.asyncio
-async def test_agent_tool_whitelist(db_session, monkeypatch):
-    """不同 agent 从 agents 表白名单装配各自专属工具集。"""
-    from app.services.seed import seed_agents
-    await seed_agents(db_session)
-    monkeypatch.setattr("app.agents.tool_runner.SessionLocal", lambda: db_session)
-    marketing_tools = await build_agent_tools("marketing")
-    assert {t.name for t in marketing_tools} == {"calc", "http_get"}
-    sales_tools = await build_agent_tools("sales_analysis")
-    assert {t.name for t in sales_tools} == {"sql_query", "calc"}
+def test_agent_modules_declare_own_tools():
+    """每个子 agent 模块自行声明 TOOL_NAMES（工具绑定在子 agent 处）。"""
+    from app.agents.marketing.agent import TOOL_NAMES as MARKETING_TOOLS
+    from app.agents.sales_analysis.agent import TOOL_NAMES as SALES_TOOLS
+    from app.agents.scheduling.agent import TOOL_NAMES as SCHEDULING_TOOLS
+    assert MARKETING_TOOLS == ["calc", "http_get"]
+    assert SALES_TOOLS == ["sql_query", "calc"]
+    assert SCHEDULING_TOOLS == ["sql_query", "calc"]
 ```
 
 - [ ] **步骤 2：运行测试确认失败**
@@ -3277,35 +3286,27 @@ async def test_agent_tool_whitelist(db_session, monkeypatch):
 # backend/app/agents/tool_runner.py
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import StructuredTool
-from sqlalchemy import select
-from app.core.database import SessionLocal
 from app.llm.factory import ModelFactory
-from app.models.configs import AgentConfig
 from app.tools.facade import facade
 from app.tools.risk import execute_with_risk
 
 MAX_TOOL_ROUNDS = 6
 
-def _to_langchain_tool(name: str) -> StructuredTool:
+def to_langchain_tool(name: str) -> StructuredTool:
+    """把 DataFacade 工具转为 LangChain StructuredTool（含描述与参数 schema）。"""
     tool = facade.get(name)
     return StructuredTool.from_function(
         coroutine=tool.fn, name=tool.name, description=tool.description,
         args_schema=tool.args_schema,
     )
 
-async def build_agent_tools(agent_code: str) -> list[StructuredTool]:
-    """从 agents 表读取 tool_whitelist 过滤工具；无配置/白名单为空时回退为全部内置工具。"""
-    whitelist: list[str] = []
-    async with SessionLocal() as db:
-        row = await db.scalar(select(AgentConfig).where(AgentConfig.code == agent_code))
-        if row:
-            whitelist = (row.config or {}).get("tool_whitelist", [])
-    names = whitelist or facade.list_tools()
-    return [_to_langchain_tool(n) for n in names if n in facade.list_tools()]
+def bind_tools_for(llm, tool_names: list[str]):
+    """由子 agent 声明的 tool_names 完成工具绑定。"""
+    return llm.bind_tools([to_langchain_tool(n) for n in tool_names])
 
-async def run_agent(state: dict, agent_code: str, system_prompt: str) -> str:
+async def run_agent(state: dict, tool_names: list[str], agent_code: str, system_prompt: str) -> str:
     """ReAct 循环：LLM 决定工具 → 执行（高风险 interrupt）→ 回填 → 直到无 tool_calls。"""
-    llm = ModelFactory.get_llm(agent_code).bind_tools(await build_agent_tools(agent_code))
+    llm = bind_tools_for(ModelFactory.get_llm(agent_code), tool_names)
     messages = [
         SystemMessage(system_prompt + "\n" + state.get("memory_context", "")),
         HumanMessage(state.get("user_message", "")),
@@ -3320,10 +3321,10 @@ async def run_agent(state: dict, agent_code: str, system_prompt: str) -> str:
             messages.append(ToolMessage(str(result), tool_call_id=call["id"]))
     return "已达到最大工具轮次，请简化问题后重试"
 
-def build_tool_agent_node(agent_code: str, system_prompt: str):
-    """通用 agent 节点工厂：取代任务 27/28 的单次 LLM 节点。"""
+def build_tool_agent_node(agent_code: str, tool_names: list[str], system_prompt: str):
+    """通用 agent 节点工厂：子 agent 传入自己的 TOOL_NAMES，节点内绑定并执行工具循环。"""
     async def node(state: dict) -> dict:
-        text = await run_agent(state, agent_code, system_prompt)
+        text = await run_agent(state, tool_names, agent_code, system_prompt)
         return {"agent_response": text, "route_history": [agent_code]}
     return node
 ```
@@ -3458,7 +3459,7 @@ async def test_marketing_node_with_tools(monkeypatch):
     async def fake_llm_factory(key):
         return FakeLLM()
     monkeypatch.setattr("app.agents.tool_runner.ModelFactory.get_llm", fake_llm_factory)
-    node = build_tool_agent_node("marketing", "你是营销助手")
+    node = build_tool_agent_node("marketing", ["calc", "http_get"], "你是营销助手")
     result = await node({"user_message": "算一下 2*3", "memory_context": "", "trace_id": "t1"})
     assert result["route_history"] == ["marketing"]
     assert "6" in result["agent_response"]
@@ -3485,14 +3486,14 @@ class FakeLLM:
 ```python
 # backend/app/agents/graph.py 注册处改造
 from app.agents.tool_runner import build_tool_agent_node
-from app.agents.marketing.agent import SYSTEM_PROMPT as MARKETING_PROMPT
-from app.agents.sales_analysis.agent import SYSTEM_PROMPT as SALES_PROMPT
-from app.agents.scheduling.agent import SYSTEM_PROMPT as SCHEDULING_PROMPT
+from app.agents.marketing.agent import SYSTEM_PROMPT as MARKETING_PROMPT, TOOL_NAMES as MARKETING_TOOLS
+from app.agents.sales_analysis.agent import SYSTEM_PROMPT as SALES_PROMPT, TOOL_NAMES as SALES_TOOLS
+from app.agents.scheduling.agent import SYSTEM_PROMPT as SCHEDULING_PROMPT, TOOL_NAMES as SCHEDULING_TOOLS
 
 registry = AgentRegistry()
-registry.register("marketing", build_tool_agent_node("marketing", MARKETING_PROMPT))
-registry.register("sales_analysis", build_tool_agent_node("sales_analysis", SALES_PROMPT))
-registry.register("scheduling", build_tool_agent_node("scheduling", SCHEDULING_PROMPT))
+registry.register("marketing", build_tool_agent_node("marketing", MARKETING_TOOLS, MARKETING_PROMPT))
+registry.register("sales_analysis", build_tool_agent_node("sales_analysis", SALES_TOOLS, SALES_PROMPT))
+registry.register("scheduling", build_tool_agent_node("scheduling", SCHEDULING_TOOLS, SCHEDULING_PROMPT))
 ```
 
 > 任务 27/28 中各 agent 模块的 `SYSTEM_PROMPT` 保留（被此处引用），原 `build_marketing_node` 等单次调用函数保留但不再注册，避免重复逻辑。
