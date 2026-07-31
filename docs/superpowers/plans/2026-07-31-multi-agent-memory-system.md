@@ -2687,7 +2687,9 @@ async def test_marketing_node_returns(monkeypatch):
 运行：`cd backend && pytest tests/test_marketing_agent.py -v`
 预期：FAIL，ImportError
 
-- [ ] **步骤 3：实现营销助手子图节点（含工具绑定占位）**
+- [ ] **步骤 3：实现营销助手子图节点（基础版单次调用）**
+
+> 工具调用循环由任务 32.5（tool_runner.py）提供，本任务先实现单次 LLM 调用版本，任务 33.5 升级为工具循环版。
 
 ```python
 # backend/app/agents/marketing/agent.py
@@ -3173,6 +3175,112 @@ git commit -m "feat: 风险评估器与 HITL interrupt 机制"
 
 ---
 
+### 任务 32.5：Agent 工具调用循环（ReAct + 风险分级）
+
+> **背景**：任务 27/28 的 agent 节点只有单次 LLM 调用，不会调用工具。本任务实现通用 ReAct 循环：LLM `bind_tools` 决定调什么工具 → 执行（高风险走 `interrupt`）→ 结果回填 → 继续，直到 LLM 给出最终回答。依赖任务 31（DataFacade）与任务 32（execute_with_risk）。
+
+**文件：**
+- 创建：`backend/app/agents/tool_runner.py`
+- 创建：`backend/tests/test_tool_runner.py`
+
+- [ ] **步骤 1：编写失败的测试（mock 两轮 LLM：先调工具、后给答案）**
+
+```python
+# backend/tests/test_tool_runner.py
+import pytest
+from langchain_core.messages import AIMessage
+from app.agents.tool_runner import run_agent
+
+class FakeLLM:
+    def __init__(self, calls):
+        self.calls = calls
+    def bind_tools(self, tools):
+        self._tools = tools
+        return self
+    async def ainvoke(self, messages):
+        if len(messages) == 2:  # 仅 system+user，尚无工具结果 → 要求调 calc
+            self.calls.append("tool_call")
+            return AIMessage(content="", tool_calls=[{
+                "name": "calc", "args": {"expr": "1+2"}, "id": "call_1", "type": "tool_call",
+            }])
+        return AIMessage(content="结果是 3")  # 已有 ToolMessage → 最终答案
+
+@pytest.mark.asyncio
+async def test_agent_calls_tool_then_answers(monkeypatch):
+    calls = []
+    monkeypatch.setattr("app.agents.tool_runner.ModelFactory.get_llm", lambda key: FakeLLM(calls))
+    text = await run_agent(
+        {"user_message": "1+2等于几", "memory_context": "", "trace_id": "t1"},
+        "marketing", "你是助手",
+    )
+    assert calls == ["tool_call"]
+    assert "3" in text
+```
+
+- [ ] **步骤 2：运行测试确认失败**
+
+运行：`cd backend && pytest tests/test_tool_runner.py -v`
+预期：FAIL，ImportError
+
+- [ ] **步骤 3：实现 ReAct 工具循环**
+
+```python
+# backend/app/agents/tool_runner.py
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.tools import StructuredTool
+from app.llm.factory import ModelFactory
+from app.tools.facade import facade
+from app.tools.risk import execute_with_risk
+
+MAX_TOOL_ROUNDS = 6
+
+def _to_langchain_tool(name: str) -> StructuredTool:
+    tool = facade.get(name)
+    return StructuredTool.from_function(coroutine=tool.fn, name=tool.name, description=tool.description)
+
+def build_agent_tools(agent_code: str) -> list[StructuredTool]:
+    """按 agent 装配工具（当前返回全部内置工具；白名单过滤后续从 agents 表 config.tool_whitelist 读取）"""
+    return [_to_langchain_tool(name) for name in facade.list_tools()]
+
+async def run_agent(state: dict, agent_code: str, system_prompt: str) -> str:
+    """ReAct 循环：LLM 决定工具 → 执行（高风险 interrupt）→ 回填 → 直到无 tool_calls。"""
+    llm = ModelFactory.get_llm(agent_code).bind_tools(build_agent_tools(agent_code))
+    messages = [
+        SystemMessage(system_prompt + "\n" + state.get("memory_context", "")),
+        HumanMessage(state.get("user_message", "")),
+    ]
+    for _ in range(MAX_TOOL_ROUNDS):
+        resp = await llm.ainvoke(messages)
+        messages.append(resp)
+        if not getattr(resp, "tool_calls", None):
+            return resp.content if hasattr(resp, "content") else str(resp)
+        for call in resp.tool_calls:
+            result = await execute_with_risk(facade, call["name"], call["args"], state.get("trace_id", ""))
+            messages.append(ToolMessage(str(result), tool_call_id=call["id"]))
+    return "已达到最大工具轮次，请简化问题后重试"
+
+def build_tool_agent_node(agent_code: str, system_prompt: str):
+    """通用 agent 节点工厂：取代任务 27/28 的单次 LLM 节点。"""
+    async def node(state: dict) -> dict:
+        text = await run_agent(state, agent_code, system_prompt)
+        return {"agent_response": text, "route_history": [agent_code]}
+    return node
+```
+
+- [ ] **步骤 4：运行测试验证通过**
+
+运行：`cd backend && pytest tests/test_tool_runner.py -v`
+预期：PASS
+
+- [ ] **步骤 5：Commit**
+
+```bash
+git add backend/app backend/tests
+git commit -m "feat: Agent ReAct 工具调用循环（风险分级集成）"
+```
+
+---
+
 ### 任务 33：HITL 审批 API（待办 + approve/reject）
 
 **文件：**
@@ -3264,6 +3372,80 @@ async def approve_task(task_id: str, body: DecideHitl, db: AsyncSession = Depend
 ```bash
 git add backend/app backend/tests
 git commit -m "feat: HITL 审批 API"
+```
+
+---
+
+### 任务 33.5：agent 节点升级为工具循环版
+
+> 用任务 32.5 的 `build_tool_agent_node` 替换任务 27/28 的单次 LLM 节点，使营销助手/经营分析/调度优化均具备工具调用能力。
+
+**文件：**
+- 修改：`backend/app/agents/graph.py`（注册处改用 build_tool_agent_node）
+- 创建：`backend/tests/test_tool_agent_nodes.py`
+
+- [ ] **步骤 1：编写失败的测试**
+
+```python
+# backend/tests/test_tool_agent_nodes.py
+import pytest
+from langchain_core.messages import AIMessage
+from app.agents.tool_runner import build_tool_agent_node
+
+@pytest.mark.asyncio
+async def test_marketing_node_with_tools(monkeypatch):
+    async def fake_llm_factory(key):
+        return FakeLLM()
+    monkeypatch.setattr("app.agents.tool_runner.ModelFactory.get_llm", fake_llm_factory)
+    node = build_tool_agent_node("marketing", "你是营销助手")
+    result = await node({"user_message": "算一下 2*3", "memory_context": "", "trace_id": "t1"})
+    assert result["route_history"] == ["marketing"]
+    assert "6" in result["agent_response"]
+
+class FakeLLM:
+    def bind_tools(self, tools):
+        self._tools = tools
+        return self
+    async def ainvoke(self, messages):
+        if len(messages) == 2:
+            return AIMessage(content="", tool_calls=[{
+                "name": "calc", "args": {"expr": "2*3"}, "id": "c1", "type": "tool_call",
+            }])
+        return AIMessage(content="答案是 6")
+```
+
+- [ ] **步骤 2：运行测试确认失败**
+
+运行：`cd backend && pytest tests/test_tool_agent_nodes.py -v`
+预期：FAIL，ImportError
+
+- [ ] **步骤 3：graph.py 注册处改为工具节点**
+
+```python
+# backend/app/agents/graph.py 注册处改造
+from app.agents.tool_runner import build_tool_agent_node
+from app.agents.marketing.agent import SYSTEM_PROMPT as MARKETING_PROMPT
+from app.agents.sales_analysis.agent import SYSTEM_PROMPT as SALES_PROMPT
+from app.agents.scheduling.agent import SYSTEM_PROMPT as SCHEDULING_PROMPT
+
+registry = AgentRegistry()
+registry.register("marketing", build_tool_agent_node("marketing", MARKETING_PROMPT))
+registry.register("sales_analysis", build_tool_agent_node("sales_analysis", SALES_PROMPT))
+registry.register("scheduling", build_tool_agent_node("scheduling", SCHEDULING_PROMPT))
+```
+
+> 任务 27/28 中各 agent 模块的 `SYSTEM_PROMPT` 保留（被此处引用），原 `build_marketing_node` 等单次调用函数保留但不再注册，避免重复逻辑。
+
+- [ ] **步骤 4：运行测试验证通过（含 chat 与 registry 回归）**
+
+运行：`cd backend && pytest tests/test_tool_agent_nodes.py tests/test_registry.py tests/test_chat_api.py -v`
+预期：全部 PASS
+
+- [ ] **步骤 5：Commit**
+
+```bash
+git add backend/app backend/tests
+git commit -m "feat: agent 节点升级为工具循环版"
 ```
 
 ---
@@ -4129,7 +4311,8 @@ git commit -m "feat: docker-compose 联调与冒烟验证"
 | §3.5/3.6 经验中心（三级+审批+向量） | 21, 22, 23, 24 |
 | §3.7 知识中心 RAG | 16, 17, 18, 19 |
 | §4 数据库（全部表 + pgvector + Alembic） | 2, 3, 4, 5, 6 |
-| §5 Agent 注册 / DataFacade / MCP / 风险 | 27, 28, 29, 31, 32, 37 |
+| §5 Agent 注册 / DataFacade / MCP / 风险 | 27, 28, 29, 31, 32, 32.5, 33.5, 37 |
+| §5 工具调用循环（ReAct + 风险分级） | 32.5, 33.5 |
 | §6 API（认证/聊天/HITL/知识/经验/组织/监测/配置） | 7, 8, 10, 14, 15, 18, 23, 24, 33, 35, 38 |
 | §7 技术决策（异步/checkpoint/多模型/部署） | 1, 11, 36, 43 |
 | HITL interrupt | 32, 33 |
