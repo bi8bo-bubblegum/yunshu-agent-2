@@ -3029,6 +3029,16 @@ def test_risk_levels():
     facade = DataFacade()
     register_builtin_tools(facade)
     assert facade.get_risk("calc") == "low"
+
+def test_tool_rich_schema():
+    """工具描述与参数 schema 必须清晰，供 LLM 理解工具用途。"""
+    facade = DataFacade()
+    register_builtin_tools(facade)
+    tool = facade.get("sql_query")
+    assert "只读" in tool.description
+    assert "sql" in tool.args_schema.model_fields
+    calc = facade.get("calc")
+    assert "expr" in calc.args_schema.model_fields
 ```
 
 - [ ] **步骤 2：运行测试确认失败**
@@ -3041,12 +3051,15 @@ def test_risk_levels():
 ```python
 # backend/app/tools/facade.py
 from typing import Awaitable, Callable
+from pydantic import BaseModel, Field
 
 ToolFunc = Callable[..., Awaitable | object]
 
 class Tool:
-    def __init__(self, name: str, fn: ToolFunc, risk: str = "low", description: str = ""):
+    def __init__(self, name: str, fn: ToolFunc, risk: str = "low", description: str = "",
+                 args_schema: type[BaseModel] | None = None):
         self.name, self.fn, self.risk, self.description = name, fn, risk, description
+        self.args_schema = args_schema or BaseModel
 
 class DataFacade:
     def __init__(self):
@@ -3069,27 +3082,50 @@ class DataFacade:
 
 facade = DataFacade()
 
-def register_builtin_tools(f: DataFacade) -> None:
-    f.register(Tool("calc", lambda expr: eval(expr, {"__builtins__": {}}), "low", "数学计算"))
-    f.register(Tool("http_get", lambda url: _http_get(url), "low", "GET 请求"))
-    f.register(Tool("sql_query", _sql_query, "medium", "数据库查询"))
-    f.register(Tool("file_delete", lambda path: _file_delete(path), "high", "删除文件"))
+# ---- 每个工具的参数 schema 与详尽描述（LLM 通过 bind_tools 可见，决定能否正确调用）----
+class CalcArgs(BaseModel):
+    expr: str = Field(description="数学表达式，如 '1+2*3'，支持四则运算与括号")
 
-def _http_get(url: str):
+class HttpGetArgs(BaseModel):
+    url: str = Field(description="要请求的完整 URL，如 https://example.com/page")
+
+class SqlQueryArgs(BaseModel):
+    sql: str = Field(description="只读 SELECT 查询语句，禁止 DDL/DML（如 DELETE/UPDATE/INSERT）")
+
+class FileDeleteArgs(BaseModel):
+    path: str = Field(description="要删除的本地文件绝对路径")
+
+TOOL_DESCRIPTIONS = {
+    "calc": "执行数学计算。当用户需要数值计算、预算测算、ROI/转化率计算时使用。传入数学表达式，返回计算结果。",
+    "http_get": "发起 HTTP GET 请求获取网页或公开接口内容。当需要查询外部信息、竞品页面、公开数据源时使用。返回响应文本（截断 2000 字符）。",
+    "sql_query": "查询企业业务数据库（只读 SELECT）。当需要分析经营数据、销售数据、历史订单等企业数据时使用。返回查询结果行列表。仅允许只读查询。",
+    "file_delete": "删除本地文件。高风险操作，执行前会触发人工确认。仅在用户明确要求删除文件时使用。",
+}
+
+def _calc(expr: str) -> float:
+    return eval(expr, {"__builtins__": {}})  # noqa: S307 仅限四则运算沙箱
+
+def _http_get(url: str) -> str:
     import httpx
     return httpx.get(url, timeout=10).text[:2000]
 
-async def _sql_query(sql: str):
+async def _sql_query(sql: str) -> list[dict]:
     from sqlalchemy import text as sqltext
     from app.core.database import engine
     async with engine.connect() as conn:
         rows = (await conn.execute(sqltext(sql))).all()
         return [dict(r._mapping) for r in rows]
 
-def _file_delete(path: str):
+def _file_delete(path: str) -> str:
     import os
     os.remove(path)
     return f"deleted {path}"
+
+def register_builtin_tools(f: DataFacade) -> None:
+    f.register(Tool("calc", _calc, "low", TOOL_DESCRIPTIONS["calc"], CalcArgs))
+    f.register(Tool("http_get", _http_get, "low", TOOL_DESCRIPTIONS["http_get"], HttpGetArgs))
+    f.register(Tool("sql_query", _sql_query, "medium", TOOL_DESCRIPTIONS["sql_query"], SqlQueryArgs))
+    f.register(Tool("file_delete", _file_delete, "high", TOOL_DESCRIPTIONS["file_delete"], FileDeleteArgs))
 
 register_builtin_tools(facade)
 ```
@@ -3252,7 +3288,10 @@ MAX_TOOL_ROUNDS = 6
 
 def _to_langchain_tool(name: str) -> StructuredTool:
     tool = facade.get(name)
-    return StructuredTool.from_function(coroutine=tool.fn, name=tool.name, description=tool.description)
+    return StructuredTool.from_function(
+        coroutine=tool.fn, name=tool.name, description=tool.description,
+        args_schema=tool.args_schema,
+    )
 
 async def build_agent_tools(agent_code: str) -> list[StructuredTool]:
     """从 agents 表读取 tool_whitelist 过滤工具；无配置/白名单为空时回退为全部内置工具。"""
