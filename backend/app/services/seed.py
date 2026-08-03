@@ -13,3 +13,4 @@ async def seed_roles(db: AsyncSession) -> None:
     for code, name in ROLES:
         if not await roles.get_by(code=code):
             await roles.add(Role(code=code, name=name))
+    await roles.commit()
