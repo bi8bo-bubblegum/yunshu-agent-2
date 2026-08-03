@@ -3,7 +3,7 @@ from datetime import datetime
 from uuid import uuid4
 from sqlalchemy import UUID, BigInteger, DateTime, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column
 from app.core.database import Base
 
 class ExecutionTrace(Base):
@@ -14,8 +14,6 @@ class ExecutionTrace(Base):
     status: Mapped[str] = mapped_column(String(16), default="running")  # running/completed/interrupted/failed
     supervisor_routes: Mapped[list | None] = mapped_column(JSONB, default=list)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    events: Mapped[list["TraceEvent"]] = relationship(back_populates="trace", foreign_keys="TraceEvent.trace_id")
-    hitl_tasks: Mapped[list["HitlTask"]] = relationship(back_populates="trace", foreign_keys="HitlTask.trace_id")
 
 class TraceEvent(Base):
     __tablename__ = "trace_events"
@@ -25,7 +23,6 @@ class TraceEvent(Base):
     type: Mapped[str] = mapped_column(String(16))  # route/llm/tool/memory/hitl
     payload: Mapped[dict] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    trace: Mapped[ExecutionTrace] = relationship(back_populates="events", foreign_keys=[trace_id])
 
 class HitlTask(Base):
     __tablename__ = "hitl_tasks"
@@ -37,4 +34,3 @@ class HitlTask(Base):
     status: Mapped[str] = mapped_column(String(16), default="pending")  # pending/approved/rejected
     approver_id: Mapped[str | None] = mapped_column(String(36), index=True)  # 逻辑外键
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    trace: Mapped[ExecutionTrace] = relationship(back_populates="hitl_tasks", foreign_keys=[trace_id])

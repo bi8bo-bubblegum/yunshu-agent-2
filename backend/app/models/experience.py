@@ -3,7 +3,7 @@ from datetime import date, datetime
 from uuid import uuid4
 from sqlalchemy import UUID, Date, DateTime, String, Text, func
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column
 from pgvector.sqlalchemy import Vector
 from app.core.database import Base
 
@@ -23,10 +23,6 @@ class Experience(Base):
     source_trace_id: Mapped[str | None] = mapped_column(String(36))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     embedding: Mapped[list[float] | None] = mapped_column(Vector(1024))
-    approvals: Mapped[list["ExperienceApproval"]] = relationship(
-        back_populates="experience", cascade="all, delete-orphan",
-        foreign_keys="ExperienceApproval.experience_id",
-    )
 
 class ExperienceApproval(Base):
     __tablename__ = "experience_approvals"
@@ -38,4 +34,3 @@ class ExperienceApproval(Base):
     status: Mapped[str] = mapped_column(String(16), default="pending")
     comment: Mapped[str | None] = mapped_column(Text)
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    experience: Mapped[Experience] = relationship(back_populates="approvals", foreign_keys=[experience_id])
