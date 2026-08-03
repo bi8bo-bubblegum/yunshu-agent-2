@@ -797,39 +797,40 @@ git commit -m "feat: 留痕与配置模型 + 全量迁移"
 
 ---
 
-### 任务 7：认证（JWT + 密码哈希）
+### 任务 7：认证基础件（JWT + 密码哈希 + 依赖注入）
+
+> 只做基础件，不写业务路由；`api/auth.py`（薄路由）与 API 集成测试放到任务 7.5 一并按三层实现，避免先写直查 DB 的路由再推翻。
 
 **文件：**
 - 创建：`backend/app/core/security.py`、`backend/app/core/deps.py`
-- 创建：`backend/app/schemas/auth.py`、`backend/app/api/auth.py`
-- 创建：`backend/app/main.py`、`backend/tests/test_auth.py`
+- 创建：`backend/app/schemas/auth.py`、`backend/app/main.py`
+- 创建：`backend/tests/test_security.py`
 
 - [ ] **步骤 1：编写失败的测试**
 
 ```python
-# backend/tests/test_auth.py
+# backend/tests/test_security.py
 import pytest
-from httpx import AsyncClient, ASGITransport
-from app.main import app
+from app.core.security import hash_password, verify_password, create_access_token, decode_token
 
-@pytest.mark.asyncio
-async def test_register_and_login():
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        r = await client.post("/api/auth/register", json={"username": "alice", "password": "pass123", "display_name": "Alice"})
-        assert r.status_code == 200
-        r = await client.post("/api/auth/login", json={"username": "alice", "password": "pass123"})
-        assert r.status_code == 200 and "access_token" in r.json()
-        me = await client.get("/api/auth/me", headers={"Authorization": f"Bearer {r.json()['access_token']}"})
-        assert me.json()["username"] == "alice"
+def test_hash_and_verify():
+    h = hash_password("pass123")
+    assert h != "pass123"
+    assert verify_password("pass123", h)
+    assert not verify_password("wrong", h)
+
+def test_token_roundtrip():
+    token = create_access_token(1, "alice")
+    payload = decode_token(token)
+    assert payload["sub"] == "1" and payload["username"] == "alice"
 ```
 
 - [ ] **步骤 2：运行测试确认失败**
 
-运行：`cd backend && pytest tests/test_auth.py -v`
-预期：FAIL，`ModuleNotFoundError: app.main`
+运行：`cd backend && pytest tests/test_security.py -v`
+预期：FAIL，`ModuleNotFoundError: app.core.security`
 
-- [ ] **步骤 3：实现 security / deps / schemas / 路由 / main**
+- [ ] **步骤 3：实现 security / deps / schemas / main**
 
 ```python
 # backend/app/core/security.py
@@ -909,76 +910,60 @@ class UserOut(BaseModel):
 ```
 
 ```python
-# backend/app/api/auth.py
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-from app.core.deps import get_db, get_current_user
-from app.core.security import hash_password, verify_password, create_access_token
-from app.models.org import User
-from app.schemas.auth import RegisterRequest, LoginRequest, TokenResponse, UserOut
-
-router = APIRouter(prefix="/api/auth", tags=["auth"])
-
-@router.post("/register", response_model=UserOut)
-async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)):
-    if await db.scalar(select(User).where(User.username == body.username)):
-        raise HTTPException(400, "用户名已存在")
-    user = User(username=body.username, password_hash=hash_password(body.password), display_name=body.display_name)
-    db.add(user)
-    await db.commit()
-    await db.refresh(user)
-    return user
-
-@router.post("/login", response_model=TokenResponse)
-async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
-    user = await db.scalar(select(User).where(User.username == body.username))
-    if not user or not verify_password(body.password, user.password_hash):
-        raise HTTPException(401, "用户名或密码错误")
-    return TokenResponse(access_token=create_access_token(user.id, user.username))
-
-@router.get("/me", response_model=UserOut)
-async def me(user: User = Depends(get_current_user)):
-    return user
-```
-
-```python
 # backend/app/main.py
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import auth
 from app.core.config import settings
 
 app = FastAPI(title="云书 Agent")
 app.add_middleware(CORSMiddleware, allow_origins=settings.FRONTEND_ORIGINS.split(","), allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
-app.include_router(auth.router)
+# 业务路由随各任务逐步 include_router（auth 路由在任务 7.5 注册）
 ```
 
 - [ ] **步骤 4：运行测试验证通过**
 
-运行：`cd backend && pytest tests/test_auth.py -v`
+运行：`cd backend && pytest tests/test_security.py -v`
 预期：PASS
 
 - [ ] **步骤 5：Commit**
 
 ```bash
 git add backend/app backend/tests
-git commit -m "feat: JWT 认证与注册登录"
+git commit -m "feat: 认证基础件（JWT + 密码哈希 + 依赖注入）"
 ```
 
 ---
 
 ### 任务 7.5：三层架构范式（BaseRepository + 认证域改造）
 
-> **全项目架构约定**：`router（薄，只校验参数）→ service（组合业务）→ repository（原子 CRUD）`。本任务建立范式：BaseRepository + UserRepository + AuthService，并替换任务 7 的直接查库路由。**后续所有 API 任务一律遵循此三层**。
+> **全项目架构约定**：`router（薄，只校验参数）→ service（组合业务）→ repository（原子 CRUD）`。本任务建立范式：BaseRepository + UserRepository + AuthService + 薄路由（认证域一步到位三层化，不写直查 DB 的路由）。**后续所有 API 任务一律遵循此三层**。
 
 **文件：**
 - 创建：`backend/app/repositories/base.py`、`backend/app/repositories/user_repo.py`
 - 创建：`backend/app/services/auth_service.py`
-- 修改：`backend/app/api/auth.py`（改为薄层）
-- 创建：`backend/tests/test_auth_service.py`
+- 创建：`backend/app/api/auth.py`（薄路由，一步到位）
+- 创建：`backend/tests/test_auth.py`、`backend/tests/test_auth_service.py`
+- 修改：`backend/app/core/deps.py`（get_current_user 改走 UserRepository）、`backend/app/main.py`（注册 auth 路由）
 
-- [ ] **步骤 1：编写失败的测试（repository + service 单测）**
+- [ ] **步骤 1：编写失败的测试（API 集成 + repository/service 单测）**
+
+```python
+# backend/tests/test_auth.py
+import pytest
+from httpx import AsyncClient, ASGITransport
+from app.main import app
+
+@pytest.mark.asyncio
+async def test_register_and_login():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        r = await client.post("/api/auth/register", json={"username": "alice", "password": "pass123", "display_name": "Alice"})
+        assert r.status_code == 200
+        r = await client.post("/api/auth/login", json={"username": "alice", "password": "pass123"})
+        assert r.status_code == 200 and "access_token" in r.json()
+        me = await client.get("/api/auth/me", headers={"Authorization": f"Bearer {r.json()['access_token']}"})
+        assert me.json()["username"] == "alice"
+```
 
 ```python
 # backend/tests/test_auth_service.py
@@ -1005,8 +990,8 @@ async def test_login_wrong_password(db_session):
 
 - [ ] **步骤 2：运行测试确认失败**
 
-运行：`cd backend && pytest tests/test_auth_service.py -v`
-预期：FAIL，ModuleNotFoundError
+运行：`cd backend && pytest tests/test_auth.py tests/test_auth_service.py -v`
+预期：FAIL，`ModuleNotFoundError: app.services.auth_service` / 路由 404
 
 - [ ] **步骤 3：实现 Repository 层（BaseRepository + UserRepository）**
 
@@ -1101,7 +1086,7 @@ class AuthService:
         return create_access_token(user.id, user.username)
 ```
 
-- [ ] **步骤 5：改造 auth 路由为薄层（替换任务 7 的实现）**
+- [ ] **步骤 5：创建薄路由 + 改造 deps 走 UserRepository + 注册 main**
 
 ```python
 # backend/app/api/auth.py —— 薄路由：只校验参数、调 service
@@ -1130,10 +1115,39 @@ async def me(user: User = Depends(get_current_user)):
     return user
 ```
 
+```python
+# backend/app/core/deps.py 修改：get_current_user 改走 UserRepository（去掉直查 select）
+from fastapi import Depends, HTTPException, status
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from sqlalchemy.ext.asyncio import AsyncSession
+from app.core.database import SessionLocal
+from app.core.security import decode_token
+from app.models.org import User
+from app.repositories.user_repo import UserRepository
+
+async def get_current_user(creds: HTTPAuthorizationCredentials | None = Depends(bearer), db: AsyncSession = Depends(get_db)) -> User:
+    if not creds:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "未认证")
+    try:
+        payload = decode_token(creds.credentials)
+    except Exception:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "token 无效")
+    user = await UserRepository(db).get(int(payload["sub"]))
+    if not user:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "用户不存在")
+    return user
+```
+
+```python
+# backend/app/main.py 追加
+from app.api import auth
+app.include_router(auth.router)
+```
+
 - [ ] **步骤 6：运行全部认证测试验证通过**
 
 运行：`cd backend && pytest tests/test_auth.py tests/test_auth_service.py -v`
-预期：全部 PASS（API 行为不变，内部已三层化）
+预期：全部 PASS（认证 API 三层化，行为一致）
 
 - [ ] **步骤 7：Commit**
 
