@@ -228,6 +228,7 @@ erDiagram
 2. **经验审批独立表**：每次晋升一条记录，支持审计追溯
 3. **HITL 与 trace 关联**：`interrupt()` 时写入待确认任务，确认后 resume
 4. **agents + mcp_servers 均为配置表**：新 agent / 新 MCP 接入 = 插入记录，不改代码
+5. **不使用物理外键**：数据库层不建 FOREIGN KEY 约束（避免锁竞争、迁移灵活、允许临时不一致）；关联列用普通列 + `relationship(foreign_keys=...)` 保持 ORM 关联能力（join / selectinload 预加载照常可用），级联删除由 ORM `cascade` 保证。§4.2 表中"FK"字样均指逻辑外键。
 
 ---
 

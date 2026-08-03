@@ -367,9 +367,12 @@ async def test_create_user_with_department(db_session):
 ```python
 # backend/app/models/org.py
 from datetime import datetime
-from sqlalchemy import BigInteger, DateTime, ForeignKey, String, func
+from sqlalchemy import BigInteger, DateTime, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.database import Base
+
+# 全项目约定：不使用物理外键（数据库不建 FOREIGN KEY 约束），
+# 关联列用普通 BigInteger + relationship(foreign_keys=...) 保持 ORM 关联能力。
 
 class Role(Base):
     __tablename__ = "roles"
@@ -381,21 +384,21 @@ class Department(Base):
     __tablename__ = "departments"
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(128), unique=True)
-    owner_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
-    owner: Mapped["User | None"] = relationship(foreign_keys=[owner_id])
-    users: Mapped[list["User"]] = relationship(back_populates="department")
+    owner_id: Mapped[int | None] = mapped_column(BigInteger, index=True)  # 逻辑外键
+    owner: Mapped["User | None"] = relationship(foreign_keys="Department.owner_id")
+    users: Mapped[list["User"]] = relationship(back_populates="department", foreign_keys="User.department_id")
 
 class User(Base):
     __tablename__ = "users"
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     username: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(String(128))
-    department_id: Mapped[int | None] = mapped_column(ForeignKey("departments.id"))
-    role_id: Mapped[int | None] = mapped_column(ForeignKey("roles.id"))
+    department_id: Mapped[int | None] = mapped_column(BigInteger, index=True)  # 逻辑外键
+    role_id: Mapped[int | None] = mapped_column(BigInteger, index=True)        # 逻辑外键
     display_name: Mapped[str] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    department: Mapped[Department | None] = relationship(back_populates="users")
-    role: Mapped[Role | None] = relationship()
+    department: Mapped[Department | None] = relationship(back_populates="users", foreign_keys=[department_id])
+    role: Mapped[Role | None] = relationship(foreign_keys=[role_id])
 ```
 
 ```python
@@ -465,7 +468,7 @@ async def test_conversation_with_messages(db_session):
 # backend/app/models/chat.py
 from datetime import datetime
 from uuid import uuid4
-from sqlalchemy import UUID, BigInteger, DateTime, ForeignKey, String, Text, func
+from sqlalchemy import UUID, BigInteger, DateTime, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.database import Base
@@ -473,22 +476,25 @@ from app.core.database import Base
 class Conversation(Base):
     __tablename__ = "conversations"
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4()))
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, index=True)  # 逻辑外键
     title: Mapped[str] = mapped_column(String(128), default="新对话")
     summary: Mapped[str | None] = mapped_column(Text)
     current_trace_id: Mapped[str | None] = mapped_column(String(36))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    messages: Mapped[list["Message"]] = relationship(back_populates="conversation", cascade="all, delete-orphan", order_by="Message.created_at")
+    messages: Mapped[list["Message"]] = relationship(
+        back_populates="conversation", cascade="all, delete-orphan", order_by="Message.created_at",
+        foreign_keys="Message.conversation_id",
+    )
 
 class Message(Base):
     __tablename__ = "messages"
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    conversation_id: Mapped[str] = mapped_column(ForeignKey("conversations.id"), index=True)
+    conversation_id: Mapped[str] = mapped_column(String(36), index=True)  # 逻辑外键
     role: Mapped[str] = mapped_column(String(16))
     content: Mapped[str] = mapped_column(Text)
     metadata_: Mapped[dict | None] = mapped_column("metadata", JSONB)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    conversation: Mapped[Conversation] = relationship(back_populates="messages")
+    conversation: Mapped[Conversation] = relationship(back_populates="messages", foreign_keys=[conversation_id])
 ```
 
 ```python
@@ -553,7 +559,7 @@ async def test_experience_with_embedding(db_session):
 # backend/app/models/experience.py
 from datetime import date, datetime
 from uuid import uuid4
-from sqlalchemy import UUID, BigInteger, Date, DateTime, ForeignKey, String, Text, func
+from sqlalchemy import UUID, BigInteger, Date, DateTime, String, Text, func
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from pgvector.sqlalchemy import Vector
@@ -562,7 +568,7 @@ from app.core.database import Base
 class Experience(Base):
     __tablename__ = "experiences"
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4()))
-    owner_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    owner_id: Mapped[int] = mapped_column(BigInteger, index=True)  # 逻辑外键
     scope: Mapped[str] = mapped_column(String(16))  # personal/dept/company
     status: Mapped[str] = mapped_column(String(16), default="draft")  # draft/pending/approved/rejected
     title: Mapped[str] = mapped_column(String(128))
@@ -571,30 +577,33 @@ class Experience(Base):
     tags: Mapped[list[str]] = mapped_column(ARRAY(String(32)), default=list)
     event_time: Mapped[date | None] = mapped_column(Date)
     result_metrics: Mapped[dict | None] = mapped_column(JSONB)
-    department_id: Mapped[int | None] = mapped_column(ForeignKey("departments.id"))
+    department_id: Mapped[int | None] = mapped_column(BigInteger, index=True)  # 逻辑外键
     source_trace_id: Mapped[str | None] = mapped_column(String(36))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     embedding: Mapped[list[float] | None] = mapped_column(Vector(1024))
-    approvals: Mapped[list["ExperienceApproval"]] = relationship(back_populates="experience", cascade="all, delete-orphan")
+    approvals: Mapped[list["ExperienceApproval"]] = relationship(
+        back_populates="experience", cascade="all, delete-orphan",
+        foreign_keys="ExperienceApproval.experience_id",
+    )
 
 class ExperienceApproval(Base):
     __tablename__ = "experience_approvals"
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4()))
-    experience_id: Mapped[str] = mapped_column(ForeignKey("experiences.id"))
+    experience_id: Mapped[str] = mapped_column(String(36), index=True)  # 逻辑外键
     from_scope: Mapped[str] = mapped_column(String(16))
     to_scope: Mapped[str] = mapped_column(String(16))
-    approver_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    approver_id: Mapped[int | None] = mapped_column(BigInteger, index=True)  # 逻辑外键
     status: Mapped[str] = mapped_column(String(16), default="pending")
     comment: Mapped[str | None] = mapped_column(Text)
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    experience: Mapped[Experience] = relationship(back_populates="approvals")
+    experience: Mapped[Experience] = relationship(back_populates="approvals", foreign_keys=[experience_id])
 ```
 
 ```python
 # backend/app/models/knowledge.py
 from datetime import datetime
 from uuid import uuid4
-from sqlalchemy import UUID, BigInteger, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import UUID, BigInteger, DateTime, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from pgvector.sqlalchemy import Vector
@@ -606,20 +615,23 @@ class Document(Base):
     title: Mapped[str] = mapped_column(String(256))
     file_path: Mapped[str] = mapped_column(String(512))
     status: Mapped[str] = mapped_column(String(16), default="parsing")  # parsing/ready/failed
-    uploader_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
-    department_id: Mapped[int | None] = mapped_column(ForeignKey("departments.id"))
+    uploader_id: Mapped[int] = mapped_column(BigInteger, index=True)  # 逻辑外键
+    department_id: Mapped[int | None] = mapped_column(BigInteger, index=True)  # 逻辑外键
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    chunks: Mapped[list["Chunk"]] = relationship(back_populates="document", cascade="all, delete-orphan")
+    chunks: Mapped[list["Chunk"]] = relationship(
+        back_populates="document", cascade="all, delete-orphan",
+        foreign_keys="Chunk.document_id",
+    )
 
 class Chunk(Base):
     __tablename__ = "chunks"
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4()))
-    document_id: Mapped[str] = mapped_column(ForeignKey("documents.id"), index=True)
+    document_id: Mapped[str] = mapped_column(String(36), index=True)  # 逻辑外键
     seq: Mapped[int] = mapped_column(Integer)
     content: Mapped[str] = mapped_column(Text)
     meta_: Mapped[dict | None] = mapped_column("meta", JSONB)
     embedding: Mapped[list[float] | None] = mapped_column(Vector(1024))
-    document: Mapped[Document] = relationship(back_populates="chunks")
+    document: Mapped[Document] = relationship(back_populates="chunks", foreign_keys=[document_id])
 ```
 
 ```python
@@ -688,7 +700,7 @@ async def test_trace_event_flow(db_session):
 # backend/app/models/trace.py
 from datetime import datetime
 from uuid import uuid4
-from sqlalchemy import UUID, BigInteger, DateTime, ForeignKey, String, Text, func
+from sqlalchemy import UUID, BigInteger, DateTime, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.database import Base
@@ -696,34 +708,34 @@ from app.core.database import Base
 class ExecutionTrace(Base):
     __tablename__ = "execution_traces"
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4()))
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, index=True)  # 逻辑外键
     conversation_id: Mapped[str | None] = mapped_column(String(36))
     status: Mapped[str] = mapped_column(String(16), default="running")  # running/completed/interrupted/failed
     supervisor_routes: Mapped[list | None] = mapped_column(JSONB, default=list)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    events: Mapped[list["TraceEvent"]] = relationship(back_populates="trace")
-    hitl_tasks: Mapped[list["HitlTask"]] = relationship(back_populates="trace")
+    events: Mapped[list["TraceEvent"]] = relationship(back_populates="trace", foreign_keys="TraceEvent.trace_id")
+    hitl_tasks: Mapped[list["HitlTask"]] = relationship(back_populates="trace", foreign_keys="HitlTask.trace_id")
 
 class TraceEvent(Base):
     __tablename__ = "trace_events"
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    trace_id: Mapped[str] = mapped_column(ForeignKey("execution_traces.id"), index=True)
+    trace_id: Mapped[str] = mapped_column(String(36), index=True)  # 逻辑外键
     type: Mapped[str] = mapped_column(String(16))  # route/llm/tool/memory/hitl
     payload: Mapped[dict] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    trace: Mapped[ExecutionTrace] = relationship(back_populates="events")
+    trace: Mapped[ExecutionTrace] = relationship(back_populates="events", foreign_keys=[trace_id])
 
 class HitlTask(Base):
     __tablename__ = "hitl_tasks"
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4()))
-    trace_id: Mapped[str] = mapped_column(ForeignKey("execution_traces.id"))
+    trace_id: Mapped[str] = mapped_column(String(36), index=True)  # 逻辑外键
     node_id: Mapped[str] = mapped_column(String(128))
     reason: Mapped[str] = mapped_column(Text)
     context: Mapped[dict | None] = mapped_column(JSONB)
     status: Mapped[str] = mapped_column(String(16), default="pending")  # pending/approved/rejected
-    approver_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    approver_id: Mapped[int | None] = mapped_column(BigInteger, index=True)  # 逻辑外键
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    trace: Mapped[ExecutionTrace] = relationship(back_populates="hitl_tasks")
+    trace: Mapped[ExecutionTrace] = relationship(back_populates="hitl_tasks", foreign_keys=[trace_id])
 ```
 
 ```python
@@ -2055,14 +2067,14 @@ async def test_merge_dedupe(db_session):
 ```python
 # backend/app/models/preferences.py
 from datetime import datetime
-from sqlalchemy import BigInteger, DateTime, Float, ForeignKey, String, Text, func
+from sqlalchemy import BigInteger, DateTime, Float, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 from app.core.database import Base
 
 class Preference(Base):
     __tablename__ = "preferences"
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, index=True)  # 逻辑外键
     category: Mapped[str] = mapped_column(String(16))  # style/decision/habit
     content: Mapped[str] = mapped_column(Text)
     confidence: Mapped[float] = mapped_column(Float, default=0.5)
@@ -4428,8 +4440,9 @@ git commit -m "feat: docker-compose 联调与冒烟验证"
 **2. 占位符扫描**：无 TODO/待定；任务 36 中 `... # 同任务 29` 为明确的复用指引（主图装配代码已在任务 29 完整给出）。
 
 **3. 类型一致性**：
-- `AgentState` 统一在任务 14 定义；任务 29 需追加 `pending_agent: str` 字段（已在任务 29 注释中说明）
+- `AgentState` 统一在任务 14 定义；含 `pending_agent`、`tool_rounds` 字段
 - 记忆模块命名统一：`build_context`（短期）、`build_pref_context`（偏好，任务 20 中实际名为 `build_context`，任务 25 测试 mock 名为 `build_pref_context`——**执行时以 `app.memory.preferences.build_context` 为准**，任务 25 的 monkeypatch 目标需相应调整）
 - `embed_texts / embed_query` 在任务 16 定义，被 18/21/22/23 复用，签名一致
+- **物理外键约定**：全项目模型一律不使用 `ForeignKey`（任务 3/4/5/6/20 已按"逻辑外键"改写）——关联列用普通列 + `relationship(foreign_keys=...)`；访问 relationship 属性必须 `selectinload` 预加载（异步限制，任务 3/4/6/10 已加）
 
 **4. 执行顺序提示**：任务 25 的测试 monkeypatch 路径与任务 20 命名存在一处不一致（`build_pref_context` vs `build_context`），实现时以任务 20 的实际函数名为准修正测试。
