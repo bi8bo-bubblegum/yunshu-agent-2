@@ -1012,11 +1012,12 @@ async def test_login_wrong_password(db_session):
 
 ```python
 # backend/app/repositories/base.py
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 class BaseRepository:
-    """通用原子 CRUD：一个方法一个数据库操作，业务组合放 service 层。"""
+    """通用原子 CRUD：一个方法一个数据库操作，业务组合放 service 层。
+    service 层禁止直接操作 db，一律通过本类方法（含事务 commit）。"""
     model = None  # 子类指定
 
     def __init__(self, db: AsyncSession):
@@ -1043,6 +1044,21 @@ class BaseRepository:
     async def delete(self, obj) -> None:
         await self.db.delete(obj)
         await self.db.commit()
+
+    async def update(self, obj) -> None:
+        """修改已有对象后提交并刷新。"""
+        await self.db.commit()
+        await self.db.refresh(obj)
+
+    async def commit(self) -> None:
+        """service 组合多个 repo 操作后统一提交事务。"""
+        await self.db.commit()
+
+    async def count(self, **filters) -> int:
+        stmt = select(func.count()).select_from(self.model)
+        if filters:
+            stmt = stmt.where(*[getattr(self.model, k) == v for k, v in filters.items()])
+        return (await self.db.scalar(stmt)) or 0
 ```
 
 ```python
@@ -1311,11 +1327,17 @@ async def test_seed_creates_defaults(db_session):
 - [ ] **步骤 3：实现种子服务与脚本**
 
 ```python
-# backend/app/services/seed.py
-from sqlalchemy import select
+# backend/app/services/seed.py —— 种子业务也只走 repo，不直查 DB
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.org import Role
 from app.models.configs import AgentConfig
+from app.repositories.base import BaseRepository
+
+class RoleRepository(BaseRepository):
+    model = Role
+
+class AgentConfigRepository(BaseRepository):
+    model = AgentConfig  # 种子用极简封装；任务 38 的 config_repo 提供更丰富的管理方法
 
 ROLES = [("member", "成员"), ("dept_owner", "部门负责人"), ("admin", "公司管理员")]
 # (code, name, description, tool_whitelist) —— whitelist 仅作管理端展示；运行时工具绑定由各 agent 模块的 TOOL_NAMES 决定（任务 27/28/32.5）
@@ -1326,17 +1348,17 @@ AGENTS = [
 ]
 
 async def seed_roles(db: AsyncSession) -> None:
+    roles = RoleRepository(db)
     for code, name in ROLES:
-        if not await db.scalar(select(Role).where(Role.code == code)):
-            db.add(Role(code=code, name=name))
-    await db.commit()
+        if not await roles.get_by(code=code):
+            await roles.add(Role(code=code, name=name))
 
 async def seed_agents(db: AsyncSession) -> None:
+    agents = AgentConfigRepository(db)
     for code, name, desc, whitelist in AGENTS:
-        if not await db.scalar(select(AgentConfig).where(AgentConfig.code == code)):
-            db.add(AgentConfig(code=code, name=name, description=desc,
-                               config={"system_prompt": "", "tool_whitelist": whitelist}))
-    await db.commit()
+        if not await agents.get_by(code=code):
+            await agents.add(AgentConfig(code=code, name=name, description=desc,
+                                         config={"system_prompt": "", "tool_whitelist": whitelist}))
 ```
 
 ```python
@@ -1434,7 +1456,7 @@ class MessageOut(BaseModel):
 
 ```python
 # backend/app/repositories/conversation_repo.py
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
 from app.models.chat import Conversation, Message
 from app.repositories.base import BaseRepository
@@ -1451,8 +1473,23 @@ class ConversationRepository(BaseRepository):
         # 异步下访问 messages 必须 selectinload 预加载，否则抛 MissingGreenlet
         return await self.db.get(Conversation, conv_id, options=[selectinload(Conversation.messages)])
 
+    async def update_summary(self, conv: Conversation, summary: str) -> None:
+        conv.summary = summary
+        await self.commit()
+
 class MessageRepository(BaseRepository):
     model = Message
+
+    async def list_recent(self, conversation_id: str, limit: int = 20) -> list[Message]:
+        return (await self.db.scalars(
+            select(Message).where(Message.conversation_id == conversation_id)
+            .order_by(Message.created_at.desc()).limit(limit)
+        )).all()
+
+    async def count_in_conversation(self, conversation_id: str) -> int:
+        return (await self.db.scalar(
+            select(func.count()).select_from(Message).where(Message.conversation_id == conversation_id)
+        )) or 0
 ```
 
 ```python
@@ -1629,18 +1666,17 @@ async def test_build_context_recent_n(db_session):
 
 ```python
 # backend/app/memory/short_term.py
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.models.chat import Conversation, Message
+from app.repositories.conversation_repo import ConversationRepository, MessageRepository
 
 async def build_context(db: AsyncSession, conversation_id: str, recent_rounds: int = 10) -> str:
-    conv = await db.get(Conversation, conversation_id)
+    # 查询全部委托 repository，本层只做上下文拼装
+    conv_repo = ConversationRepository(db)
+    msg_repo = MessageRepository(db)
+    conv = await conv_repo.get(conversation_id)
     if not conv:
         return ""
-    msgs = (await db.scalars(
-        select(Message).where(Message.conversation_id == conversation_id)
-        .order_by(Message.created_at.desc()).limit(recent_rounds * 2)
-    )).all()
+    msgs = await msg_repo.list_recent(conversation_id, recent_rounds * 2)
     msgs.reverse()
     lines = [f"{m.role}: {m.content}" for m in msgs]
     prefix = f"[历史摘要] {conv.summary}\n" if conv.summary else ""
@@ -1695,9 +1731,8 @@ async def test_maybe_roll_summary_updates(db_session, monkeypatch):
 
 ```python
 # backend/app/services/summary.py
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.models.chat import Conversation, Message
+from app.repositories.conversation_repo import ConversationRepository, MessageRepository
 from app.llm.factory import ModelFactory
 
 async def summarize_text(messages_text: str) -> str:
@@ -1708,21 +1743,18 @@ async def summarize_text(messages_text: str) -> str:
     return resp.content if hasattr(resp, "content") else str(resp)
 
 async def maybe_roll_summary(db: AsyncSession, conversation_id: str, force: bool = False, max_messages: int = 20) -> None:
-    conv = await db.get(Conversation, conversation_id)
-    count = (await db.execute(select(Message).where(Message.conversation_id == conversation_id))).scalar_one_or_none()  # count 见步骤注释
-    if not force and (count is None or count < max_messages):
+    # 数据库操作委托 repository
+    conv_repo = ConversationRepository(db)
+    msg_repo = MessageRepository(db)
+    conv = await conv_repo.get(conversation_id)
+    count = await msg_repo.count_in_conversation(conversation_id)
+    if not force and count < max_messages:
         return
-    recent = (await db.scalars(
-        select(Message).where(Message.conversation_id == conversation_id)
-        .order_by(Message.created_at.desc()).limit(10)
-    )).all()
+    recent = await msg_repo.list_recent(conversation_id, 10)
     text = "\n".join(f"{m.role}: {m.content}" for m in reversed(recent))
     old = f"已有摘要：{conv.summary}\n" if conv.summary else ""
-    conv.summary = await summarize_text(old + text)
-    await db.commit()
+    await conv_repo.update_summary(conv, await summarize_text(old + text))
 ```
-
-> 注：`count` 查询用 `select(func.count(Message.id)).where(...)` 取标量；若简化可去掉阈值判断，仅保留 force 参数。
 
 - [ ] **步骤 4：运行测试验证通过**
 
@@ -2179,6 +2211,7 @@ async def test_upload_and_search(monkeypatch):
 
 ```python
 # backend/app/repositories/document_repo.py
+from sqlalchemy.sql import text as sqltext
 from app.models.knowledge import Document, Chunk
 from app.repositories.base import BaseRepository
 
@@ -2191,6 +2224,17 @@ class ChunkRepository(BaseRepository):
     async def add_chunks(self, chunks: list[Chunk]) -> None:
         self.db.add_all(chunks)
         await self.db.commit()
+
+    async def vector_search(self, query_vec: list[float], top_k: int = 5) -> list[dict]:
+        """pgvector 相似度检索（service/memory 层不再直接执行 SQL）。"""
+        rows = (await self.db.execute(
+            sqltext(
+                "SELECT id, content, document_id, 1 - (embedding <=> :q) AS score "
+                "FROM chunks WHERE embedding IS NOT NULL ORDER BY embedding <=> :q LIMIT :k"
+            ),
+            {"q": query_vec, "k": top_k},
+        )).all()
+        return [{"id": r.id, "content": r.content, "document_id": r.document_id, "score": round(r.score, 4)} for r in rows]
 ```
 
 ```python
@@ -2198,7 +2242,6 @@ class ChunkRepository(BaseRepository):
 import os
 from uuid import uuid4
 from fastapi import HTTPException
-from sqlalchemy.sql import text as sqltext
 from app.models.knowledge import Document, Chunk
 from app.repositories.document_repo import DocumentRepository, ChunkRepository
 from app.services.document_parser import parse_text, split_chunks
@@ -2207,11 +2250,10 @@ from app.services.embedding import embed_texts, embed_query
 UPLOAD_DIR = "storage/documents"
 
 class KnowledgeService:
-    """知识库业务：上传→解析→切分→embedding→入库；语义检索。"""
+    """知识库业务：上传→解析→切分→embedding→入库；语义检索。数据库操作全部委托 repository。"""
     def __init__(self, db):
         self.documents = DocumentRepository(db)
         self.chunks = ChunkRepository(db)
-        self.db = db
 
     async def upload(self, uploader_id: int, filename: str, content: bytes) -> Document:
         ext = filename.rsplit(".", 1)[-1]
@@ -2231,23 +2273,16 @@ class KnowledgeService:
                 for i, (t, v) in enumerate(zip(chunks, vecs))
             ])
             doc.status = "ready"
-            await self.db.commit()
+            await self.documents.update(doc)
         except Exception as e:
             doc.status = "failed"
-            await self.db.commit()
+            await self.documents.update(doc)
             raise HTTPException(500, f"解析失败: {e}")
         return doc
 
     async def search(self, query: str, top_k: int = 5) -> dict:
         query_vec = await embed_query(query)
-        rows = (await self.db.execute(
-            sqltext(
-                "SELECT id, content, document_id, 1 - (embedding <=> :q) AS score "
-                "FROM chunks WHERE embedding IS NOT NULL ORDER BY embedding <=> :q LIMIT :k"
-            ),
-            {"q": query_vec, "k": top_k},
-        )).all()
-        return {"results": [{"id": r.id, "content": r.content, "document_id": r.document_id, "score": round(r.score, 4)} for r in rows]}
+        return {"results": await self.chunks.vector_search(query_vec, top_k)}
 ```
 
 ```python
@@ -2325,16 +2360,14 @@ async def test_retrieve_knowledge_format(monkeypatch):
 ```python
 # backend/app/memory/knowledge.py
 from sqlalchemy.ext.asyncio import AsyncSession
+from app.repositories.document_repo import ChunkRepository
 from app.services.embedding import embed_query
-from sqlalchemy.sql import text as sqltext
 
 async def search_chunks(db: AsyncSession, query: str, top_k: int = 5) -> list[dict]:
+    # 向量检索委托 repository
     query_vec = await embed_query(query)
-    rows = (await db.execute(
-        sqltext("SELECT id, content, document_id FROM chunks WHERE embedding IS NOT NULL ORDER BY embedding <=> :q LIMIT :k"),
-        {"q": query_vec, "k": top_k},
-    )).all()
-    return [{"id": r.id, "content": r.content, "document_id": r.document_id} for r in rows]
+    hits = await ChunkRepository(db).vector_search(query_vec, top_k)
+    return [{"id": h["id"], "content": h["content"], "document_id": h["document_id"]} for h in hits]
 
 async def retrieve_knowledge(db: AsyncSession, query: str, top_k: int = 5) -> str:
     hits = await search_chunks(db, query, top_k)
@@ -2362,6 +2395,7 @@ git commit -m "feat: 知识检索装配"
 
 **文件：**
 - 创建：`backend/app/models/preferences.py`
+- 创建：`backend/app/repositories/preference_repo.py`
 - 创建：`backend/app/services/preference_svc.py`
 - 创建：`backend/app/memory/preferences.py`
 - 创建：`backend/tests/test_preferences.py`
@@ -2410,26 +2444,41 @@ class Preference(Base):
 ```
 
 ```python
-# backend/app/services/preference_svc.py
+# backend/app/repositories/preference_repo.py
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.preferences import Preference
+from app.repositories.base import BaseRepository
 
-async def merge_preference(db: AsyncSession, user_id: int, category: str, content: str, confidence: float, source: str) -> None:
-    existing = (await db.scalars(
-        select(Preference).where(Preference.user_id == user_id, Preference.category == category, Preference.content == content)
-    )).first()
-    if existing:
-        existing.confidence = max(existing.confidence, confidence)
-    else:
-        db.add(Preference(user_id=user_id, category=category, content=content, confidence=confidence, source=source))
-    await db.commit()
+class PreferenceRepository(BaseRepository):
+    model = Preference
+
+    async def list_by_user(self, user_id: int) -> list[Preference]:
+        return (await self.db.scalars(select(Preference).where(Preference.user_id == user_id))).all()
+
+    async def merge(self, user_id: int, category: str, content: str, confidence: float, source: str) -> None:
+        """相同 category+content 的偏好合并（取更高 confidence），数据库操作集中在 repo。"""
+        existing = (await self.db.scalars(
+            select(Preference).where(Preference.user_id == user_id, Preference.category == category, Preference.content == content)
+        )).first()
+        if existing:
+            existing.confidence = max(existing.confidence, confidence)
+            await self.update(existing)
+        else:
+            self.db.add(Preference(user_id=user_id, category=category, content=content, confidence=confidence, source=source))
+            await self.commit()
 ```
 
-- [ ] **步骤 4：实现偏好提取（对话结束后 LLM 结构化提取）**
+```python
+# backend/app/services/preference_svc.py
+from sqlalchemy.ext.asyncio import AsyncSession
+from app.repositories.preference_repo import PreferenceRepository
+
+async def merge_preference(db: AsyncSession, user_id: int, category: str, content: str, confidence: float, source: str) -> None:
+    await PreferenceRepository(db).merge(user_id, category, content, confidence, source)
+```
 
 ```python
-# backend/app/services/preference_svc.py 追加
+# backend/app/services/preference_svc.py 追加：LLM 结构化提取
 import json
 from app.llm.factory import ModelFactory
 
@@ -2456,12 +2505,11 @@ async def extract_and_save(db: AsyncSession, user_id: int, text: str) -> None:
 
 ```python
 # backend/app/memory/preferences.py
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.models.preferences import Preference
+from app.repositories.preference_repo import PreferenceRepository
 
 async def build_context(db: AsyncSession, user_id: int) -> str:
-    rows = (await db.scalars(select(Preference).where(Preference.user_id == user_id))).all()
+    rows = await PreferenceRepository(db).list_by_user(user_id)
     if not rows:
         return ""
     parts = [f"- ({p.category}) {p.content}" for p in rows]
@@ -2487,6 +2535,7 @@ git commit -m "feat: 偏好提取与合并去重"
 ### 任务 21：经验提炼与个人层自动入库
 
 **文件：**
+- 创建：`backend/app/repositories/experience_repo.py`
 - 创建：`backend/app/services/experience_svc.py`
 - 创建：`backend/tests/test_experience_extract.py`
 
@@ -2518,14 +2567,37 @@ async def test_distill_and_save(db_session, monkeypatch):
 运行：`cd backend && pytest tests/test_experience_extract.py -v`
 预期：FAIL，ImportError
 
-- [ ] **步骤 3：实现经验提炼服务**
+- [ ] **步骤 3：实现经验提炼服务与 Repository**
+
+```python
+# backend/app/repositories/experience_repo.py
+from sqlalchemy.sql import text as sqltext
+from app.models.experience import Experience
+from app.repositories.base import BaseRepository
+
+class ExperienceRepository(BaseRepository):
+    model = Experience
+
+    async def vector_search(self, query_vec: list[float], limit: int = 30) -> list[Experience]:
+        """按向量相似度召回候选经验（service/memory 层不直接执行 SQL）。"""
+        rows = (await self.db.execute(
+            sqltext("SELECT id FROM experiences WHERE embedding IS NOT NULL ORDER BY embedding <=> :q LIMIT :k"),
+            {"q": query_vec, "k": limit},
+        )).all()
+        result = []
+        for r in rows:
+            obj = await self.get(r.id)
+            if obj:
+                result.append(obj)
+        return result
+```
 
 ```python
 # backend/app/services/experience_svc.py
 import json
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.experience import Experience
+from app.repositories.experience_repo import ExperienceRepository
 from app.services.embedding import embed_texts
 from app.llm.factory import ModelFactory
 
@@ -2555,8 +2627,7 @@ async def distill_experience(text: str, user_id: int, trace_id: str) -> Experien
     )
 
 async def save_personal_experience(db: AsyncSession, exp: Experience) -> None:
-    db.add(exp)
-    await db.commit()
+    await ExperienceRepository(db).add(exp)
 ```
 
 - [ ] **步骤 4：运行测试验证通过**
@@ -2608,25 +2679,19 @@ async def test_build_experience_context(db_session, monkeypatch):
 ```python
 # backend/app/memory/experiences.py
 from datetime import datetime
-from sqlalchemy import select, text as sqltext
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.models.experience import Experience
+from app.repositories.experience_repo import ExperienceRepository
 from app.services.embedding import embed_query
 
 SCOPE_ORDER = {"personal": 0, "dept": 1, "company": 2}
 
 async def build_experience_context(db: AsyncSession, user_id: int, department_id: int | None, query: str, top_k: int = 5) -> str:
+    # 向量召回委托 repository，本层只做可见范围过滤 + 同期加权 + 层级偏好（非 DB 操作）
     qv = await embed_query(query)
-    rows = (await db.execute(sqltext(
-        "SELECT id, title, summary, scope, event_time "
-        "FROM experiences WHERE embedding IS NOT NULL "
-        "ORDER BY embedding <=> :q LIMIT 30"
-    ), {"q": qv})).all()
+    candidates = await ExperienceRepository(db).vector_search(qv, 30)
     hits = []
     now_month = datetime.now().month
-    for r in rows:
-        exp = await db.get(Experience, r.id)
-        # 可见范围过滤：personal 仅本人；dept 需同部门；company 全员
+    for exp in candidates:
         if exp.scope == "personal" and exp.owner_id != user_id:
             continue
         if exp.scope == "dept" and (department_id is None or exp.department_id != department_id):
@@ -2660,7 +2725,7 @@ git commit -m "feat: 经验向量检索与加权"
 ### 任务 23：经验中心 API（三层：分层视图 + 提交审批）
 
 **文件：**
-- 创建：`backend/app/repositories/experience_repo.py`
+- 修改：`backend/app/repositories/experience_repo.py`（追加 list_visible / ApprovalRepository，任务 21 已建 ExperienceRepository）
 - 创建：`backend/app/services/experience_service.py`
 - 创建：`backend/app/api/experiences.py`（薄层）
 - 创建：`backend/tests/test_experiences_api.py`
@@ -2701,23 +2766,22 @@ async def test_submit_experience_for_approval(monkeypatch):
 - [ ] **步骤 3：实现经验路由**
 
 ```python
-# backend/app/repositories/experience_repo.py
+# backend/app/repositories/experience_repo.py 修改：ExperienceRepository 类内追加 list_visible（任务 21 已建类），并新增 ApprovalRepository
 from sqlalchemy import select
 from app.models.experience import Experience, ExperienceApproval
 from app.repositories.base import BaseRepository
 
-class ExperienceRepository(BaseRepository):
-    model = Experience
+async def list_visible(self, user_id: int, department_id: int | None) -> list[Experience]:
+    """个人层本人 + 部门层同部门 + 公司层全员。"""
+    return (await self.db.scalars(
+        select(Experience).where(
+            (Experience.owner_id == user_id)
+            | (Experience.scope == "company")
+            | ((Experience.scope == "dept") & (Experience.department_id == department_id))
+        ).order_by(Experience.created_at.desc())
+    )).all()
 
-    async def list_visible(self, user_id: int, department_id: int | None) -> list[Experience]:
-        """个人层本人 + 部门层同部门 + 公司层全员。"""
-        return (await self.db.scalars(
-            select(Experience).where(
-                (Experience.owner_id == user_id)
-                | (Experience.scope == "company")
-                | ((Experience.scope == "dept") & (Experience.department_id == department_id))
-            ).order_by(Experience.created_at.desc())
-        )).all()
+ExperienceRepository.list_visible = list_visible  # 类内追加
 
 class ApprovalRepository(BaseRepository):
     model = ExperienceApproval
@@ -2737,7 +2801,6 @@ class ExperienceService:
     def __init__(self, db):
         self.experiences = ExperienceRepository(db)
         self.approvals = ApprovalRepository(db)
-        self.db = db
 
     async def create(self, user_id: int, department_id: int | None, data) -> Experience:
         vec = (await embed_texts([f"{data.title} {data.summary}"]))[0]
@@ -2891,7 +2954,7 @@ class ApprovalService:
             exp.status = "approved"
         else:
             exp.status = "rejected"
-        await self.approvals.db.commit()
+        await self.approvals.commit()  # 事务提交走 repository
         return {"ok": True}
 ```
 
@@ -3882,7 +3945,7 @@ class HitlService:
         trace = await self.traces.get(task.trace_id)
         if trace:
             trace.status = "completed"
-        await self.tasks.db.commit()
+        await self.tasks.commit()  # 事务提交走 repository
         return {"ok": True}
 ```
 
@@ -4170,14 +4233,26 @@ async def test_trace_created_per_chat(monkeypatch):
 
 ```python
 # backend/app/repositories/trace_repo.py
+from sqlalchemy import select
 from app.models.trace import ExecutionTrace, TraceEvent, HitlTask
 from app.repositories.base import BaseRepository
 
 class TraceRepository(BaseRepository):
     model = ExecutionTrace
 
+    async def list_by_user(self, user_id: int, limit: int = 50) -> list[ExecutionTrace]:
+        return (await self.db.scalars(
+            select(ExecutionTrace).where(ExecutionTrace.user_id == user_id)
+            .order_by(ExecutionTrace.started_at.desc()).limit(limit)
+        )).all()
+
 class EventRepository(BaseRepository):
     model = TraceEvent
+
+    async def list_by_trace(self, trace_id: str) -> list[TraceEvent]:
+        return (await self.db.scalars(
+            select(TraceEvent).where(TraceEvent.trace_id == trace_id).order_by(TraceEvent.id)
+        )).all()
 
 class HitlRepository(BaseRepository):
     model = HitlTask
@@ -4213,7 +4288,7 @@ from app.traces.collector import collector
         trace.status = "completed"
         trace.supervisor_routes = result.get("route_history", [])
         conv.current_trace_id = trace.id
-        await self.db.commit()
+        await self.traces.commit()  # 事务提交走 repository
         collector.emit(trace.id, "route", {"routes": trace.supervisor_routes})
         # 偏好提取 / 经验提炼同任务 30
         yield json.dumps({"event": "token", "content": text}, ensure_ascii=False)
@@ -4221,24 +4296,20 @@ from app.traces.collector import collector
 ```
 
 ```python
-# backend/app/services/trace_service.py —— 监测查询业务
-from sqlalchemy import select
-from app.models.trace import ExecutionTrace, TraceEvent
+# backend/app/services/trace_service.py —— 监测查询业务（只组合 repo，不直查 DB）
+from app.models.trace import TraceEvent
+from app.repositories.trace_repo import TraceRepository, EventRepository
 
 class TraceService:
     def __init__(self, db):
-        self.db = db
+        self.traces = TraceRepository(db)
+        self.events = EventRepository(db)
 
     async def list_by_user(self, user_id: int, limit: int = 50):
-        return (await self.db.scalars(
-            select(ExecutionTrace).where(ExecutionTrace.user_id == user_id)
-            .order_by(ExecutionTrace.started_at.desc()).limit(limit)
-        )).all()
+        return await self.traces.list_by_user(user_id, limit)
 
     async def events(self, trace_id: str) -> list[TraceEvent]:
-        return (await self.db.scalars(
-            select(TraceEvent).where(TraceEvent.trace_id == trace_id).order_by(TraceEvent.id)
-        )).all()
+        return await self.events.list_by_trace(trace_id)
 ```
 
 ```python
