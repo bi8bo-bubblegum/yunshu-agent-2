@@ -334,6 +334,7 @@ async def db_session():
 # backend/tests/test_org.py
 import pytest
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 from app.models.org import Department, Role, User
 
 @pytest.mark.asyncio
@@ -347,7 +348,11 @@ async def test_create_user_with_department(db_session):
     user = User(username="alice", password_hash="x", department_id=dept.id, role_id=role.id, display_name="爱丽丝")
     db_session.add(user)
     await db_session.flush()
-    result = await db_session.scalar(select(User).where(User.username == "alice"))
+    # 异步下访问 relationship 必须 selectinload 预加载，否则抛 MissingGreenlet
+    result = await db_session.scalar(
+        select(User).where(User.username == "alice")
+        .options(selectinload(User.department), selectinload(User.role))
+    )
     assert result.department.name == "市场部"
     assert result.role.code == "member"
 ```
@@ -426,6 +431,7 @@ git commit -m "feat: 组织模型 User/Department/Role"
 # backend/tests/test_chat_models.py
 import pytest
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 from app.models.chat import Conversation, Message
 from app.models.org import User
 
@@ -439,7 +445,11 @@ async def test_conversation_with_messages(db_session):
     await db_session.flush()
     db_session.add(Message(conversation_id=conv.id, role="user", content="策划国庆方案"))
     await db_session.commit()
-    result = await db_session.scalar(select(Conversation).where(Conversation.id == conv.id))
+    # 异步下访问 conversation.messages 必须 selectinload 预加载
+    result = await db_session.scalar(
+        select(Conversation).where(Conversation.id == conv.id)
+        .options(selectinload(Conversation.messages))
+    )
     assert len(result.messages) == 1
     assert result.messages[0].role == "user"
 ```
@@ -646,6 +656,7 @@ git commit -m "feat: 经验与知识模型（pgvector 向量列）"
 # backend/tests/test_trace_models.py
 import pytest
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 from app.models.trace import ExecutionTrace, TraceEvent, HitlTask
 from app.models.configs import AgentConfig, McpServer
 
@@ -657,7 +668,11 @@ async def test_trace_event_flow(db_session):
     db_session.add(TraceEvent(trace_id=trace.id, type="llm_call", payload={"model": "x", "tokens": 100}))
     db_session.add(HitlTask(trace_id=trace.id, node_id="n1", reason="高风险操作", status="pending"))
     await db_session.commit()
-    result = await db_session.scalar(select(ExecutionTrace).where(ExecutionTrace.id == trace.id))
+    # 异步下访问 events/hitl_tasks 必须 selectinload 预加载
+    result = await db_session.scalar(
+        select(ExecutionTrace).where(ExecutionTrace.id == trace.id)
+        .options(selectinload(ExecutionTrace.events), selectinload(ExecutionTrace.hitl_tasks))
+    )
     assert result.supervisor_routes[0]["agent"] == "marketing"
     assert result.hitl_tasks[0].status == "pending"
 ```
@@ -1185,6 +1200,7 @@ class MessageOut(BaseModel):
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 from app.core.deps import get_db, get_current_user
 from app.models.org import User
 from app.models.chat import Conversation, Message
@@ -1206,7 +1222,8 @@ async def list_conversations(db: AsyncSession = Depends(get_db), user: User = De
 
 @router.get("/{conv_id}/messages", response_model=list[MessageOut])
 async def list_messages(conv_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
-    conv = await db.get(Conversation, conv_id)
+    # 异步下访问 conv.messages 必须 selectinload 预加载，否则抛 MissingGreenlet
+    conv = await db.get(Conversation, conv_id, options=[selectinload(Conversation.messages)])
     if not conv or conv.user_id != user.id:
         raise HTTPException(404, "会话不存在")
     return conv.messages
