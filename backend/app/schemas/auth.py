@@ -19,5 +19,5 @@ class UserOut(BaseModel):
     username: str
     display_name: str
     department_id: str | None = None
-    role_id: str | None = None
+    role_code: str | None = None
     model_config = {"from_attributes": True}

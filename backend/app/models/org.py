@@ -26,6 +26,6 @@ class User(Base):
     username: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(String(128))
     department_id: Mapped[str | None] = mapped_column(String(36), index=True)
-    role_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    role_code: Mapped[str | None] = mapped_column(String(32), index=True)  # 逻辑外键，关联 Role.code
     display_name: Mapped[str] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
