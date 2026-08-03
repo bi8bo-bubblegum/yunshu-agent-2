@@ -380,34 +380,35 @@ async def test_create_user_with_department(db_session):
 ```python
 # backend/app/models/org.py
 from datetime import datetime
-from sqlalchemy import BigInteger, DateTime, String, func
+from uuid import uuid4
+from sqlalchemy import UUID, DateTime, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.database import Base
 
-# 全项目约定：不使用物理外键（数据库不建 FOREIGN KEY 约束），
-# 关联列用普通 BigInteger + relationship(foreign_keys=...) 保持 ORM 关联能力。
+# 全项目约定：不使用物理外键（数据库不建 FOREIGN KEY 约束）；
+# 全库主键统一 UUID 字符串（应用层 uuid4 生成），关联列用普通 String(36) + relationship(foreign_keys=...) 保持 ORM 关联能力。
 
 class Role(Base):
     __tablename__ = "roles"
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4()))
     code: Mapped[str] = mapped_column(String(32), unique=True)
     name: Mapped[str] = mapped_column(String(64))
 
 class Department(Base):
     __tablename__ = "departments"
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4()))
     name: Mapped[str] = mapped_column(String(128), unique=True)
-    owner_id: Mapped[int | None] = mapped_column(BigInteger, index=True)  # 逻辑外键
+    owner_id: Mapped[str | None] = mapped_column(String(36), index=True)  # 逻辑外键
     owner: Mapped["User | None"] = relationship(foreign_keys="Department.owner_id")
     users: Mapped[list["User"]] = relationship(back_populates="department", foreign_keys="User.department_id")
 
 class User(Base):
     __tablename__ = "users"
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4()))
     username: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(String(128))
-    department_id: Mapped[int | None] = mapped_column(BigInteger, index=True)  # 逻辑外键
-    role_id: Mapped[int | None] = mapped_column(BigInteger, index=True)        # 逻辑外键
+    department_id: Mapped[str | None] = mapped_column(String(36), index=True)  # 逻辑外键
+    role_id: Mapped[str | None] = mapped_column(String(36), index=True)        # 逻辑外键
     display_name: Mapped[str] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     department: Mapped[Department | None] = relationship(back_populates="users", foreign_keys=[department_id])
@@ -481,7 +482,7 @@ async def test_conversation_with_messages(db_session):
 # backend/app/models/chat.py
 from datetime import datetime
 from uuid import uuid4
-from sqlalchemy import UUID, BigInteger, DateTime, String, Text, func
+from sqlalchemy import UUID, DateTime, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.database import Base
@@ -489,7 +490,7 @@ from app.core.database import Base
 class Conversation(Base):
     __tablename__ = "conversations"
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4()))
-    user_id: Mapped[int] = mapped_column(BigInteger, index=True)  # 逻辑外键
+    user_id: Mapped[str] = mapped_column(String(36), index=True)  # 逻辑外键
     title: Mapped[str] = mapped_column(String(128), default="新对话")
     summary: Mapped[str | None] = mapped_column(Text)
     current_trace_id: Mapped[str | None] = mapped_column(String(36))
@@ -501,7 +502,7 @@ class Conversation(Base):
 
 class Message(Base):
     __tablename__ = "messages"
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4()))
     conversation_id: Mapped[str] = mapped_column(String(36), index=True)  # 逻辑外键
     role: Mapped[str] = mapped_column(String(16))
     content: Mapped[str] = mapped_column(Text)
@@ -549,7 +550,7 @@ from app.models.knowledge import Document, Chunk
 @pytest.mark.asyncio
 async def test_experience_with_embedding(db_session):
     exp = Experience(
-        owner_id=1, scope="personal", status="approved",
+        owner_id="u1", scope="personal", status="approved",
         title="国庆大促策略", summary="满减+直播", content="详情",
         event_time="2025-10-01", result_metrics={"gmv": 320, "roi": 3.2},
         embedding=[0.1, 0.2, 0.3],
@@ -572,7 +573,7 @@ async def test_experience_with_embedding(db_session):
 # backend/app/models/experience.py
 from datetime import date, datetime
 from uuid import uuid4
-from sqlalchemy import UUID, BigInteger, Date, DateTime, String, Text, func
+from sqlalchemy import UUID, Date, DateTime, String, Text, func
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from pgvector.sqlalchemy import Vector
@@ -581,7 +582,7 @@ from app.core.database import Base
 class Experience(Base):
     __tablename__ = "experiences"
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4()))
-    owner_id: Mapped[int] = mapped_column(BigInteger, index=True)  # 逻辑外键
+    owner_id: Mapped[str] = mapped_column(String(36), index=True)  # 逻辑外键
     scope: Mapped[str] = mapped_column(String(16))  # personal/dept/company
     status: Mapped[str] = mapped_column(String(16), default="draft")  # draft/pending/approved/rejected
     title: Mapped[str] = mapped_column(String(128))
@@ -590,7 +591,7 @@ class Experience(Base):
     tags: Mapped[list[str]] = mapped_column(ARRAY(String(32)), default=list)
     event_time: Mapped[date | None] = mapped_column(Date)
     result_metrics: Mapped[dict | None] = mapped_column(JSONB)
-    department_id: Mapped[int | None] = mapped_column(BigInteger, index=True)  # 逻辑外键
+    department_id: Mapped[str | None] = mapped_column(String(36), index=True)  # 逻辑外键
     source_trace_id: Mapped[str | None] = mapped_column(String(36))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     embedding: Mapped[list[float] | None] = mapped_column(Vector(1024))
@@ -605,7 +606,7 @@ class ExperienceApproval(Base):
     experience_id: Mapped[str] = mapped_column(String(36), index=True)  # 逻辑外键
     from_scope: Mapped[str] = mapped_column(String(16))
     to_scope: Mapped[str] = mapped_column(String(16))
-    approver_id: Mapped[int | None] = mapped_column(BigInteger, index=True)  # 逻辑外键
+    approver_id: Mapped[str | None] = mapped_column(String(36), index=True)  # 逻辑外键
     status: Mapped[str] = mapped_column(String(16), default="pending")
     comment: Mapped[str | None] = mapped_column(Text)
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -616,7 +617,7 @@ class ExperienceApproval(Base):
 # backend/app/models/knowledge.py
 from datetime import datetime
 from uuid import uuid4
-from sqlalchemy import UUID, BigInteger, DateTime, Integer, String, Text, func
+from sqlalchemy import UUID, DateTime, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from pgvector.sqlalchemy import Vector
@@ -628,8 +629,8 @@ class Document(Base):
     title: Mapped[str] = mapped_column(String(256))
     file_path: Mapped[str] = mapped_column(String(512))
     status: Mapped[str] = mapped_column(String(16), default="parsing")  # parsing/ready/failed
-    uploader_id: Mapped[int] = mapped_column(BigInteger, index=True)  # 逻辑外键
-    department_id: Mapped[int | None] = mapped_column(BigInteger, index=True)  # 逻辑外键
+    uploader_id: Mapped[str] = mapped_column(String(36), index=True)  # 逻辑外键
+    department_id: Mapped[str | None] = mapped_column(String(36), index=True)  # 逻辑外键
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     chunks: Mapped[list["Chunk"]] = relationship(
         back_populates="document", cascade="all, delete-orphan",
@@ -687,7 +688,7 @@ from app.models.configs import AgentConfig, McpServer
 
 @pytest.mark.asyncio
 async def test_trace_event_flow(db_session):
-    trace = ExecutionTrace(user_id=1, status="running", supervisor_routes=[{"agent": "marketing"}])
+    trace = ExecutionTrace(user_id="u1", status="running", supervisor_routes=[{"agent": "marketing"}])
     db_session.add(trace)
     await db_session.flush()
     db_session.add(TraceEvent(trace_id=trace.id, type="llm_call", payload={"model": "x", "tokens": 100}))
@@ -721,7 +722,7 @@ from app.core.database import Base
 class ExecutionTrace(Base):
     __tablename__ = "execution_traces"
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4()))
-    user_id: Mapped[int] = mapped_column(BigInteger, index=True)  # 逻辑外键
+    user_id: Mapped[str] = mapped_column(String(36), index=True)  # 逻辑外键
     conversation_id: Mapped[str | None] = mapped_column(String(36))
     status: Mapped[str] = mapped_column(String(16), default="running")  # running/completed/interrupted/failed
     supervisor_routes: Mapped[list | None] = mapped_column(JSONB, default=list)
@@ -731,6 +732,7 @@ class ExecutionTrace(Base):
 
 class TraceEvent(Base):
     __tablename__ = "trace_events"
+    # 全库唯一自增主键特例：留痕为高频批量写入，顺序自增比 UUID 更省索引与页分裂
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     trace_id: Mapped[str] = mapped_column(String(36), index=True)  # 逻辑外键
     type: Mapped[str] = mapped_column(String(16))  # route/llm/tool/memory/hitl
@@ -746,7 +748,7 @@ class HitlTask(Base):
     reason: Mapped[str] = mapped_column(Text)
     context: Mapped[dict | None] = mapped_column(JSONB)
     status: Mapped[str] = mapped_column(String(16), default="pending")  # pending/approved/rejected
-    approver_id: Mapped[int | None] = mapped_column(BigInteger, index=True)  # 逻辑外键
+    approver_id: Mapped[str | None] = mapped_column(String(36), index=True)  # 逻辑外键
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     trace: Mapped[ExecutionTrace] = relationship(back_populates="hitl_tasks", foreign_keys=[trace_id])
 ```
@@ -820,9 +822,9 @@ def test_hash_and_verify():
     assert not verify_password("wrong", h)
 
 def test_token_roundtrip():
-    token = create_access_token(1, "alice")
+    token = create_access_token("u1", "alice")
     payload = decode_token(token)
-    assert payload["sub"] == "1" and payload["username"] == "alice"
+    assert payload["sub"] == "u1" and payload["username"] == "alice"
 ```
 
 - [ ] **步骤 2：运行测试确认失败**
@@ -845,7 +847,7 @@ def hash_password(plain: str) -> str:
 def verify_password(plain: str, hashed: str) -> bool:
     return checkpw(plain.encode(), hashed.encode())
 
-def create_access_token(user_id: int, username: str) -> str:
+def create_access_token(user_id: str, username: str) -> str:
     payload = {"sub": str(user_id), "username": username,
                "exp": datetime.now(timezone.utc) + timedelta(minutes=settings.JWT_EXPIRE_MINUTES)}
     return jwt.encode(payload, settings.JWT_SECRET, algorithm="HS256")
@@ -877,7 +879,7 @@ async def get_current_user(creds: HTTPAuthorizationCredentials | None = Depends(
         payload = decode_token(creds.credentials)
     except Exception:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "token 无效")
-    user = await db.scalar(select(User).where(User.id == int(payload["sub"])))
+    user = await db.scalar(select(User).where(User.id == payload["sub"]))
     if not user:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "用户不存在")
     return user
@@ -901,11 +903,11 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
 
 class UserOut(BaseModel):
-    id: int
+    id: str
     username: str
     display_name: str
-    department_id: int | None = None
-    role_id: int | None = None
+    department_id: str | None = None
+    role_id: str | None = None
     model_config = {"from_attributes": True}
 ```
 
@@ -1132,7 +1134,7 @@ async def get_current_user(creds: HTTPAuthorizationCredentials | None = Depends(
         payload = decode_token(creds.credentials)
     except Exception:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "token 无效")
-    user = await UserRepository(db).get(int(payload["sub"]))
+    user = await UserRepository(db).get(payload["sub"])
     if not user:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "用户不存在")
     return user
@@ -1253,9 +1255,9 @@ class DepartmentCreate(BaseModel):
     name: str
 
 class DepartmentOut(BaseModel):
-    id: int
+    id: str
     name: str
-    owner_id: int | None = None
+    owner_id: str | None = None
     model_config = {"from_attributes": True}
 ```
 
@@ -1461,7 +1463,7 @@ class ConversationOut(BaseModel):
     model_config = {"from_attributes": True}
 
 class MessageOut(BaseModel):
-    id: int
+    id: str
     role: str
     content: str
     created_at: datetime
@@ -1478,7 +1480,7 @@ from app.repositories.base import BaseRepository
 class ConversationRepository(BaseRepository):
     model = Conversation
 
-    async def list_by_user(self, user_id: int) -> list[Conversation]:
+    async def list_by_user(self, user_id: str) -> list[Conversation]:
         return (await self.db.scalars(
             select(Conversation).where(Conversation.user_id == user_id).order_by(Conversation.created_at.desc())
         )).all()
@@ -1516,15 +1518,15 @@ class ConversationService:
     def __init__(self, db):
         self.conversations = ConversationRepository(db)
 
-    async def create(self, user_id: int, title: str) -> Conversation:
+    async def create(self, user_id: str, title: str) -> Conversation:
         conv = Conversation(user_id=user_id, title=title)
         await self.conversations.add(conv)
         return conv
 
-    async def list_by_user(self, user_id: int) -> list[Conversation]:
+    async def list_by_user(self, user_id: str) -> list[Conversation]:
         return await self.conversations.list_by_user(user_id)
 
-    async def list_messages(self, user_id: int, conv_id: str):
+    async def list_messages(self, user_id: str, conv_id: str):
         conv = await self.conversations.get_with_messages(conv_id)
         if not conv or conv.user_id != user_id:
             raise HTTPException(404, "会话不存在")
@@ -1660,7 +1662,7 @@ from app.memory.short_term import build_context
 
 @pytest.mark.asyncio
 async def test_build_context_recent_n(db_session):
-    conv = Conversation(user_id=1, title="t")
+    conv = Conversation(user_id="u1", title="t")
     db_session.add(conv)
     await db_session.flush()
     for i in range(8):
@@ -1727,7 +1729,7 @@ from app.services.summary import maybe_roll_summary
 @pytest.mark.asyncio
 async def test_maybe_roll_summary_updates(db_session, monkeypatch):
     from app.models.chat import Conversation
-    conv = Conversation(user_id=1, title="t", summary=None)
+    conv = Conversation(user_id="u1", title="t", summary=None)
     db_session.add(conv)
     await db_session.commit()
     monkeypatch.setattr("app.services.summary.summarize_text", lambda text: "压缩后的摘要")
@@ -1831,7 +1833,7 @@ from langchain_core.messages import BaseMessage
 
 class AgentState(TypedDict, total=False):
     conversation_id: str
-    user_id: int
+    user_id: str
     user_message: str
     history: str
     memory_context: str          # 记忆装配结果
@@ -1879,13 +1881,13 @@ class ChatService:
         self.conversations = ConversationRepository(db)
         self.messages = MessageRepository(db)
 
-    async def _ensure_owned(self, user_id: int, conv_id: str) -> Conversation:
+    async def _ensure_owned(self, user_id: str, conv_id: str) -> Conversation:
         conv = await self.conversations.get(conv_id)
         if not conv or conv.user_id != user_id:
             raise HTTPException(404, "会话不存在")
         return conv
 
-    async def stream_chat(self, user_id: int, conv_id: str, message: str):
+    async def stream_chat(self, user_id: str, conv_id: str, message: str):
         """SSE 事件异步生成器：start → token → done。"""
         await self._ensure_owned(user_id, conv_id)
         await self.messages.add(Message(conversation_id=conv_id, role="user", content=message))
@@ -1995,7 +1997,7 @@ class ChatService:
         self.conversations = ConversationRepository(db)
         self.messages = MessageRepository(db)
 
-    async def stream_chat(self, user_id: int, conv_id: str, message: str):
+    async def stream_chat(self, user_id: str, conv_id: str, message: str):
         await self._ensure_owned(user_id, conv_id)
         await self.messages.add(Message(conversation_id=conv_id, role="user", content=message))
         yield json.dumps({"event": "start"}, ensure_ascii=False)
@@ -2269,7 +2271,7 @@ class KnowledgeService:
         self.documents = DocumentRepository(db)
         self.chunks = ChunkRepository(db)
 
-    async def upload(self, uploader_id: int, filename: str, content: bytes) -> Document:
+    async def upload(self, uploader_id: str, filename: str, content: bytes) -> Document:
         ext = filename.rsplit(".", 1)[-1]
         doc_id = str(uuid4())
         path = os.path.join(UPLOAD_DIR, f"{doc_id}.{ext}")
@@ -2425,9 +2427,9 @@ from app.services.preference_svc import merge_preference
 
 @pytest.mark.asyncio
 async def test_merge_dedupe(db_session):
-    await merge_preference(db_session, user_id=1, category="style", content="回答简洁", confidence=0.8, source="s1")
-    await merge_preference(db_session, user_id=1, category="style", content="回答简洁", confidence=0.9, source="s2")
-    rows = (await db_session.scalars(select(Preference).where(Preference.user_id == 1))).all()
+    await merge_preference(db_session, user_id="u1", category="style", content="回答简洁", confidence=0.8, source="s1")
+    await merge_preference(db_session, user_id="u1", category="style", content="回答简洁", confidence=0.9, source="s2")
+    rows = (await db_session.scalars(select(Preference).where(Preference.user_id == "u1"))).all()
     assert len(rows) == 1
     assert rows[0].confidence == 0.9
 ```
@@ -2442,14 +2444,15 @@ async def test_merge_dedupe(db_session):
 ```python
 # backend/app/models/preferences.py
 from datetime import datetime
-from sqlalchemy import BigInteger, DateTime, Float, String, Text, func
+from uuid import uuid4
+from sqlalchemy import UUID, DateTime, Float, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 from app.core.database import Base
 
 class Preference(Base):
     __tablename__ = "preferences"
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(BigInteger, index=True)  # 逻辑外键
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4()))
+    user_id: Mapped[str] = mapped_column(String(36), index=True)  # 逻辑外键
     category: Mapped[str] = mapped_column(String(16))  # style/decision/habit
     content: Mapped[str] = mapped_column(Text)
     confidence: Mapped[float] = mapped_column(Float, default=0.5)
@@ -2466,10 +2469,10 @@ from app.repositories.base import BaseRepository
 class PreferenceRepository(BaseRepository):
     model = Preference
 
-    async def list_by_user(self, user_id: int) -> list[Preference]:
+    async def list_by_user(self, user_id: str) -> list[Preference]:
         return (await self.db.scalars(select(Preference).where(Preference.user_id == user_id))).all()
 
-    async def merge(self, user_id: int, category: str, content: str, confidence: float, source: str) -> None:
+    async def merge(self, user_id: str, category: str, content: str, confidence: float, source: str) -> None:
         """相同 category+content 的偏好合并（取更高 confidence），数据库操作集中在 repo。"""
         existing = (await self.db.scalars(
             select(Preference).where(Preference.user_id == user_id, Preference.category == category, Preference.content == content)
@@ -2487,7 +2490,7 @@ class PreferenceRepository(BaseRepository):
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.repositories.preference_repo import PreferenceRepository
 
-async def merge_preference(db: AsyncSession, user_id: int, category: str, content: str, confidence: float, source: str) -> None:
+async def merge_preference(db: AsyncSession, user_id: str, category: str, content: str, confidence: float, source: str) -> None:
     await PreferenceRepository(db).merge(user_id, category, content, confidence, source)
 ```
 
@@ -2511,7 +2514,7 @@ async def extract_preferences(text: str) -> list[dict]:
     except Exception:
         return []
 
-async def extract_and_save(db: AsyncSession, user_id: int, text: str) -> None:
+async def extract_and_save(db: AsyncSession, user_id: str, text: str) -> None:
     prefs = await extract_preferences(text)
     for p in prefs:
         await merge_preference(db, user_id, p.get("category", "habit"), p.get("content", ""), float(p.get("confidence", 0.5)), "auto")
@@ -2522,7 +2525,7 @@ async def extract_and_save(db: AsyncSession, user_id: int, text: str) -> None:
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.repositories.preference_repo import PreferenceRepository
 
-async def build_context(db: AsyncSession, user_id: int) -> str:
+async def build_context(db: AsyncSession, user_id: str) -> str:
     rows = await PreferenceRepository(db).list_by_user(user_id)
     if not rows:
         return ""
@@ -2571,7 +2574,7 @@ async def test_distill_and_save(db_session, monkeypatch):
     monkeypatch.setattr("app.services.experience_svc.ModelFactory.get_llm", lambda: Fake())
     monkeypatch.setattr("app.services.experience_svc.embed_texts", lambda t: [[0.1, 0.2, 0.3]])
 
-    exp = await distill_experience("用户：策划国庆营销方案\n助手：建议满减+直播", user_id=1, trace_id="t1")
+    exp = await distill_experience("用户：策划国庆营销方案\n助手：建议满减+直播", user_id="u1", trace_id="t1")
     assert exp is not None
     assert exp.title == "国庆大促"
 ```
@@ -2622,7 +2625,7 @@ DISTILL_PROMPT = (
     "营销/策略类必须包含 event_time 和 result_metrics，否则视为无价值输出 null。只输出 JSON。\n对话：{text}"
 )
 
-async def distill_experience(text: str, user_id: int, trace_id: str) -> Experience | None:
+async def distill_experience(text: str, user_id: str, trace_id: str) -> Experience | None:
     llm = ModelFactory.get_llm()
     resp = await llm.ainvoke(DISTILL_PROMPT.format(text=text[:6000]))
     raw = resp.content if hasattr(resp, "content") else str(resp)
@@ -2675,11 +2678,11 @@ from app.memory.experiences import build_experience_context
 
 @pytest.mark.asyncio
 async def test_build_experience_context(db_session, monkeypatch):
-    db_session.add(Experience(owner_id=1, scope="personal", status="approved", title="国庆大促",
+    db_session.add(Experience(owner_id="u1", scope="personal", status="approved", title="国庆大促",
                               summary="满减+直播", event_time="2025-10-01", embedding=[0.1, 0.2, 0.3]))
     await db_session.commit()
     monkeypatch.setattr("app.memory.experiences.embed_query", lambda t: [0.1, 0.2, 0.3])
-    ctx = await build_experience_context(db_session, user_id=1, department_id=None, query="国庆营销")
+    ctx = await build_experience_context(db_session, user_id="u1", department_id=None, query="国庆营销")
     assert "国庆大促" in ctx
 ```
 
@@ -2699,7 +2702,7 @@ from app.services.embedding import embed_query
 
 SCOPE_ORDER = {"personal": 0, "dept": 1, "company": 2}
 
-async def build_experience_context(db: AsyncSession, user_id: int, department_id: int | None, query: str, top_k: int = 5) -> str:
+async def build_experience_context(db: AsyncSession, user_id: str, department_id: str | None, query: str, top_k: int = 5) -> str:
     # 向量召回委托 repository，本层只做可见范围过滤 + 同期加权 + 层级偏好（非 DB 操作）
     qv = await embed_query(query)
     candidates = await ExperienceRepository(db).vector_search(qv, 30)
@@ -2785,7 +2788,7 @@ from sqlalchemy import select
 from app.models.experience import Experience, ExperienceApproval
 from app.repositories.base import BaseRepository
 
-async def list_visible(self, user_id: int, department_id: int | None) -> list[Experience]:
+async def list_visible(self, user_id: str, department_id: str | None) -> list[Experience]:
     """个人层本人 + 部门层同部门 + 公司层全员。"""
     return (await self.db.scalars(
         select(Experience).where(
@@ -2816,7 +2819,7 @@ class ExperienceService:
         self.experiences = ExperienceRepository(db)
         self.approvals = ApprovalRepository(db)
 
-    async def create(self, user_id: int, department_id: int | None, data) -> Experience:
+    async def create(self, user_id: str, department_id: str | None, data) -> Experience:
         vec = (await embed_texts([f"{data.title} {data.summary}"]))[0]
         exp = Experience(owner_id=user_id, scope="personal", status="draft", title=data.title,
                          summary=data.summary, content=data.content, tags=data.tags,
@@ -2825,7 +2828,7 @@ class ExperienceService:
         await self.experiences.add(exp)
         return exp
 
-    async def submit(self, user_id: int, exp_id: str, to_scope: str) -> Experience:
+    async def submit(self, user_id: str, exp_id: str, to_scope: str) -> Experience:
         exp = await self.experiences.get(exp_id)
         if not exp or exp.owner_id != user_id or exp.scope != "personal":
             raise HTTPException(404, "经验不存在或不可提交")
@@ -2835,7 +2838,7 @@ class ExperienceService:
         await self.approvals.add(ExperienceApproval(experience_id=exp.id, from_scope="personal", to_scope=to_scope, status="pending"))
         return exp
 
-    async def list_visible(self, user_id: int, department_id: int | None) -> list[Experience]:
+    async def list_visible(self, user_id: str, department_id: str | None) -> list[Experience]:
         return await self.experiences.list_visible(user_id, department_id)
 ```
 
@@ -2954,7 +2957,7 @@ class ApprovalService:
         rows = await self.approvals.list_pending()
         return [{"id": a.id, "experience_id": a.experience_id, "from_scope": a.from_scope, "to_scope": a.to_scope} for a in rows]
 
-    async def decide(self, approval_id: str, approver_id: int, approve: bool, comment: str = ""):
+    async def decide(self, approval_id: str, approver_id: str, approve: bool, comment: str = ""):
         ap = await self.approvals.get(approval_id)
         if not ap or ap.status != "pending":
             raise HTTPException(404, "审批不存在")
@@ -3034,7 +3037,7 @@ async def test_assembly_sections(monkeypatch):
     monkeypatch.setattr("app.memory.assembly.build_pref_context", lambda db, uid: "[偏好]")
     monkeypatch.setattr("app.memory.assembly.build_experience_context", lambda db, uid, dept, q: "[经验]")
     monkeypatch.setattr("app.memory.assembly.retrieve_knowledge", lambda db, q: "[知识]")
-    ctx = await assemble_memory(None, user_id=1, conversation_id="c1", department_id=2, query="国庆营销")
+    ctx = await assemble_memory(None, user_id="u1", conversation_id="c1", department_id="d1", query="国庆营销")
     assert "短期" in ctx and "偏好" in ctx and "经验" in ctx and "知识" in ctx
 ```
 
@@ -3051,8 +3054,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.memory import short_term, preferences as pref_mem, experiences as exp_mem, knowledge
 
 async def assemble_memory(
-    db: AsyncSession, user_id: int, conversation_id: str,
-    department_id: int | None, query: str,
+    db: AsyncSession, user_id: str, conversation_id: str,
+    department_id: str | None, query: str,
 ) -> str:
     sections = []
     sections.append(await short_term.build_context(db, conversation_id))
@@ -3585,7 +3588,7 @@ from app.memory.assembly import assemble_memory
 from app.services.experience_svc import distill_experience, save_personal_experience
 from app.services.preference_svc import extract_and_save
 
-    async def stream_chat(self, user_id: int, conv_id: str, message: str):
+    async def stream_chat(self, user_id: str, conv_id: str, message: str):
         await self._ensure_owned(user_id, conv_id)
         await self.messages.add(Message(conversation_id=conv_id, role="user", content=message))
         yield json.dumps({"event": "start"}, ensure_ascii=False)
@@ -3906,7 +3909,7 @@ from app.models.trace import HitlTask, ExecutionTrace
 
 @pytest.mark.asyncio
 async def test_hitl_approve_flow(db_session):
-    trace = ExecutionTrace(user_id=1, status="interrupted")
+    trace = ExecutionTrace(user_id="u1", status="interrupted")
     db_session.add(trace)
     await db_session.flush()
     db_session.add(HitlTask(trace_id=trace.id, node_id="n1", reason="删除文件", status="pending"))
@@ -3949,7 +3952,7 @@ class HitlService:
         rows = await self.tasks.list(status="pending")
         return [{"id": t.id, "trace_id": t.trace_id, "reason": t.reason, "context": t.context} for t in rows]
 
-    async def decide(self, task_id: str, approver_id: int, approved: bool):
+    async def decide(self, task_id: str, approver_id: str, approved: bool):
         task = await self.tasks.get(task_id)
         if not task or task.status != "pending":
             raise HTTPException(404, "任务不存在")
@@ -4254,7 +4257,7 @@ from app.repositories.base import BaseRepository
 class TraceRepository(BaseRepository):
     model = ExecutionTrace
 
-    async def list_by_user(self, user_id: int, limit: int = 50) -> list[ExecutionTrace]:
+    async def list_by_user(self, user_id: str, limit: int = 50) -> list[ExecutionTrace]:
         return (await self.db.scalars(
             select(ExecutionTrace).where(ExecutionTrace.user_id == user_id)
             .order_by(ExecutionTrace.started_at.desc()).limit(limit)
@@ -4285,7 +4288,7 @@ from app.traces.collector import collector
         self.messages = MessageRepository(db)
         self.traces = TraceRepository(db)
 
-    async def stream_chat(self, user_id: int, conv_id: str, message: str):
+    async def stream_chat(self, user_id: str, conv_id: str, message: str):
         await self._ensure_owned(user_id, conv_id)
         conv = await self.conversations.get(conv_id)
         trace = ExecutionTrace(id=str(uuid4()), user_id=user_id, conversation_id=conv_id, status="running", supervisor_routes=[])
@@ -4319,7 +4322,7 @@ class TraceService:
         self.traces = TraceRepository(db)
         self.events = EventRepository(db)
 
-    async def list_by_user(self, user_id: int, limit: int = 50):
+    async def list_by_user(self, user_id: str, limit: int = 50):
         return await self.traces.list_by_user(user_id, limit)
 
     async def events(self, trace_id: str) -> list[TraceEvent]:

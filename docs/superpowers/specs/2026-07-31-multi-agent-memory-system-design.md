@@ -206,9 +206,9 @@ erDiagram
 
 | 表 | 关键字段 | 说明 |
 |---|---|---|
-| `users` | id, username UK, password_hash, department_id FK, role_id FK, display_name | 用户 |
-| `departments` | id, name UK, owner_id FK（负责人） | 部门 |
-| `roles` | id, code UK（dept_owner/admin/member） | 角色 |
+| `users` | id UUID, username UK, password_hash, department_id FK, role_id FK, display_name | 用户 |
+| `departments` | id UUID, name UK, owner_id FK（负责人） | 部门 |
+| `roles` | id UUID, code UK（dept_owner/admin/member） | 角色 |
 | `conversations` | id UUID, user_id FK, title, summary（滚动摘要）, current_trace_id, created_at | 会话 |
 | `messages` | id, conversation_id FK, role, content, metadata JSONB, created_at | 消息 |
 | `preferences` | id, user_id FK, category, content, confidence, source, created_at | 偏好 |
@@ -217,7 +217,7 @@ erDiagram
 | `documents` | id UUID, title, file_path, status, uploader_id FK, department_id FK, created_at | 知识文档 |
 | `chunks` | id UUID, document_id FK, seq, content, meta JSONB, embedding | 知识切块（向量） |
 | `execution_traces` | id UUID, user_id FK, conversation_id FK, status, supervisor_routes, started_at | 执行轨迹汇总 |
-| `trace_events` | id, trace_id FK, type（route/llm/tool/memory/hitl）, payload JSONB, created_at | 留痕事件明细（只追加） |
+| `trace_events` | id 自增（高频写特例）, trace_id FK, type（route/llm/tool/memory/hitl）, payload JSONB, created_at | 留痕事件明细（只追加） |
 | `hitl_tasks` | id UUID, trace_id FK, node_id, reason, context JSONB, status, approver_id FK, decided_at | 人工确认任务 |
 | `agents` | code PK, name, description, model_key, config JSONB（提示词/工具白名单）, enabled | Agent 注册表 |
 | `mcp_servers` | name PK, url, auth_type, config JSONB, enabled | 外部 MCP 配置表 |
@@ -229,6 +229,7 @@ erDiagram
 3. **HITL 与 trace 关联**：`interrupt()` 时写入待确认任务，确认后 resume
 4. **agents + mcp_servers 均为配置表**：新 agent / 新 MCP 接入 = 插入记录，不改代码
 5. **不使用物理外键**：数据库层不建 FOREIGN KEY 约束（避免锁竞争、迁移灵活、允许临时不一致）；关联列用普通列 + `relationship(foreign_keys=...)` 保持 ORM 关联能力（join / selectinload 预加载照常可用），级联删除由 ORM `cascade` 保证。§4.2 表中"FK"字样均指逻辑外键。
+6. **主键统一 UUID 字符串**：全库主键由应用层 `uuid4()` 生成（`UUID(as_uuid=False)` 列），客户端/异步链路无需等 DB 分配即可拿到 id（trace、会话创建即用）；不可枚举、分布式不冲突；所有逻辑外键统一 `String(36)`。**唯一特例**：`trace_events` 保留自增主键——留痕为高频批量写入，顺序自增比 UUID 更省索引与页分裂。
 
 ---
 
