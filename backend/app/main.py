@@ -2,10 +2,11 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
-from app.api import auth
+from app.api import auth, org
 
 
 app = FastAPI(title="云枢 Agent")
 app.add_middleware(CORSMiddleware, allow_origins=settings.FRONTEND_ORIGINS.split(","), allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 app.include_router(auth.router)
+app.include_router(org.router)
