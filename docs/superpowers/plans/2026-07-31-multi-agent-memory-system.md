@@ -38,13 +38,26 @@ backend/
 │   │   ├── knowledge.py        # Document / Chunk
 │   │   ├── trace.py            # ExecutionTrace / TraceEvent / HitlTask
 │   │   └── configs.py          # AgentConfig / McpServer
+│   ├── repositories/           # ★ 数据访问层：原子 CRUD（每实体一个 repo）
+│   │   ├── base.py             # BaseRepository（通用 get/add/update/delete/list）
+│   │   ├── user_repo.py / department_repo.py / role_repo.py
+│   │   ├── conversation_repo.py / message_repo.py
+│   │   ├── preference_repo.py / experience_repo.py / approval_repo.py
+│   │   ├── document_repo.py / chunk_repo.py
+│   │   ├── trace_repo.py / event_repo.py / hitl_repo.py
+│   │   └── config_repo.py
 │   ├── schemas/                # Pydantic 请求/响应模型
-│   ├── api/                    # auth/chat/conversations/hitl/documents/
-│   │                           #   experiences/approvals/org/traces/configs
-│   ├── services/
+│   ├── api/                    # ★ 接口层：薄路由，只做参数校验+调 service
+│   ├── services/               # ★ 业务层：组合 repository 与业务规则
+│   │   ├── auth_service.py     # 注册/登录/JWT
+│   │   ├── chat_service.py     # 会话+消息+记忆装配+图执行
+│   │   ├── knowledge_service.py# 文档上传解析/RAG
+│   │   ├── experience_service.py  # 经验提炼/审批/晋升
+│   │   ├── approval_service.py    # 审批流
+│   │   ├── hitl_service.py        # HITL 任务
+│   │   ├── trace_service.py       # 留痕查询
 │   │   ├── document_parser.py  # PDF/Word/Markdown 解析+切分
 │   │   ├── embedding.py        # embedding 客户端封装
-│   │   ├── experience_svc.py   # 经验提炼/审批/晋升
 │   │   ├── preference_svc.py   # 偏好提取/合并去重
 │   │   ├── summary.py          # 对话滚动摘要
 │   │   └── seed.py             # 种子数据
@@ -955,14 +968,189 @@ git commit -m "feat: JWT 认证与注册登录"
 
 ---
 
-### 任务 8：组织架构 API
+### 任务 7.5：三层架构范式（BaseRepository + 认证域改造）
+
+> **全项目架构约定**：`router（薄，只校验参数）→ service（组合业务）→ repository（原子 CRUD）`。本任务建立范式：BaseRepository + UserRepository + AuthService，并替换任务 7 的直接查库路由。**后续所有 API 任务一律遵循此三层**。
 
 **文件：**
-- 创建：`backend/app/api/org.py`、`backend/app/schemas/org.py`
-- 创建：`backend/tests/test_org_api.py`
+- 创建：`backend/app/repositories/base.py`、`backend/app/repositories/user_repo.py`
+- 创建：`backend/app/services/auth_service.py`
+- 修改：`backend/app/api/auth.py`（改为薄层）
+- 创建：`backend/tests/test_auth_service.py`
+
+- [ ] **步骤 1：编写失败的测试（repository + service 单测）**
+
+```python
+# backend/tests/test_auth_service.py
+import pytest
+from fastapi import HTTPException
+from app.services.auth_service import AuthService
+
+@pytest.mark.asyncio
+async def test_register_and_login_service(db_session):
+    svc = AuthService(db_session)
+    user = await svc.register("alice", "pass123", "Alice")
+    assert user.username == "alice"
+    token = await svc.login("alice", "pass123")
+    assert token
+
+@pytest.mark.asyncio
+async def test_login_wrong_password(db_session):
+    svc = AuthService(db_session)
+    await svc.register("bob", "pass123", "Bob")
+    with pytest.raises(HTTPException) as e:
+        await svc.login("bob", "wrong")
+    assert e.value.status_code == 401
+```
+
+- [ ] **步骤 2：运行测试确认失败**
+
+运行：`cd backend && pytest tests/test_auth_service.py -v`
+预期：FAIL，ModuleNotFoundError
+
+- [ ] **步骤 3：实现 Repository 层（BaseRepository + UserRepository）**
+
+```python
+# backend/app/repositories/base.py
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+class BaseRepository:
+    """通用原子 CRUD：一个方法一个数据库操作，业务组合放 service 层。"""
+    model = None  # 子类指定
+
+    def __init__(self, db: AsyncSession):
+        self.db = db
+
+    async def get(self, pk):
+        return await self.db.get(self.model, pk)
+
+    async def get_by(self, **filters):
+        return (await self.db.scalars(select(self.model).filter_by(**filters))).first()
+
+    async def list(self, **filters):
+        return (await self.db.scalars(select(self.model).filter_by(**filters))).all()
+
+    async def add(self, obj) -> None:
+        self.db.add(obj)
+        await self.db.commit()
+        await self.db.refresh(obj)
+
+    async def add_all(self, objs) -> None:
+        self.db.add_all(objs)
+        await self.db.commit()
+
+    async def delete(self, obj) -> None:
+        await self.db.delete(obj)
+        await self.db.commit()
+```
+
+```python
+# backend/app/repositories/user_repo.py
+from app.models.org import User
+from app.repositories.base import BaseRepository
+
+class UserRepository(BaseRepository):
+    model = User
+
+    async def get_by_username(self, username: str) -> User | None:
+        return await self.get_by(username=username)
+```
+
+- [ ] **步骤 4：实现 Service 层（AuthService）**
+
+```python
+# backend/app/services/auth_service.py
+from fastapi import HTTPException
+from app.models.org import User
+from app.repositories.user_repo import UserRepository
+from app.core.security import hash_password, verify_password, create_access_token
+
+class AuthService:
+    """业务组合：注册去重 + 密码校验 + 签发 token，数据库操作委托 repository。"""
+    def __init__(self, db):
+        self.users = UserRepository(db)
+
+    async def register(self, username: str, password: str, display_name: str) -> User:
+        if await self.users.get_by_username(username):
+            raise HTTPException(400, "用户名已存在")
+        user = User(username=username, password_hash=hash_password(password), display_name=display_name)
+        await self.users.add(user)
+        return user
+
+    async def login(self, username: str, password: str) -> str:
+        user = await self.users.get_by_username(username)
+        if not user or not verify_password(password, user.password_hash):
+            raise HTTPException(401, "用户名或密码错误")
+        return create_access_token(user.id, user.username)
+```
+
+- [ ] **步骤 5：改造 auth 路由为薄层（替换任务 7 的实现）**
+
+```python
+# backend/app/api/auth.py —— 薄路由：只校验参数、调 service
+from fastapi import APIRouter, Depends
+from sqlalchemy.ext.asyncio import AsyncSession
+from app.core.deps import get_db, get_current_user
+from app.models.org import User
+from app.schemas.auth import RegisterRequest, LoginRequest, TokenResponse, UserOut
+from app.services.auth_service import AuthService
+
+router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+def get_auth_service(db: AsyncSession = Depends(get_db)) -> AuthService:
+    return AuthService(db)
+
+@router.post("/register", response_model=UserOut)
+async def register(body: RegisterRequest, svc: AuthService = Depends(get_auth_service)):
+    return await svc.register(body.username, body.password, body.display_name)
+
+@router.post("/login", response_model=TokenResponse)
+async def login(body: LoginRequest, svc: AuthService = Depends(get_auth_service)):
+    return TokenResponse(access_token=await svc.login(body.username, body.password))
+
+@router.get("/me", response_model=UserOut)
+async def me(user: User = Depends(get_current_user)):
+    return user
+```
+
+- [ ] **步骤 6：运行全部认证测试验证通过**
+
+运行：`cd backend && pytest tests/test_auth.py tests/test_auth_service.py -v`
+预期：全部 PASS（API 行为不变，内部已三层化）
+
+- [ ] **步骤 7：Commit**
+
+```bash
+git add backend/app backend/tests
+git commit -m "feat: 三层架构范式(Repository/Service/Router)与认证域改造"
+```
+
+---
+
+### 任务 8：组织架构 API（三层）
+
+**文件：**
+- 创建：`backend/app/repositories/department_repo.py`、`backend/app/services/org_service.py`
+- 创建：`backend/app/api/org.py`（薄层）、`backend/app/schemas/org.py`
+- 创建：`backend/tests/test_org_api.py`、`backend/tests/test_org_service.py`
 - 修改：`backend/app/main.py`
 
-- [ ] **步骤 1：编写失败的测试**
+- [ ] **步骤 1：编写失败的测试（service 单测 + API 测试）**
+
+```python
+# backend/tests/test_org_service.py
+import pytest
+from app.services.org_service import OrgService
+
+@pytest.mark.asyncio
+async def test_create_and_list_department(db_session):
+    svc = OrgService(db_session)
+    dept = await svc.create_department("市场部")
+    assert dept.name == "市场部"
+    depts = await svc.list_departments()
+    assert any(d.id == dept.id for d in depts)
+```
 
 ```python
 # backend/tests/test_org_api.py
@@ -986,10 +1174,46 @@ async def test_department_crud():
 
 - [ ] **步骤 2：运行测试确认失败**
 
-运行：`cd backend && pytest tests/test_org_api.py -v`
-预期：FAIL，404
+运行：`cd backend && pytest tests/test_org_service.py -v`
+预期：FAIL，ModuleNotFoundError
 
-- [ ] **步骤 3：实现路由并在 main.py 注册**
+- [ ] **步骤 3：实现 Repository 层（DepartmentRepository）**
+
+```python
+# backend/app/repositories/department_repo.py
+from app.models.org import Department
+from app.repositories.base import BaseRepository
+
+class DepartmentRepository(BaseRepository):
+    model = Department
+```
+
+- [ ] **步骤 4：实现 Service 层（OrgService）**
+
+```python
+# backend/app/services/org_service.py
+from app.models.org import Department, User
+from app.repositories.department_repo import DepartmentRepository
+from app.repositories.user_repo import UserRepository
+
+class OrgService:
+    def __init__(self, db):
+        self.departments = DepartmentRepository(db)
+        self.users = UserRepository(db)
+
+    async def create_department(self, name: str) -> Department:
+        dept = Department(name=name)
+        await self.departments.add(dept)
+        return dept
+
+    async def list_departments(self) -> list[Department]:
+        return await self.departments.list()
+
+    async def list_users(self) -> list[User]:
+        return await self.users.list()
+```
+
+- [ ] **步骤 5：实现薄路由并在 main.py 注册**
 
 ```python
 # backend/app/schemas/org.py
@@ -1006,32 +1230,31 @@ class DepartmentOut(BaseModel):
 ```
 
 ```python
-# backend/app/api/org.py
+# backend/app/api/org.py —— 薄路由
 from fastapi import APIRouter, Depends
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.deps import get_db, get_current_user
-from app.models.org import Department, User
+from app.models.org import User
 from app.schemas.auth import UserOut
 from app.schemas.org import DepartmentCreate, DepartmentOut
+from app.services.org_service import OrgService
 
 router = APIRouter(tags=["org"])
 
+def get_org_service(db: AsyncSession = Depends(get_db)) -> OrgService:
+    return OrgService(db)
+
 @router.post("/api/departments", response_model=DepartmentOut)
-async def create_department(body: DepartmentCreate, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
-    dept = Department(name=body.name)
-    db.add(dept)
-    await db.commit()
-    await db.refresh(dept)
-    return dept
+async def create_department(body: DepartmentCreate, svc: OrgService = Depends(get_org_service), _: User = Depends(get_current_user)):
+    return await svc.create_department(body.name)
 
 @router.get("/api/departments", response_model=list[DepartmentOut])
-async def list_departments(db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
-    return (await db.scalars(select(Department))).all()
+async def list_departments(svc: OrgService = Depends(get_org_service), _: User = Depends(get_current_user)):
+    return await svc.list_departments()
 
 @router.get("/api/users", response_model=list[UserOut])
-async def list_users(db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
-    return (await db.scalars(select(User))).all()
+async def list_users(svc: OrgService = Depends(get_org_service), _: User = Depends(get_current_user)):
+    return await svc.list_users()
 ```
 
 ```python
@@ -1042,8 +1265,8 @@ app.include_router(org.router)
 
 - [ ] **步骤 4：运行测试验证通过**
 
-运行：`cd backend && pytest tests/test_org_api.py -v`
-预期：PASS
+运行：`cd backend && pytest tests/test_org_api.py tests/test_org_service.py -v`
+预期：全部 PASS
 
 - [ ] **步骤 5：Commit**
 
@@ -1148,10 +1371,12 @@ git commit -m "feat: 种子数据（角色与默认 agent 配置）"
 
 ## 里程碑 M2：聊天核心链路（短期记忆）
 
-### 任务 10：会话与消息 API
+### 任务 10：会话与消息 API（三层）
 
 **文件：**
-- 创建：`backend/app/api/conversations.py`、`backend/app/schemas/chat.py`
+- 创建：`backend/app/repositories/conversation_repo.py`
+- 创建：`backend/app/services/conversation_service.py`
+- 创建：`backend/app/api/conversations.py`（薄层）、`backend/app/schemas/chat.py`
 - 创建：`backend/tests/test_conversations_api.py`
 - 修改：`backend/app/main.py`
 
@@ -1208,37 +1433,78 @@ class MessageOut(BaseModel):
 ```
 
 ```python
-# backend/app/api/conversations.py
-from fastapi import APIRouter, Depends, HTTPException
+# backend/app/repositories/conversation_repo.py
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+from app.models.chat import Conversation, Message
+from app.repositories.base import BaseRepository
+
+class ConversationRepository(BaseRepository):
+    model = Conversation
+
+    async def list_by_user(self, user_id: int) -> list[Conversation]:
+        return (await self.db.scalars(
+            select(Conversation).where(Conversation.user_id == user_id).order_by(Conversation.created_at.desc())
+        )).all()
+
+    async def get_with_messages(self, conv_id: str) -> Conversation | None:
+        # 异步下访问 messages 必须 selectinload 预加载，否则抛 MissingGreenlet
+        return await self.db.get(Conversation, conv_id, options=[selectinload(Conversation.messages)])
+
+class MessageRepository(BaseRepository):
+    model = Message
+```
+
+```python
+# backend/app/services/conversation_service.py
+from fastapi import HTTPException
+from app.models.chat import Conversation
+from app.repositories.conversation_repo import ConversationRepository
+
+class ConversationService:
+    def __init__(self, db):
+        self.conversations = ConversationRepository(db)
+
+    async def create(self, user_id: int, title: str) -> Conversation:
+        conv = Conversation(user_id=user_id, title=title)
+        await self.conversations.add(conv)
+        return conv
+
+    async def list_by_user(self, user_id: int) -> list[Conversation]:
+        return await self.conversations.list_by_user(user_id)
+
+    async def list_messages(self, user_id: int, conv_id: str):
+        conv = await self.conversations.get_with_messages(conv_id)
+        if not conv or conv.user_id != user_id:
+            raise HTTPException(404, "会话不存在")
+        return conv.messages
+```
+
+```python
+# backend/app/api/conversations.py —— 薄路由
+from fastapi import APIRouter, Depends
+from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.deps import get_db, get_current_user
 from app.models.org import User
-from app.models.chat import Conversation, Message
 from app.schemas.chat import ConversationCreate, ConversationOut, MessageOut
+from app.services.conversation_service import ConversationService
 
 router = APIRouter(prefix="/api/conversations", tags=["conversations"])
 
+def get_conv_service(db: AsyncSession = Depends(get_db)) -> ConversationService:
+    return ConversationService(db)
+
 @router.post("", response_model=ConversationOut)
-async def create_conversation(body: ConversationCreate, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
-    conv = Conversation(user_id=user.id, title=body.title)
-    db.add(conv)
-    await db.commit()
-    await db.refresh(conv)
-    return conv
+async def create_conversation(body: ConversationCreate, svc: ConversationService = Depends(get_conv_service), user: User = Depends(get_current_user)):
+    return await svc.create(user.id, body.title)
 
 @router.get("", response_model=list[ConversationOut])
-async def list_conversations(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
-    return (await db.scalars(select(Conversation).where(Conversation.user_id == user.id).order_by(Conversation.created_at.desc()))).all()
+async def list_conversations(svc: ConversationService = Depends(get_conv_service), user: User = Depends(get_current_user)):
+    return await svc.list_by_user(user.id)
 
 @router.get("/{conv_id}/messages", response_model=list[MessageOut])
-async def list_messages(conv_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
-    # 异步下访问 conv.messages 必须 selectinload 预加载，否则抛 MissingGreenlet
-    conv = await db.get(Conversation, conv_id, options=[selectinload(Conversation.messages)])
-    if not conv or conv.user_id != user.id:
-        raise HTTPException(404, "会话不存在")
-    return conv.messages
+async def list_messages(conv_id: str, svc: ConversationService = Depends(get_conv_service), user: User = Depends(get_current_user)):
+    return await svc.list_messages(user.id, conv_id)
 ```
 
 - [ ] **步骤 4：main.py 注册并运行测试**
@@ -1551,10 +1817,45 @@ def build_graph():
 graph = build_graph()
 ```
 
-- [ ] **步骤 4：实现 SSE 聊天路由（EventSourceResponse）**
+- [ ] **步骤 4：实现 ChatService（业务层）与薄路由**
 
 ```python
-# backend/app/api/chat.py
+# backend/app/services/chat_service.py
+import json
+from fastapi import HTTPException
+from app.models.chat import Conversation, Message
+from app.repositories.conversation_repo import ConversationRepository, MessageRepository
+from app.agents.graph import graph
+
+class ChatService:
+    """聊天业务：校验归属 + 持久化消息 + 执行图 + 产出 SSE 事件（后续任务 15/30/35 在此扩展）。"""
+    def __init__(self, db):
+        self.conversations = ConversationRepository(db)
+        self.messages = MessageRepository(db)
+
+    async def _ensure_owned(self, user_id: int, conv_id: str) -> Conversation:
+        conv = await self.conversations.get(conv_id)
+        if not conv or conv.user_id != user_id:
+            raise HTTPException(404, "会话不存在")
+        return conv
+
+    async def stream_chat(self, user_id: int, conv_id: str, message: str):
+        """SSE 事件异步生成器：start → token → done。"""
+        await self._ensure_owned(user_id, conv_id)
+        await self.messages.add(Message(conversation_id=conv_id, role="user", content=message))
+        yield json.dumps({"event": "start"}, ensure_ascii=False)
+        result = await graph.ainvoke({
+            "conversation_id": conv_id, "user_id": user_id,
+            "user_message": message, "messages": [],
+        })
+        text = result.get("agent_response", "")
+        await self.messages.add(Message(conversation_id=conv_id, role="assistant", content=text))
+        yield json.dumps({"event": "token", "content": text}, ensure_ascii=False)
+        yield json.dumps({"event": "done"}, ensure_ascii=False)
+```
+
+```python
+# backend/app/api/chat.py —— 薄路由：只包装 SSE 流式响应
 import json
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
@@ -1562,8 +1863,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
 from app.core.deps import get_db, get_current_user
 from app.models.org import User
-from app.models.chat import Conversation, Message
-from app.agents.graph import graph
+from app.services.chat_service import ChatService
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
@@ -1571,17 +1871,17 @@ class ChatRequest(BaseModel):
     conversation_id: str
     message: str
 
-@router.post("/completions")
-async def chat_completions(body: ChatRequest, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
-    conv = await db.get(Conversation, body.conversation_id)
-    if not conv or conv.user_id != user.id:
-        return StreamingResponse(iter([f"data: {json.dumps({'error': '会话不存在'}, ensure_ascii=False)}\n\n"]), media_type="text/event-stream")
+def get_chat_service(db: AsyncSession = Depends(get_db)) -> ChatService:
+    return ChatService(db)
 
+@router.post("/completions")
+async def chat_completions(body: ChatRequest, svc: ChatService = Depends(get_chat_service), user: User = Depends(get_current_user)):
     async def event_stream():
-        yield f"data: {json.dumps({'event': 'start'}, ensure_ascii=False)}\n\n"
-        result = await graph.ainvoke({"conversation_id": conv.id, "user_id": user.id, "user_message": body.message})
-        text = result.get("agent_response", "")
-        yield f"data: {json.dumps({'event': 'token', 'content': text}, ensure_ascii=False)}\n\n"
+        try:
+            async for evt in svc.stream_chat(user.id, body.conversation_id, body.message):
+                yield f"data: {evt}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'event': 'error', 'content': str(e)}, ensure_ascii=False)}\n\n"
         yield f"data: {json.dumps({'event': 'done'}, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
@@ -1636,44 +1936,33 @@ async def test_messages_persisted_after_chat(db_session):
 运行：`cd backend && pytest tests/test_chat_persist.py -v`
 预期：FAIL，`len(msgs) == 0`
 
-- [ ] **步骤 3：改造 chat.py：写入消息 + 装配短期记忆**
+- [ ] **步骤 3：改造 ChatService：短期记忆装配 + 滚动摘要（router 保持薄层）**
 
 ```python
-# backend/app/api/chat.py 关键改造：写入消息 + 短期记忆装配 + 摘要
+# backend/app/services/chat_service.py 关键改造
+from app.memory.short_term import build_context
+from app.services.summary import maybe_roll_summary
 
-async def chat_completions(body: ChatRequest, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
-    conv = await db.get(Conversation, body.conversation_id)
-    if not conv or conv.user_id != user.id:
-        return StreamingResponse(iter([f"data: {json.dumps({'error': '会话不存在'}, ensure_ascii=False)}\n\n"]), media_type="text/event-stream")
+class ChatService:
+    def __init__(self, db):
+        self.db = db
+        self.conversations = ConversationRepository(db)
+        self.messages = MessageRepository(db)
 
-    # 先持久化用户消息
-    db.add(Message(conversation_id=conv.id, role="user", content=body.message))
-    await db.commit()
-
-    async def event_stream():
-        from app.memory.short_term import build_context
-        yield f"data: {json.dumps({'event': 'start'}, ensure_ascii=False)}\n\n"
-        history = await build_context(db, conv.id, recent_rounds=10)
+    async def stream_chat(self, user_id: int, conv_id: str, message: str):
+        await self._ensure_owned(user_id, conv_id)
+        await self.messages.add(Message(conversation_id=conv_id, role="user", content=message))
+        yield json.dumps({"event": "start"}, ensure_ascii=False)
+        history = await build_context(self.db, conv_id, recent_rounds=10)  # 短期记忆装配
         result = await graph.ainvoke({
-            "conversation_id": conv.id, "user_id": user.id,
-            "user_message": body.message, "history": history,
+            "conversation_id": conv_id, "user_id": user_id,
+            "user_message": message, "history": history, "messages": [],
         })
         text = result.get("agent_response", "")
-        db.add(Message(conversation_id=conv.id, role="assistant", content=text))
-        await db.commit()
-        # 消息超过阈值触发滚动摘要
-        from app.services.summary import maybe_roll_summary
-        await maybe_roll_summary(db, conv.id)
-        yield f"data: {json.dumps({'event': 'token', 'content': text}, ensure_ascii=False)}\n\n"
-        yield f"data: {json.dumps({'event': 'done'}, ensure_ascii=False)}\n\n"
-
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
-```
-
-```python
-# backend/app/agents/graph.py 关键改造：echo 节点带上 history
-async def echo_node(state: AgentState) -> dict:
-    return {"agent_response": f"收到：{state.get('user_message', '')}\n\n[上下文]\n{state.get('history', '')[:200]}"}
+        await self.messages.add(Message(conversation_id=conv_id, role="assistant", content=text))
+        await maybe_roll_summary(self.db, conv_id)  # 消息超阈值滚动摘要
+        yield json.dumps({"event": "token", "content": text}, ensure_ascii=False)
+        yield json.dumps({"event": "done"}, ensure_ascii=False)
 ```
 
 - [ ] **步骤 4：运行测试验证通过**
@@ -1842,10 +2131,12 @@ git commit -m "feat: 文档解析与切分"
 
 ---
 
-### 任务 18：文档上传 API + 向量入库
+### 任务 18：文档上传 API + 向量入库（三层）
 
 **文件：**
-- 创建：`backend/app/api/documents.py`
+- 创建：`backend/app/repositories/document_repo.py`
+- 创建：`backend/app/services/knowledge_service.py`
+- 创建：`backend/app/api/documents.py`（薄层）
 - 创建：`backend/tests/test_documents_api.py`
 - 修改：`backend/app/main.py`
 
@@ -1861,8 +2152,8 @@ from app.main import app
 async def test_upload_and_search(monkeypatch):
     async def fake_embed(texts):
         return [[0.1, 0.2, 0.3]] * len(texts)
-    monkeypatch.setattr("app.api.documents.embed_texts", fake_embed)
-    monkeypatch.setattr("app.api.documents.embed_query", lambda t: [0.1, 0.2, 0.3])
+    monkeypatch.setattr("app.services.knowledge_service.embed_texts", fake_embed)
+    monkeypatch.setattr("app.services.knowledge_service.embed_query", lambda t: [0.1, 0.2, 0.3])
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
@@ -1884,71 +2175,107 @@ async def test_upload_and_search(monkeypatch):
 运行：`cd backend && pytest tests/test_documents_api.py -v`
 预期：FAIL，404
 
-- [ ] **步骤 3：实现上传与检索路由**
+- [ ] **步骤 3：实现 Repository / Service / 薄路由三层**
 
 ```python
-# backend/app/api/documents.py
+# backend/app/repositories/document_repo.py
+from app.models.knowledge import Document, Chunk
+from app.repositories.base import BaseRepository
+
+class DocumentRepository(BaseRepository):
+    model = Document
+
+class ChunkRepository(BaseRepository):
+    model = Chunk
+
+    async def add_chunks(self, chunks: list[Chunk]) -> None:
+        self.db.add_all(chunks)
+        await self.db.commit()
+```
+
+```python
+# backend/app/services/knowledge_service.py
 import os
 from uuid import uuid4
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
-from fastapi.responses import FileResponse
-from sqlalchemy import select
+from fastapi import HTTPException
+from sqlalchemy.sql import text as sqltext
+from app.models.knowledge import Document, Chunk
+from app.repositories.document_repo import DocumentRepository, ChunkRepository
+from app.services.document_parser import parse_text, split_chunks
+from app.services.embedding import embed_texts, embed_query
+
+UPLOAD_DIR = "storage/documents"
+
+class KnowledgeService:
+    """知识库业务：上传→解析→切分→embedding→入库；语义检索。"""
+    def __init__(self, db):
+        self.documents = DocumentRepository(db)
+        self.chunks = ChunkRepository(db)
+        self.db = db
+
+    async def upload(self, uploader_id: int, filename: str, content: bytes) -> Document:
+        ext = filename.rsplit(".", 1)[-1]
+        doc_id = str(uuid4())
+        path = os.path.join(UPLOAD_DIR, f"{doc_id}.{ext}")
+        os.makedirs(UPLOAD_DIR, exist_ok=True)
+        with open(path, "wb") as f:
+            f.write(content)
+        doc = Document(id=doc_id, title=filename, file_path=path, status="parsing", uploader_id=uploader_id)
+        await self.documents.add(doc)
+        try:
+            text = parse_text(content, ext)
+            chunks = split_chunks(text, ext=ext)
+            vecs = await embed_texts(chunks)
+            await self.chunks.add_chunks([
+                Chunk(document_id=doc_id, seq=i, content=t, embedding=v)
+                for i, (t, v) in enumerate(zip(chunks, vecs))
+            ])
+            doc.status = "ready"
+            await self.db.commit()
+        except Exception as e:
+            doc.status = "failed"
+            await self.db.commit()
+            raise HTTPException(500, f"解析失败: {e}")
+        return doc
+
+    async def search(self, query: str, top_k: int = 5) -> dict:
+        query_vec = await embed_query(query)
+        rows = (await self.db.execute(
+            sqltext(
+                "SELECT id, content, document_id, 1 - (embedding <=> :q) AS score "
+                "FROM chunks WHERE embedding IS NOT NULL ORDER BY embedding <=> :q LIMIT :k"
+            ),
+            {"q": query_vec, "k": top_k},
+        )).all()
+        return {"results": [{"id": r.id, "content": r.content, "document_id": r.document_id, "score": round(r.score, 4)} for r in rows]}
+```
+
+```python
+# backend/app/api/documents.py —— 薄路由
+from fastapi import APIRouter, Depends, File, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
 from app.core.deps import get_db, get_current_user
 from app.models.org import User
-from app.models.knowledge import Document, Chunk
-from app.services.document_parser import parse_text, split_chunks
-from app.services.embedding import embed_texts, embed_query
-from pgvector.sqlalchemy import Vector
-from sqlalchemy.sql import text as sqltext
+from app.services.knowledge_service import KnowledgeService
 
 router = APIRouter(tags=["knowledge"])
-UPLOAD_DIR = "storage/documents"
-
-@router.post("/api/documents")
-async def upload_document(
-    file: UploadFile = File(...), db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user),
-):
-    content = await file.read()
-    ext = file.filename.rsplit(".", 1)[-1]
-    doc_id = str(uuid4())
-    path = os.path.join(UPLOAD_DIR, f"{doc_id}.{ext}")
-    os.makedirs(UPLOAD_DIR, exist_ok=True)
-    with open(path, "wb") as f:
-        f.write(content)
-    doc = Document(id=doc_id, title=file.filename, file_path=path, status="parsing", uploader_id=user.id)
-    db.add(doc)
-    await db.commit()
-    try:
-        text = parse_text(content, ext)
-        chunks = split_chunks(text, ext=ext)
-        vecs = await embed_texts(chunks)
-        for i, (chunk_text, vec) in enumerate(zip(chunks, vecs)):
-            db.add(Chunk(document_id=doc_id, seq=i, content=chunk_text, embedding=vec))
-        doc.status = "ready"
-        await db.commit()
-    except Exception as e:
-        doc.status = "failed"
-        await db.commit()
-        raise HTTPException(500, f"解析失败: {e}")
-    return doc
 
 class SearchRequest(BaseModel):
     query: str
     top_k: int = 5
 
+def get_knowledge_service(db: AsyncSession = Depends(get_db)) -> KnowledgeService:
+    return KnowledgeService(db)
+
+@router.post("/api/documents")
+async def upload_document(file: UploadFile = File(...), svc: KnowledgeService = Depends(get_knowledge_service), user: User = Depends(get_current_user)):
+    content = await file.read()
+    return await svc.upload(user.id, file.filename, content)
+
 @router.post("/api/kb/search")
-async def search_kb(body: SearchRequest, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
-    query_vec = await embed_query(body.query)
-    rows = (await db.execute(
-        sqltext(
-            "SELECT id, content, document_id, 1 - (embedding <=> :q) AS score "
-            "FROM chunks WHERE embedding IS NOT NULL ORDER BY embedding <=> :q LIMIT :k"
-        ),
-        {"q": query_vec, "k": body.top_k},
-    )).all()
-    return {"results": [{"id": r.id, "content": r.content, "document_id": r.document_id, "score": round(r.score, 4)} for r in rows]}
+async def search_kb(body: SearchRequest, svc: KnowledgeService = Depends(get_knowledge_service), _: User = Depends(get_current_user)):
+    return await svc.search(body.query, body.top_k)
 ```
 
 - [ ] **步骤 4：main.py 注册并运行测试**
@@ -3109,32 +3436,34 @@ class FakeLLM:
 运行：`cd backend && pytest tests/test_assembly_in_graph.py -v`
 预期：FAIL（图尚无记忆装配，营销节点未调用）
 
-- [ ] **步骤 3：改造 chat.py：图执行前装配记忆**
+- [ ] **步骤 3：改造 ChatService：记忆装配 + 偏好/经验沉淀（router 保持薄层）**
 
 ```python
-# backend/app/api/chat.py 关键改造：装配记忆后执行图
+# backend/app/services/chat_service.py 关键改造
 from app.memory.assembly import assemble_memory
 from app.services.experience_svc import distill_experience, save_personal_experience
 from app.services.preference_svc import extract_and_save
 
-async def event_stream():
-    yield f"data: {json.dumps({'event': 'start'}, ensure_ascii=False)}\n\n"
-    mem = await assemble_memory(db, user.id, conv.id, user.department_id, body.message)
-    result = await graph.ainvoke({
-        "conversation_id": conv.id, "user_id": user.id,
-        "user_message": body.message, "memory_context": mem, "messages": [],
-    })
-    text = result.get("agent_response", "")
-    db.add(Message(conversation_id=conv.id, role="assistant", content=text))
-    await db.commit()
-    # 对话结束：偏好提取 + 经验提炼（异步 fire-and-forget）
-    dialog = f"用户：{body.message}\n助手：{text}"
-    await extract_and_save(db, user.id, dialog)
-    exp = await distill_experience(dialog, user.id, result.get("trace_id", ""))
-    if exp:
-        await save_personal_experience(db, exp)
-    yield f"data: {json.dumps({'event': 'token', 'content': text}, ensure_ascii=False)}\n\n"
-    yield f"data: {json.dumps({'event': 'done'}, ensure_ascii=False)}\n\n"
+    async def stream_chat(self, user_id: int, conv_id: str, message: str):
+        await self._ensure_owned(user_id, conv_id)
+        await self.messages.add(Message(conversation_id=conv_id, role="user", content=message))
+        yield json.dumps({"event": "start"}, ensure_ascii=False)
+        user = await self.conversations.get(conv_id)
+        mem = await assemble_memory(self.db, user_id, conv_id, user.department_id, message)  # 四层记忆装配
+        result = await graph.ainvoke({
+            "conversation_id": conv_id, "user_id": user_id,
+            "user_message": message, "memory_context": mem, "messages": [],
+        })
+        text = result.get("agent_response", "")
+        await self.messages.add(Message(conversation_id=conv_id, role="assistant", content=text))
+        # 对话结束：偏好提取 + 经验提炼（fire-and-forget）
+        dialog = f"用户：{message}\n助手：{text}"
+        await extract_and_save(self.db, user_id, dialog)
+        exp = await distill_experience(dialog, user_id, result.get("trace_id", ""))
+        if exp:
+            await save_personal_experience(self.db, exp)
+        yield json.dumps({"event": "token", "content": text}, ensure_ascii=False)
+        yield json.dumps({"event": "done"}, ensure_ascii=False)
 ```
 
 - [ ] **步骤 4：运行测试验证通过**
@@ -3753,54 +4082,102 @@ async def test_trace_created_per_chat(monkeypatch):
 运行：`cd backend && pytest tests/test_trace_integration.py -v`
 预期：FAIL，404（/api/traces 不存在）
 
-- [ ] **步骤 3：chat.py 创建 trace + graph 埋点 + traces 查询 API**
+- [ ] **步骤 3：改造 ChatService 创建 trace + 实现 trace_service 与监测路由**
 
 ```python
-# backend/app/api/chat.py 关键改造：创建 trace 并记录路由
-from uuid import uuid4
-from app.models.trace import ExecutionTrace
-from app.traces.collector import collector
+# backend/app/repositories/trace_repo.py
+from app.models.trace import ExecutionTrace, TraceEvent, HitlTask
+from app.repositories.base import BaseRepository
 
-async def event_stream():
-    trace = ExecutionTrace(id=str(uuid4()), user_id=user.id, conversation_id=conv.id, status="running", supervisor_routes=[])
-    db.add(trace)
-    await db.commit()
-    yield f"data: {json.dumps({'event': 'start', 'trace_id': trace.id}, ensure_ascii=False)}\n\n"
-    mem = await assemble_memory(db, user.id, conv.id, user.department_id, body.message)
-    result = await graph.ainvoke({
-        "conversation_id": conv.id, "user_id": user.id,
-        "user_message": body.message, "memory_context": mem, "trace_id": trace.id, "messages": [],
-    })
-    text = result.get("agent_response", "")
-    db.add(Message(conversation_id=conv.id, role="assistant", content=text))
-    trace.status = "completed"
-    trace.supervisor_routes = result.get("route_history", [])
-    conv.current_trace_id = trace.id
-    await db.commit()
-    collector.emit(trace.id, "route", {"routes": trace.supervisor_routes})
-    # ...（偏好提取/经验提炼同任务 30）
+class TraceRepository(BaseRepository):
+    model = ExecutionTrace
+
+class EventRepository(BaseRepository):
+    model = TraceEvent
+
+class HitlRepository(BaseRepository):
+    model = HitlTask
 ```
 
 ```python
-# backend/app/api/traces.py —— 监测查询 API
-from fastapi import APIRouter, Depends
+# backend/app/services/chat_service.py 关键改造：每次聊天创建 trace 并记录路由
+from uuid import uuid4
+from app.models.trace import ExecutionTrace
+from app.repositories.trace_repo import TraceRepository
+from app.traces.collector import collector
+
+    def __init__(self, db):
+        self.db = db
+        self.conversations = ConversationRepository(db)
+        self.messages = MessageRepository(db)
+        self.traces = TraceRepository(db)
+
+    async def stream_chat(self, user_id: int, conv_id: str, message: str):
+        await self._ensure_owned(user_id, conv_id)
+        conv = await self.conversations.get(conv_id)
+        trace = ExecutionTrace(id=str(uuid4()), user_id=user_id, conversation_id=conv_id, status="running", supervisor_routes=[])
+        await self.traces.add(trace)
+        yield json.dumps({"event": "start", "trace_id": trace.id}, ensure_ascii=False)
+        await self.messages.add(Message(conversation_id=conv_id, role="user", content=message))
+        mem = await assemble_memory(self.db, user_id, conv_id, conv.department_id, message)
+        result = await graph.ainvoke({
+            "conversation_id": conv_id, "user_id": user_id,
+            "user_message": message, "memory_context": mem, "trace_id": trace.id, "messages": [],
+        })
+        text = result.get("agent_response", "")
+        await self.messages.add(Message(conversation_id=conv_id, role="assistant", content=text))
+        trace.status = "completed"
+        trace.supervisor_routes = result.get("route_history", [])
+        conv.current_trace_id = trace.id
+        await self.db.commit()
+        collector.emit(trace.id, "route", {"routes": trace.supervisor_routes})
+        # 偏好提取 / 经验提炼同任务 30
+        yield json.dumps({"event": "token", "content": text}, ensure_ascii=False)
+        yield json.dumps({"event": "done"}, ensure_ascii=False)
+```
+
+```python
+# backend/app/services/trace_service.py —— 监测查询业务
 from sqlalchemy import select
+from app.models.trace import ExecutionTrace, TraceEvent
+
+class TraceService:
+    def __init__(self, db):
+        self.db = db
+
+    async def list_by_user(self, user_id: int, limit: int = 50):
+        return (await self.db.scalars(
+            select(ExecutionTrace).where(ExecutionTrace.user_id == user_id)
+            .order_by(ExecutionTrace.started_at.desc()).limit(limit)
+        )).all()
+
+    async def events(self, trace_id: str) -> list[TraceEvent]:
+        return (await self.db.scalars(
+            select(TraceEvent).where(TraceEvent.trace_id == trace_id).order_by(TraceEvent.id)
+        )).all()
+```
+
+```python
+# backend/app/api/traces.py —— 薄路由：监测查询 API
+from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.deps import get_db, get_current_user
 from app.models.org import User
-from app.models.trace import ExecutionTrace, TraceEvent
+from app.services.trace_service import TraceService
 
 router = APIRouter(prefix="/api/traces", tags=["traces"])
 
+def get_trace_service(db: AsyncSession = Depends(get_db)) -> TraceService:
+    return TraceService(db)
+
 @router.get("")
-async def list_traces(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
-    rows = (await db.scalars(select(ExecutionTrace).where(ExecutionTrace.user_id == user.id).order_by(ExecutionTrace.started_at.desc()).limit(50))).all()
+async def list_traces(svc: TraceService = Depends(get_trace_service), user: User = Depends(get_current_user)):
+    rows = await svc.list_by_user(user.id)
     return [{"id": t.id, "status": t.status, "conversation_id": t.conversation_id, "supervisor_routes": t.supervisor_routes} for t in rows]
 
 @router.get("/{trace_id}/events")
-async def trace_events(trace_id: str, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
-    rows = (await db.scalars(select(TraceEvent).where(TraceEvent.trace_id == trace_id).order_by(TraceEvent.id))).all()
-    return [{"type": e.type, "payload": e.payload, "created_at": e.created_at} for e in rows]
+async def trace_events(trace_id: str, svc: TraceService = Depends(get_trace_service), _: User = Depends(get_current_user)):
+    return [{"type": e.type, "payload": e.payload, "created_at": e.created_at} for e in await svc.events(trace_id)]
 ```
 
 - [ ] **步骤 4：main.py 注册 traces 路由并运行测试**
