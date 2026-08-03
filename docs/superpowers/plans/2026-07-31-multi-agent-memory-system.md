@@ -2657,10 +2657,12 @@ git commit -m "feat: 经验向量检索与加权"
 
 ---
 
-### 任务 23：经验中心 API（分层视图 + 提交审批）
+### 任务 23：经验中心 API（三层：分层视图 + 提交审批）
 
 **文件：**
-- 创建：`backend/app/api/experiences.py`
+- 创建：`backend/app/repositories/experience_repo.py`
+- 创建：`backend/app/services/experience_service.py`
+- 创建：`backend/app/api/experiences.py`（薄层）
 - 创建：`backend/tests/test_experiences_api.py`
 - 修改：`backend/app/main.py`
 
@@ -2699,15 +2701,75 @@ async def test_submit_experience_for_approval(monkeypatch):
 - [ ] **步骤 3：实现经验路由**
 
 ```python
-# backend/app/api/experiences.py
-from fastapi import APIRouter, Depends, HTTPException
+# backend/app/repositories/experience_repo.py
 from sqlalchemy import select
+from app.models.experience import Experience, ExperienceApproval
+from app.repositories.base import BaseRepository
+
+class ExperienceRepository(BaseRepository):
+    model = Experience
+
+    async def list_visible(self, user_id: int, department_id: int | None) -> list[Experience]:
+        """个人层本人 + 部门层同部门 + 公司层全员。"""
+        return (await self.db.scalars(
+            select(Experience).where(
+                (Experience.owner_id == user_id)
+                | (Experience.scope == "company")
+                | ((Experience.scope == "dept") & (Experience.department_id == department_id))
+            ).order_by(Experience.created_at.desc())
+        )).all()
+
+class ApprovalRepository(BaseRepository):
+    model = ExperienceApproval
+
+    async def list_pending(self) -> list[ExperienceApproval]:
+        return (await self.db.scalars(select(ExperienceApproval).where(ExperienceApproval.status == "pending"))).all()
+```
+
+```python
+# backend/app/services/experience_service.py
+from fastapi import HTTPException
+from app.models.experience import Experience, ExperienceApproval
+from app.repositories.experience_repo import ExperienceRepository, ApprovalRepository
+from app.services.embedding import embed_texts
+
+class ExperienceService:
+    def __init__(self, db):
+        self.experiences = ExperienceRepository(db)
+        self.approvals = ApprovalRepository(db)
+        self.db = db
+
+    async def create(self, user_id: int, department_id: int | None, data) -> Experience:
+        vec = (await embed_texts([f"{data.title} {data.summary}"]))[0]
+        exp = Experience(owner_id=user_id, scope="personal", status="draft", title=data.title,
+                         summary=data.summary, content=data.content, tags=data.tags,
+                         event_time=data.event_time, result_metrics=data.result_metrics,
+                         department_id=department_id, embedding=vec)
+        await self.experiences.add(exp)
+        return exp
+
+    async def submit(self, user_id: int, exp_id: str, to_scope: str) -> Experience:
+        exp = await self.experiences.get(exp_id)
+        if not exp or exp.owner_id != user_id or exp.scope != "personal":
+            raise HTTPException(404, "经验不存在或不可提交")
+        if to_scope not in ("dept", "company"):
+            raise HTTPException(400, "目标层级无效")
+        exp.status = "pending"
+        await self.approvals.add(ExperienceApproval(experience_id=exp.id, from_scope="personal", to_scope=to_scope, status="pending"))
+        return exp
+
+    async def list_visible(self, user_id: int, department_id: int | None) -> list[Experience]:
+        return await self.experiences.list_visible(user_id, department_id)
+```
+
+```python
+# backend/app/api/experiences.py —— 薄路由
+from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
 from app.core.deps import get_db, get_current_user
 from app.models.org import User
-from app.models.experience import Experience, ExperienceApproval
-from app.services.embedding import embed_texts
+from app.services.experience_service import ExperienceService
 
 router = APIRouter(prefix="/api/experiences", tags=["experiences"])
 
@@ -2722,38 +2784,20 @@ class ExperienceCreate(BaseModel):
 class SubmitRequest(BaseModel):
     to_scope: str  # dept/company
 
+def get_exp_service(db: AsyncSession = Depends(get_db)) -> ExperienceService:
+    return ExperienceService(db)
+
 @router.post("")
-async def create_experience(body: ExperienceCreate, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
-    vec = (await embed_texts([f"{body.title} {body.summary}"]))[0]
-    exp = Experience(owner_id=user.id, scope="personal", status="draft", title=body.title,
-                     summary=body.summary, content=body.content, tags=body.tags,
-                     event_time=body.event_time, result_metrics=body.result_metrics,
-                     department_id=user.department_id, embedding=vec)
-    db.add(exp)
-    await db.commit()
-    await db.refresh(exp)
-    return exp
+async def create_experience(body: ExperienceCreate, svc: ExperienceService = Depends(get_exp_service), user: User = Depends(get_current_user)):
+    return await svc.create(user.id, user.department_id, body)
 
 @router.post("/{exp_id}/submit")
-async def submit_experience(exp_id: str, body: SubmitRequest, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
-    exp = await db.get(Experience, exp_id)
-    if not exp or exp.owner_id != user.id or exp.scope != "personal":
-        raise HTTPException(404, "经验不存在或不可提交")
-    if body.to_scope not in ("dept", "company"):
-        raise HTTPException(400, "目标层级无效")
-    exp.status = "pending"
-    db.add(ExperienceApproval(experience_id=exp.id, from_scope="personal", to_scope=body.to_scope, status="pending"))
-    await db.commit()
-    await db.refresh(exp)
-    return exp
+async def submit_experience(exp_id: str, body: SubmitRequest, svc: ExperienceService = Depends(get_exp_service), user: User = Depends(get_current_user)):
+    return await svc.submit(user.id, exp_id, body.to_scope)
 
 @router.get("")
-async def list_experiences(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
-    rows = (await db.scalars(select(Experience).where(
-        (Experience.owner_id == user.id) | (Experience.scope == "company") | (
-            (Experience.scope == "dept") & (Experience.department_id == user.department_id)
-        )
-    ).order_by(Experience.created_at.desc()))).all()
+async def list_experiences(svc: ExperienceService = Depends(get_exp_service), user: User = Depends(get_current_user)):
+    rows = await svc.list_visible(user.id, user.department_id)
     return [{"id": e.id, "title": e.title, "scope": e.scope, "status": e.status, "summary": e.summary} for e in rows]
 ```
 
@@ -2771,10 +2815,11 @@ git commit -m "feat: 经验中心 API（分层视图+提交审批）"
 
 ---
 
-### 任务 24：审批 API（部门负责人/管理员审批晋升）
+### 任务 24：审批 API（三层：部门负责人/管理员审批晋升）
 
 **文件：**
-- 创建：`backend/app/api/approvals.py`
+- 创建：`backend/app/services/approval_service.py`
+- 创建：`backend/app/api/approvals.py`（薄层）
 - 创建：`backend/tests/test_approvals_api.py`
 - 修改：`backend/app/main.py`
 
@@ -2789,7 +2834,7 @@ from app.models.experience import Experience, ExperienceApproval
 
 @pytest.mark.asyncio
 async def test_approve_promotes_to_dept(db_session, monkeypatch):
-    monkeypatch.setattr("app.api.experiences.embed_texts", lambda t: [[0.1, 0.2, 0.3]])
+    monkeypatch.setattr("app.services.experience_service.embed_texts", lambda t: [[0.1, 0.2, 0.3]])
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         await c.post("/api/auth/register", json={"username": "owner", "password": "x123456", "display_name": "Owner"})
@@ -2817,15 +2862,47 @@ async def test_approve_promotes_to_dept(db_session, monkeypatch):
 - [ ] **步骤 3：实现审批路由**
 
 ```python
-# backend/app/api/approvals.py
+# backend/app/services/approval_service.py
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from fastapi import HTTPException
+from app.repositories.experience_repo import ApprovalRepository, ExperienceRepository
+
+class ApprovalService:
+    """审批业务：列出待办 + 审批通过则晋升经验层级。"""
+    def __init__(self, db):
+        self.approvals = ApprovalRepository(db)
+        self.experiences = ExperienceRepository(db)
+
+    async def list_pending(self):
+        rows = await self.approvals.list_pending()
+        return [{"id": a.id, "experience_id": a.experience_id, "from_scope": a.from_scope, "to_scope": a.to_scope} for a in rows]
+
+    async def decide(self, approval_id: str, approver_id: int, approve: bool, comment: str = ""):
+        ap = await self.approvals.get(approval_id)
+        if not ap or ap.status != "pending":
+            raise HTTPException(404, "审批不存在")
+        exp = await self.experiences.get(ap.experience_id)
+        ap.status = "approved" if approve else "rejected"
+        ap.approver_id = approver_id
+        ap.comment = comment
+        ap.decided_at = datetime.now(timezone.utc)
+        if approve:
+            exp.scope = ap.to_scope
+            exp.status = "approved"
+        else:
+            exp.status = "rejected"
+        await self.approvals.db.commit()
+        return {"ok": True}
+```
+
+```python
+# backend/app/api/approvals.py —— 薄路由
+from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
 from app.core.deps import get_db, get_current_user
 from app.models.org import User
-from app.models.experience import Experience, ExperienceApproval
+from app.services.approval_service import ApprovalService
 
 router = APIRouter(prefix="/api/approvals", tags=["approvals"])
 
@@ -2833,29 +2910,16 @@ class DecideRequest(BaseModel):
     approve: bool
     comment: str = ""
 
+def get_approval_service(db: AsyncSession = Depends(get_db)) -> ApprovalService:
+    return ApprovalService(db)
+
 @router.get("")
-async def list_approvals(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
-    # 部门负责人可审 personal->dept；管理员可审 dept->company
-    rows = (await db.scalars(select(ExperienceApproval).where(ExperienceApproval.status == "pending"))).all()
-    return [{"id": a.id, "experience_id": a.experience_id, "from_scope": a.from_scope, "to_scope": a.to_scope} for a in rows]
+async def list_approvals(svc: ApprovalService = Depends(get_approval_service), _: User = Depends(get_current_user)):
+    return await svc.list_pending()
 
 @router.post("/{approval_id}/decide")
-async def decide_approval(approval_id: str, body: DecideRequest, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
-    ap = await db.get(ExperienceApproval, approval_id)
-    if not ap or ap.status != "pending":
-        raise HTTPException(404, "审批不存在")
-    exp = await db.get(Experience, ap.experience_id)
-    ap.status = "approved" if body.approve else "rejected"
-    ap.approver_id = user.id
-    ap.comment = body.comment
-    ap.decided_at = datetime.now(timezone.utc)
-    if body.approve:
-        exp.scope = ap.to_scope
-        exp.status = "approved"
-    else:
-        exp.status = "rejected"
-    await db.commit()
-    return {"ok": True}
+async def decide_approval(approval_id: str, body: DecideRequest, svc: ApprovalService = Depends(get_approval_service), user: User = Depends(get_current_user)):
+    return await svc.decide(approval_id, user.id, body.approve, body.comment)
 ```
 
 - [ ] **步骤 4：main.py 注册并运行测试**
@@ -3793,39 +3857,59 @@ async def test_hitl_approve_flow(db_session):
 - [ ] **步骤 3：实现 HITL 路由**
 
 ```python
-# backend/app/api/hitl.py
+# backend/app/services/hitl_service.py
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from fastapi import HTTPException
+from app.repositories.trace_repo import HitlRepository, TraceRepository
+
+class HitlService:
+    """HITL 审批业务：列出待办 + 确认/驳回（复用任务 35 的 HitlRepository/TraceRepository）。"""
+    def __init__(self, db):
+        self.tasks = HitlRepository(db)
+        self.traces = TraceRepository(db)
+
+    async def list_pending(self):
+        rows = await self.tasks.list(status="pending")
+        return [{"id": t.id, "trace_id": t.trace_id, "reason": t.reason, "context": t.context} for t in rows]
+
+    async def decide(self, task_id: str, approver_id: int, approved: bool):
+        task = await self.tasks.get(task_id)
+        if not task or task.status != "pending":
+            raise HTTPException(404, "任务不存在")
+        task.status = "approved" if approved else "rejected"
+        task.approver_id = approver_id
+        task.decided_at = datetime.now(timezone.utc)
+        trace = await self.traces.get(task.trace_id)
+        if trace:
+            trace.status = "completed"
+        await self.tasks.db.commit()
+        return {"ok": True}
+```
+
+```python
+# backend/app/api/hitl.py —— 薄路由
+from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
 from app.core.deps import get_db, get_current_user
 from app.models.org import User
-from app.models.trace import HitlTask, ExecutionTrace
+from app.services.hitl_service import HitlService
 
 router = APIRouter(prefix="/api/hitl", tags=["hitl"])
-
-@router.get("/tasks")
-async def list_tasks(db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
-    rows = (await db.scalars(select(HitlTask).where(HitlTask.status == "pending"))).all()
-    return [{"id": t.id, "trace_id": t.trace_id, "reason": t.reason, "context": t.context} for t in rows]
 
 class DecideHitl(BaseModel):
     approved: bool
 
+def get_hitl_service(db: AsyncSession = Depends(get_db)) -> HitlService:
+    return HitlService(db)
+
+@router.get("/tasks")
+async def list_tasks(svc: HitlService = Depends(get_hitl_service), _: User = Depends(get_current_user)):
+    return await svc.list_pending()
+
 @router.post("/tasks/{task_id}/approve")
-async def approve_task(task_id: str, body: DecideHitl, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
-    task = await db.get(HitlTask, task_id)
-    if not task or task.status != "pending":
-        raise HTTPException(404, "任务不存在")
-    task.status = "approved" if body.approved else "rejected"
-    task.approver_id = user.id
-    task.decided_at = datetime.now(timezone.utc)
-    trace = await db.get(ExecutionTrace, task.trace_id)
-    if trace:
-        trace.status = "completed"
-    await db.commit()
-    return {"ok": True}
+async def approve_task(task_id: str, body: DecideHitl, svc: HitlService = Depends(get_hitl_service), user: User = Depends(get_current_user)):
+    return await svc.decide(task_id, user.id, body.approved)
 ```
 
 - [ ] **步骤 4：main.py 注册并运行测试**
@@ -4343,10 +4427,12 @@ git commit -m "feat: MCP 服务注册与动态工具接入"
 
 ---
 
-### 任务 38：配置管理 API（agents / mcp-servers / models）
+### 任务 38：配置管理 API（三层：agents / mcp-servers / models）
 
 **文件：**
-- 创建：`backend/app/api/configs.py`
+- 创建：`backend/app/repositories/config_repo.py`
+- 创建：`backend/app/services/config_service.py`
+- 创建：`backend/app/api/configs.py`（薄层）
 - 创建：`backend/tests/test_configs_api.py`
 - 修改：`backend/app/main.py`
 
@@ -4381,15 +4467,55 @@ async def test_agent_config_crud():
 - [ ] **步骤 3：实现配置路由**
 
 ```python
-# backend/app/api/configs.py
+# backend/app/repositories/config_repo.py
+from app.models.configs import AgentConfig, McpServer
+from app.repositories.base import BaseRepository
+
+class AgentConfigRepository(BaseRepository):
+    model = AgentConfig
+
+class McpServerRepository(BaseRepository):
+    model = McpServer
+```
+
+```python
+# backend/app/services/config_service.py
+from app.models.configs import AgentConfig, McpServer
+from app.repositories.config_repo import AgentConfigRepository, McpServerRepository
+from app.tools.mcp_adapter import mcp_registry
+
+class ConfigService:
+    """配置业务：agent / mcp-server 增查；新增 MCP 时同步注册到运行时注册表。"""
+    def __init__(self, db):
+        self.agents = AgentConfigRepository(db)
+        self.mcps = McpServerRepository(db)
+
+    async def create_agent(self, code: str, name: str, model_key: str, config: dict) -> AgentConfig:
+        row = AgentConfig(code=code, name=name, model_key=model_key, config=config)
+        await self.agents.add(row)
+        return row
+
+    async def list_agents(self) -> list[AgentConfig]:
+        return await self.agents.list()
+
+    async def create_mcp(self, name: str, url: str, auth_type: str, config: dict) -> McpServer:
+        row = McpServer(name=name, url=url, auth_type=auth_type, config=config)
+        await self.mcps.add(row)
+        mcp_registry.register({"name": row.name, "url": row.url, "auth_type": row.auth_type, "config": row.config, "enabled": True})
+        return row
+
+    async def list_mcps(self) -> list[McpServer]:
+        return await self.mcps.list()
+```
+
+```python
+# backend/app/api/configs.py —— 薄路由
 from fastapi import APIRouter, Depends
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
 from app.core.deps import get_db, get_current_user
 from app.models.org import User
-from app.models.configs import AgentConfig, McpServer
-from app.tools.mcp_adapter import mcp_registry
+from app.services.config_service import ConfigService
 
 router = APIRouter(tags=["configs"])
 
@@ -4405,28 +4531,24 @@ class McpIn(BaseModel):
     auth_type: str = "none"
     config: dict = {}
 
+def get_config_service(db: AsyncSession = Depends(get_db)) -> ConfigService:
+    return ConfigService(db)
+
 @router.post("/api/agents")
-async def create_agent(body: AgentIn, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
-    row = AgentConfig(code=body.code, name=body.name, model_key=body.model_key, config=body.config)
-    db.add(row)
-    await db.commit()
-    return row
+async def create_agent(body: AgentIn, svc: ConfigService = Depends(get_config_service), _: User = Depends(get_current_user)):
+    return await svc.create_agent(body.code, body.name, body.model_key, body.config)
 
 @router.get("/api/agents")
-async def list_agents(db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
-    return (await db.scalars(select(AgentConfig))).all()
+async def list_agents(svc: ConfigService = Depends(get_config_service), _: User = Depends(get_current_user)):
+    return await svc.list_agents()
 
 @router.post("/api/mcp-servers")
-async def create_mcp(body: McpIn, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
-    row = McpServer(name=body.name, url=body.url, auth_type=body.auth_type, config=body.config)
-    db.add(row)
-    await db.commit()
-    mcp_registry.register({"name": row.name, "url": row.url, "auth_type": row.auth_type, "config": row.config, "enabled": True})
-    return row
+async def create_mcp(body: McpIn, svc: ConfigService = Depends(get_config_service), _: User = Depends(get_current_user)):
+    return await svc.create_mcp(body.name, body.url, body.auth_type, body.config)
 
 @router.get("/api/mcp-servers")
-async def list_mcp(db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
-    return (await db.scalars(select(McpServer))).all()
+async def list_mcp(svc: ConfigService = Depends(get_config_service), _: User = Depends(get_current_user)):
+    return await svc.list_mcps()
 ```
 
 - [ ] **步骤 4：main.py 注册并运行测试**
@@ -4809,7 +4931,8 @@ git commit -m "feat: docker-compose 联调与冒烟验证"
 | §4 数据库（全部表 + pgvector + Alembic） | 2, 3, 4, 5, 6 |
 | §5 子Agent子图（内部构建 ToolNode ReAct）嵌入父图 | 27, 28, 29, 33.5 |
 | §5 Agent 注册 / DataFacade / MCP / 风险 | 31, 32, 32.5, 37 |
-| §6 API（认证/聊天/HITL/知识/经验/组织/监测/配置） | 7, 8, 10, 14, 15, 18, 23, 24, 33, 35, 38 |
+| §6 API（认证/聊天/HITL/知识/经验/组织/监测/配置） | 7, 7.5, 8, 10, 14, 15, 18, 23, 24, 33, 35, 38 |
+| §6 三层架构（router→service→repository） | 7.5（范式）+ 8, 10, 14, 15, 18, 23, 24, 33, 35, 38 |
 | §7 技术决策（异步/checkpoint/多模型/部署） | 1, 11, 36, 43 |
 | HITL interrupt | 32, 33 |
 | 前端三阶段 | 39, 40, 41, 42 |
@@ -4821,5 +4944,6 @@ git commit -m "feat: docker-compose 联调与冒烟验证"
 - 记忆模块命名统一：`build_context`（短期）、`build_pref_context`（偏好，任务 20 中实际名为 `build_context`，任务 25 测试 mock 名为 `build_pref_context`——**执行时以 `app.memory.preferences.build_context` 为准**，任务 25 的 monkeypatch 目标需相应调整）
 - `embed_texts / embed_query` 在任务 16 定义，被 18/21/22/23 复用，签名一致
 - **物理外键约定**：全项目模型一律不使用 `ForeignKey`（任务 3/4/5/6/20 已按"逻辑外键"改写）——关联列用普通列 + `relationship(foreign_keys=...)`；访问 relationship 属性必须 `selectinload` 预加载（异步限制，任务 3/4/6/10 已加）
+- **三层架构约定**（任务 7.5 范式）：`router` 只做参数校验并调用 service（薄层）；`service` 组合业务规则与多个 repository；`repository` 继承 `BaseRepository` 只做原子 CRUD。禁止在 router 中直接执行 SQL / 组装业务。已按此改造：任务 8/10/14/15/18/23/24/33/35/38
 
 **4. 执行顺序提示**：任务 25 的测试 monkeypatch 路径与任务 20 命名存在一处不一致（`build_pref_context` vs `build_context`），实现时以任务 20 的实际函数名为准修正测试。

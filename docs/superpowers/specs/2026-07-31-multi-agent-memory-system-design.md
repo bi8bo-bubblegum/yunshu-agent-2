@@ -349,6 +349,7 @@ yunshu-agent-2/
 | 项 | 决策 |
 |---|---|
 | 全异步 | FastAPI + SQLAlchemy 2.0 async（asyncpg）+ LangGraph async API，全链路无阻塞 |
+| 三层架构 | router（薄，参数校验）→ service（组合业务）→ repository（BaseRepository 原子 CRUD），禁止 router 直查数据库 |
 | 状态持久化 | `langgraph-checkpoint-postgres` 存会话 checkpoint，支撑中断/恢复/HITL |
 | 向量检索 | pgvector（HNSW 索引），经验 + 知识同库 |
 | 多模型 | ModelFactory 统一工厂，LLM/embedding 独立配置，OpenAI 兼容适配 |
