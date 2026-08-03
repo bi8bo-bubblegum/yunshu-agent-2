@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     DEFAULT_MODEL: str = "best-1"
     EMBEDDING_MODEL: str = "text-embedding-v3-small"
     MODEL_API_BASE: str
+    MODEL_API_KEY: str = ""
     FRONTEND_ORIGINS: str = "http://localhost:5173"
 
     model_config = {"env_file": ".env"}
