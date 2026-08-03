@@ -15,6 +15,7 @@ class AuthService:
             raise HTTPException(status_code=400, detail="用户名已存在")
         user = User(username=username, password_hash=hash_password(password), display_name=display_name)
         await self.user_repo.add(user)
+        await self.user_repo.commit()
         return user
 
     async def login(self, username: str, password: str) -> str:
