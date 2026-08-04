@@ -20,7 +20,7 @@ class ChatService:
 
     async def stream_chat(self, user_id: str, conv_id: str, message: str):
         """SSE 事件异步生成器：start → token → done。"""
-        await self._ensure_owned(user_id, conv_id)
+        await self._ensure_owned(conv_id, user_id)
         await self.message_repo.add(Message(conversation_id=conv_id, role="user", content=message))
         await self.message_repo.commit()
         yield json.dumps({"event": "start"}, ensure_ascii=False)
