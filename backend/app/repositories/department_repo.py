@@ -2,5 +2,5 @@ from app.models import Department
 from app.repositories.base import BaseRepository
 
 
-class DepartmentRepository(BaseRepository):
+class DepartmentRepository(BaseRepository[Department]):
     model = Department

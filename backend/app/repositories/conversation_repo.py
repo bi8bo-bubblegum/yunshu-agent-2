@@ -2,14 +2,14 @@ from sqlalchemy import select, func
 from app.models.chat import Conversation, Message
 from app.repositories.base import BaseRepository
 
-class ConversationRepository(BaseRepository):
+class ConversationRepository(BaseRepository[Conversation]):
     model = Conversation
 
     async def list_by_user(self, user_id: str) -> list[Conversation]:
         stmt = select(Conversation).where(Conversation.user_id == user_id).order_by(Conversation.created_at.desc())
         return list((await self.db.scalars(stmt)).all())
 
-class MessageRepository(BaseRepository):
+class MessageRepository(BaseRepository[Message]):
     model = Message
 
     async def list_by_conversation(self, conversation_id: str) -> list[Message]:

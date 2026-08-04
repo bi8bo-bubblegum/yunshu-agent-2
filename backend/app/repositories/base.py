@@ -1,34 +1,37 @@
+from typing import ClassVar, Generic, Type, TypeVar
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
+ModelType = TypeVar("ModelType")
 
-class BaseRepository:
+
+class BaseRepository(Generic[ModelType]):
     """通用原子 CRUD：一个方法一个数据库操作，不自行 commit（保证 service 层事务原子性）。
     service 层组合多个 repo 操作后统一调用 commit()。"""
-    model = None
+    model: ClassVar[Type[ModelType]]
 
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def get(self, pk):
+    async def get(self, pk) -> ModelType | None:
         return await self.db.get(self.model, pk)
 
-    async def get_by(self, **filters):
+    async def get_by(self, **filters) -> ModelType | None:
         return (await self.db.scalars(select(self.model).filter_by(**filters))).first()
 
-    async def list(self, **filters):
-        return (await self.db.scalars(select(self.model).filter_by(**filters))).all()
+    async def list(self, **filters) -> list[ModelType]:
+        return list((await self.db.scalars(select(self.model).filter_by(**filters))).all())
 
-    async def add(self, obj):
+    async def add(self, obj) -> None:
         """加入会话并 flush（拿到 id），不 commit。"""
         self.db.add(obj)
         await self.db.flush()
 
-    async def add_all(self, objs):
+    async def add_all(self, objs) -> None:
         self.db.add_all(objs)
         await self.db.flush()
 
-    async def delete(self, obj):
+    async def delete(self, obj) -> None:
         await self.db.delete(obj)
         await self.db.flush()
 
