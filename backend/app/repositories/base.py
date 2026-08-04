@@ -14,7 +14,7 @@ class BaseRepository(Generic[ModelType]):
         self.db = db
 
     async def get(self, pk) -> ModelType | None:
-        return await self.db.get(self.model, pk)
+        return (await self.db.scalars(select(self.model).where(self.model.id == pk))).first()
 
     async def get_by(self, **filters) -> ModelType | None:
         return (await self.db.scalars(select(self.model).filter_by(**filters))).first()
