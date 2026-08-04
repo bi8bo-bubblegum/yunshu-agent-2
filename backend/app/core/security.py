@@ -18,7 +18,7 @@ def create_access_token(user_id: str, username: str) -> str:
         "username": username,
         "exp": datetime.now(timezone.utc) + timedelta(minutes=settings.JWT_EXPIRE_MINUTES),
     }
-    return jwt.encode(payload, settings.SECRET_KEY, algorithm="HS256")
+    return jwt.encode(payload, settings.JWT_SECRET, algorithm="HS256")
 
 def decode_token(token: str) -> str:
-    return jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])
+    return jwt.decode(token, settings.JWT_SECRET, algorithms=["HS256"])
