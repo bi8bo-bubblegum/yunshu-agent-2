@@ -3,12 +3,16 @@ import json
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.memory.short_term import build_context
 from app.models.chat import Conversation, Message
 from app.repositories.conversation_repo import ConversationRepository, MessageRepository
 from app.agents.graph import graph
+from app.services.summary import maybe_roll_summary
+
 
 class ChatService:
     def __init__(self, db: AsyncSession):
+        self.db = db
         self.conversation_repo = ConversationRepository(db)
         self.message_repo = MessageRepository(db)
 
@@ -24,12 +28,14 @@ class ChatService:
         await self.message_repo.add(Message(conversation_id=conv_id, role="user", content=message))
         await self.message_repo.commit()
         yield json.dumps({"event": "start"}, ensure_ascii=False)
+        history = await build_context(self.db, conv_id, 10)
         result = await graph.ainvoke({
             "conversation_id": conv_id, "user_id": user_id,
-            "user_message": message, "messages": [],
+            "user_message": message, "history": history, "messages": [],
         })
         text = result.get("agent_response", "")
         await self.message_repo.add(Message(conversation_id=conv_id, role="assistant", content=text))
         await self.message_repo.commit()
+        await maybe_roll_summary(self.db, conv_id)
         yield json.dumps({"event": "token", "content": text}, ensure_ascii=False)
         yield json.dumps({"event": "done"}, ensure_ascii=False)
