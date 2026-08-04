@@ -1,7 +1,7 @@
 # backend/app/repositories/experience_repo.py
 from sqlalchemy import select
 from sqlalchemy.sql import text as sqltext
-from app.models.experience import Experience, ExperienceApproval
+from app.models.experience import Experience
 from app.repositories.base import BaseRepository
 
 class ExperienceRepository(BaseRepository[Experience]):
@@ -29,9 +29,3 @@ class ExperienceRepository(BaseRepository[Experience]):
                 | ((Experience.scope == "dept") & (Experience.department_id == department_id))
             ).order_by(Experience.created_at.desc())
         )).all())
-
-class ApprovalRepository(BaseRepository[ExperienceApproval]):
-    model = ExperienceApproval
-
-    async def list_pending(self) -> list[ExperienceApproval]:
-        return list((await self.db.scalars(select(ExperienceApproval).where(ExperienceApproval.status == "pending"))).all())

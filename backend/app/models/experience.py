@@ -23,14 +23,3 @@ class Experience(Base):
     source_trace_id: Mapped[str | None] = mapped_column(String(36))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     embedding: Mapped[list[float] | None] = mapped_column(Vector(1024))
-
-class ExperienceApproval(Base):
-    __tablename__ = "experience_approvals"
-    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4()))
-    experience_id: Mapped[str] = mapped_column(String(36), index=True)  # 逻辑外键
-    from_scope: Mapped[str] = mapped_column(String(16))
-    to_scope: Mapped[str] = mapped_column(String(16))
-    approver_id: Mapped[str | None] = mapped_column(String(36), index=True)  # 逻辑外键
-    status: Mapped[str] = mapped_column(String(16), default="pending")
-    comment: Mapped[str | None] = mapped_column(Text)
-    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

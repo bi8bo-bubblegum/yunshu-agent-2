@@ -1,7 +1,9 @@
 # backend/app/services/experience_service.py
 from fastapi import HTTPException
-from app.models.experience import Experience, ExperienceApproval
-from app.repositories.experience_repo import ExperienceRepository, ApprovalRepository
+from app.models.experience import Experience
+from app.models.trace import Approval
+from app.repositories.experience_repo import ExperienceRepository
+from app.repositories.trace_repo import ApprovalRepository
 from app.services.embedding import embed_texts
 
 class ExperienceService:
@@ -26,7 +28,15 @@ class ExperienceService:
         if to_scope not in ("dept", "company"):
             raise HTTPException(400, "目标层级无效")
         exp.status = "pending"
-        await self.approval_repo.add(ExperienceApproval(experience_id=exp.id, from_scope="personal", to_scope=to_scope, status="pending"))
+        # 创建统一审批单（经验晋升，非阻塞）
+        approver_role = "dept_owner" if to_scope == "dept" else "admin"
+        await self.approval_repo.add(Approval(
+            category="experience_promotion", mode="async",
+            ref_type="experience", ref_id=exp.id,
+            title=f"经验晋升：{exp.title}",
+            context={"experience_id": exp.id, "from_scope": "personal", "to_scope": to_scope},
+            status="pending", requester_id=user_id, approver_role=approver_role,
+        ))
         await self.approval_repo.commit()
         return exp
 
