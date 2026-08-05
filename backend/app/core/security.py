@@ -1,5 +1,3 @@
-from idlelib import __main__
-
 import jwt
 
 from datetime import datetime, timedelta, timezone

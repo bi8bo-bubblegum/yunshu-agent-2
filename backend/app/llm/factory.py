@@ -15,7 +15,7 @@ class ModelFactory:
         return ChatOpenAI(
             model=MODEL_MAP[model_key],
             base_url=settings.MODEL_API_BASE,
-            api_key=settings.LLM_API_KEY,
+            api_key=settings.MODEL_API_KEY,
             temperature=0.3
         )
 

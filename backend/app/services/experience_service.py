@@ -1,15 +1,14 @@
 # backend/app/services/experience_service.py
 from fastapi import HTTPException
 from app.models.experience import Experience
-from app.models.trace import Approval
 from app.repositories.experience_repo import ExperienceRepository
-from app.repositories.trace_repo import ApprovalRepository
+from app.services.approval_service import ApprovalService
 from app.services.embedding import embed_texts
 
 class ExperienceService:
     def __init__(self, db):
         self.experience_repo = ExperienceRepository(db)
-        self.approval_repo = ApprovalRepository(db)
+        self.approval_svc = ApprovalService(db)
 
     async def create(self, user_id: str, department_id: str | None, data) -> Experience:
         vec = (await embed_texts([f"{data.title} {data.summary}"]))[0]
@@ -30,14 +29,13 @@ class ExperienceService:
         exp.status = "pending"
         # 创建统一审批单（经验晋升，非阻塞）
         approver_role = "dept_owner" if to_scope == "dept" else "admin"
-        await self.approval_repo.add(Approval(
-            category="experience_promotion", mode="async",
+        await self.approval_svc.create_approval(
+            category="experience_promotion", risk=None, mode="async",
             ref_type="experience", ref_id=exp.id,
             title=f"经验晋升：{exp.title}",
             context={"experience_id": exp.id, "from_scope": "personal", "to_scope": to_scope},
-            status="pending", requester_id=user_id, approver_role=approver_role,
-        ))
-        await self.approval_repo.commit()
+            requester_id=user_id, approver_role=approver_role,
+        )
         return exp
 
     async def list_visible(self, user_id: str, department_id: str | None) -> list[Experience]:

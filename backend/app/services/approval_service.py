@@ -21,6 +21,21 @@ class ApprovalService:
                  "title": a.title, "context": a.context, "requester_id": a.requester_id,
                  "submitted_at": a.submitted_at.isoformat() if a.submitted_at else None} for a in rows]
 
+    async def create_approval(self, category: str, risk: str | None, mode: str,
+                              ref_type: str, ref_id: str, title: str,
+                              context: dict | None, requester_id: str,
+                              approver_role: str | None = None) -> str:
+        """创建审批单，返回审批单 ID。供 facade.guarded_critical 和 ExperienceService.submit 调用。"""
+        approval = Approval(
+            category=category, risk=risk, mode=mode,
+            ref_type=ref_type, ref_id=ref_id, title=title,
+            context=context, status="pending", requester_id=requester_id,
+            approver_role=approver_role,
+        )
+        await self.approval_repo.add(approval)
+        await self.approval_repo.commit()
+        return approval.id
+
     async def decide(self, approval_id: str, approver_id: str, approve: bool, comment: str = ""):
         ap = await self.approval_repo.get(approval_id)
         if not ap or ap.status != "pending":
