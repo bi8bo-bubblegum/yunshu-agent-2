@@ -3,34 +3,26 @@ from pydantic import BaseModel, Field
 from app.llm.factory import ModelFactory
 
 class RouteDecision(BaseModel):
-    """意图路由结构化输出"""
-    agent: str = Field(description="目标 agent 编码，从可选列表中选择")
+    """意图路由结构化输出。agent 可选：注册的 agent 代码 + done（终止循环）。"""
+    agent: str = Field(description="目标 agent 编码，从可选列表中选择；任务完成时返回 done")
     reason: str = Field(description="路由理由")
     confidence: float = Field(description="置信度 0~1")
-
-class DecideDoneOutput(BaseModel):
-    """判断回答是否完整的结构化输出"""
-    done: bool = Field(description="是否已完整解决问题")
 
 ROUTE_SCHEMA = RouteDecision.model_json_schema()
 AGENT_CODES = ["marketing", "sales_analysis", "scheduling", "general"]
 
 async def route_decision(message: str, agents: list[str], model_key: str = "default") -> dict:
+    """LLM 判断目标 agent，可选列表包含所有注册的 agent + done。
+    agent 完成后再次调用此函数决定是否需要其他 agent 协作或结束。"""
     llm = ModelFactory.get_llm(model_key).with_structured_output(RouteDecision)
     try:
         result = await llm.ainvoke(
-            f"你是意图路由器。从用户消息判断交给哪个 agent，可选：{agents}。\n消息：{message}"
+            f"你是意图路由器。根据用户消息和对话历史，判断下一步交给哪个 agent，"
+            f"可选：{agents}。如果任务已完成，返回 done。\n消息：{message}"
         )
         data = result.model_dump()
     except Exception:
-        return {"agent": "general", "reason": "解析失败兜底", "confidence": 0.1}
+        return {"agent": "done", "reason": "解析失败，默认结束", "confidence": 0.1}
     if data.get("agent") not in agents:
-        data["agent"] = "general"
+        data["agent"] = "done"
     return data
-
-async def decide_done(agent_response: str, model_key: str = "default") -> bool:
-    llm = ModelFactory.get_llm(model_key).with_structured_output(DecideDoneOutput)
-    result = await llm.ainvoke(
-        f"判断以下回答是否已完整解决问题。\n回答：{agent_response[:2000]}"
-    )
-    return result.done
