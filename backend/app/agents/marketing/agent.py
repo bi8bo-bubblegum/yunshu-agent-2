@@ -2,8 +2,10 @@
 from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolNode
 from langchain_core.messages import HumanMessage, SystemMessage
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.llm.factory import ModelFactory
-from app.tools.facade import facade
+from app.tools.loader import load_tools, load_mcp_tools_by_agent
 from app.agents.state import AgentState
 
 SYSTEM_PROMPT = (
@@ -11,31 +13,32 @@ SYSTEM_PROMPT = (
     "为用户策划营销方案。营销策略需包含目标、渠道、预算、预期效果。回答用中文。"
 )
 
-# 营销助手声明自己需要的内置工具（工具在任务 26.5 注册到 facade）
-# MCP 服务绑定待任务 38.5 动态化后由 load_tools 统一加载
+# 内置工具仍硬编码（新增内置工具本身就需要写代码）
 TOOL_NAMES = ["query_marketing_campaigns", "create_marketing_campaign", "publish_campaign"]
+AGENT_CODE = "marketing"
+MAX_TOOL_ROUNDS = 6
 
-MAX_TOOL_ROUNDS = 6  # 工具调用最大轮次，防 LLM 死循环（每子 agent 可配置不同值）
 
-async def build_marketing_agent():
-    """营销助手子图：agent ↔ ToolNode 的 ReAct 循环，编译后作为节点嵌入父图。
-    子图在模块内部独立构建，后续可差异化演进（换节点、加记忆节点、改路由等）。"""
-    tools = [facade.to_langchain_tool(n) for n in TOOL_NAMES]
+async def build_marketing_agent(db: AsyncSession):
+    """营销助手子图。内置工具硬编码声明，MCP 绑定从数据库动态读取。"""
+    # 1. 内置工具（硬编码）
+    # 2. MCP 绑定（从数据库读取，替代硬编码的 MCP_SERVER_NAMES）
+    mcp_server_names = await load_mcp_tools_by_agent(db, AGENT_CODE)
+    tools = await load_tools(db, TOOL_NAMES, mcp_server_names)
 
     async def agent_node(state: AgentState) -> dict:
-        llm = ModelFactory.get_llm("marketing").bind_tools(tools)
+        llm = ModelFactory.get_llm(AGENT_CODE).bind_tools(tools)
         msgs = [
             SystemMessage(SYSTEM_PROMPT + "\n" + state.get("memory_context", "")),
             HumanMessage(state.get("user_message", "")),
         ] + state.get("messages", [])
         resp = await llm.ainvoke(msgs)
-        return {"messages": [resp], "tool_rounds": 1}  # add reducer 自动累加
+        return {"messages": [resp], "tool_rounds": 1}
 
     def should_continue(state: AgentState) -> str:
         last = state["messages"][-1]
         if not getattr(last, "tool_calls", None):
             return "end"
-        # 达到最大轮次即使仍要调工具也强制结束，防死循环
         return "tools" if state.get("tool_rounds", 0) < MAX_TOOL_ROUNDS else "end"
 
     g = StateGraph(AgentState)
