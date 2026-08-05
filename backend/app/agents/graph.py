@@ -91,7 +91,9 @@ async def get_graph():
     return _graph
 
 
-# 模块级兼容：同步环境下直接初始化
+# 模块级兼容：同步环境下直接初始化（保留供测试等场景调用；
+# 应用运行时由 lifespan 在应用事件循环中通过 get_graph() 构建，
+# 避免模块导入时用临时事件循环创建数据库连接池导致跨 loop 冲突）
 def _init_sync():
     global _graph
     if _graph is None:
@@ -106,11 +108,5 @@ def _init_sync():
         _graph = build_graph(reg)
 
 
-# 尝试同步初始化（仅当有数据库可用时）
-try:
-    _init_sync()
-except Exception:
-    pass  # 无数据库时延迟到 get_graph()
-
-# 导出 graph 变量，兼容既有导入
+# 导出 graph 变量，兼容既有导入；初始为 None，由 get_graph() / lifespan 初始化
 graph = _graph

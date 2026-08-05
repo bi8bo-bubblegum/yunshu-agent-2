@@ -4,7 +4,7 @@ from uuid import uuid4
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agents.graph import graph
+from app.agents.graph import get_graph
 from app.memory.assembly import assemble_memory
 from app.models.chat import Conversation, Message
 from app.models.trace import ExecutionTrace
@@ -47,6 +47,7 @@ class ChatService:
         user = await self.user_repo.get(user_id)
         dep_id = user.department_id if user and user.department_id else None
         mem = await assemble_memory(self.db, user_id, conv_id, dep_id, message)
+        graph = await get_graph()
         result = await graph.ainvoke({
             "conversation_id": conv_id, "user_id": user_id,
             "user_message": message, "memory_context": mem,

@@ -60,11 +60,12 @@ class ApprovalService:
 
     async def _resume_graph(self, approval_id: str, approved: bool, trace_id: str):
         """审批通过/驳回后恢复图执行。"""
+        from app.agents.graph import get_graph
         from langgraph.types import Command
-        from app.agents.graph import graph
         trace = await self.trace_repo.get(trace_id)
         if trace and trace.conversation_id:
             config = {"configurable": {"thread_id": trace.conversation_id}}
+            graph = await get_graph()
             await graph.ainvoke(
                 Command(resume={"approved": approved, "approval_id": approval_id}),
                 config=config,
