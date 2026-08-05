@@ -23,6 +23,6 @@ class ModelFactory:
     def get_embedding(cls):
         return OpenAIEmbeddings(
             model=settings.EMBEDDING_MODEL,
-            base_url=settings.MODEL_API_BASE,
-            api_key=settings.MODEL_API_KEY,
+            base_url=settings.EMBEDDING_API_BASE,
+            api_key=settings.EMBEDDING_API_KEY,
         )
