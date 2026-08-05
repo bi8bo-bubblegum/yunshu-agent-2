@@ -39,9 +39,22 @@ async def load_mcp_servers(db: AsyncSession) -> None:
         })
 
 
+def _build_connection(cfg: dict) -> dict:
+    """根据服务配置组装 MultiServerMCPClient 连接参数。
+    - auth_type=api_key/bearer 且 config.api_key 存在时，组装 Authorization header
+    - 其余（none）不传认证信息"""
+    conn: dict = {"url": cfg["url"], "transport": "streamable_http"}
+    auth_type = cfg.get("auth_type", "none")
+    config = cfg.get("config") or {}
+    if auth_type in ("api_key", "bearer") and config.get("api_key"):
+        conn["headers"] = {"Authorization": f"Bearer {config['api_key']}"}
+    return conn
+
+
 async def get_mcp_tools(server_name: str) -> list:
-    """通过 langchain-mcp-adapters 把远端 MCP 工具转为 LangChain Tool。"""
+    """通过 langchain-mcp-adapters 把远端 MCP 工具转为 LangChain Tool。
+    认证：从注册表配置组装 headers（api_key/bearer 凭证存数据库 config JSONB）。"""
     from langchain_mcp_adapters.client import MultiServerMCPClient
     cfg = mcp_registry._servers[server_name]
-    client = MultiServerMCPClient({server_name: {"url": cfg["url"], "transport": "streamable_http"}})
+    client = MultiServerMCPClient({server_name: _build_connection(cfg)})
     return await client.get_tools(server_name)

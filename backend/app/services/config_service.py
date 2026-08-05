@@ -38,7 +38,34 @@ class ConfigService:
         config["tool_risks"] = tool_risks
         server.config = config
         await self.mcp_repo.commit()
+        self._sync_registry(server)
         return {"ok": True, "tool_risks": tool_risks}
+
+    async def update_mcp_auth(self, name: str, auth_type: str, api_key: str | None) -> dict:
+        """更新 MCP 服务的认证配置（api_key/bearer 凭证存 config JSONB）。
+        修改后经 _sync_registry 同步运行时注册表，get_mcp_tools 组装 Authorization header。"""
+        if auth_type not in ("none", "api_key", "bearer"):
+            raise HTTPException(400, "auth_type 仅支持 none/api_key/bearer")
+        server = await self.mcp_repo.get(name)
+        if not server:
+            raise HTTPException(404, "MCP 服务不存在")
+        server.auth_type = auth_type
+        config = server.config or {}
+        if api_key:
+            config["api_key"] = api_key
+        elif auth_type == "none":
+            config.pop("api_key", None)
+        server.config = config
+        await self.mcp_repo.commit()
+        self._sync_registry(server)
+        return {"ok": True, "auth_type": auth_type}
+
+    def _sync_registry(self, server: McpServer) -> None:
+        """将数据库最新配置同步到运行时注册表（供 get_mcp_tools 读取）。"""
+        mcp_registry.register({
+            "name": server.name, "url": server.url, "auth_type": server.auth_type,
+            "config": server.config, "enabled": server.enabled,
+        })
 
     # ---- Agent MCP 绑定 ----
 

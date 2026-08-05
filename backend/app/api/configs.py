@@ -27,6 +27,11 @@ class ToolRisksUpdate(BaseModel):
     tool_risks: dict[str, str]  # {"delete_order": "critical", "adjust_schedule": "high"}
 
 
+class McpAuthUpdate(BaseModel):
+    auth_type: str = "none"  # none | api_key | bearer
+    api_key: str | None = None  # api_key/bearer 时的密钥，存入 config JSONB
+
+
 def get_config_service(db: AsyncSession = Depends(get_db)) -> ConfigService:
     return ConfigService(db)
 
@@ -74,6 +79,14 @@ async def list_mcp_tools(name: str,
         }
         for t in raw_tools
     ]
+
+
+@router.put("/api/mcp-servers/{name}/auth")
+async def update_mcp_auth(name: str, body: McpAuthUpdate,
+                          svc: ConfigService = Depends(get_config_service),
+                          _: User = Depends(get_current_user)):
+    """配置 MCP 服务认证（api_key/bearer 凭证存数据库，get_mcp_tools 组装 Authorization header）。"""
+    return await svc.update_mcp_auth(name, body.auth_type, body.api_key)
 
 
 @router.put("/api/mcp-servers/{name}/tool-risks")
