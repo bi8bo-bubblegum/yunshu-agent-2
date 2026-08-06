@@ -18,8 +18,11 @@ AGENT_CODE = "sales_analysis"
 MAX_TOOL_ROUNDS = 6
 
 
-async def build_sales_agent(db: AsyncSession):
-    """经营分析子图。内置工具硬编码声明，MCP 绑定从数据库动态读取。"""
+async def build_sales_agent(db: AsyncSession, enable_checkpointer: bool = False):
+    """经营分析子图。内置工具硬编码声明，MCP 绑定从数据库动态读取。
+    enable_checkpointer=True（父图嵌入场景）：compile(checkpointer=True) 继承父图
+    checkpointer（由 wrap_subgraph 经 config 注入），子图内 interrupt 正常工作；
+    默认 False（root 图/单测场景）不启用 checkpointer。"""
     mcp_server_names = await load_mcp_tools_by_agent(db, AGENT_CODE)
     tools = await load_tools(db, TOOL_NAMES, mcp_server_names)
 
@@ -44,4 +47,4 @@ async def build_sales_agent(db: AsyncSession):
     g.set_entry_point("agent")
     g.add_edge("tools", "agent")
     g.add_conditional_edges("agent", should_continue, {"tools": "tools", "end": END})
-    return g.compile()
+    return g.compile(checkpointer=True if enable_checkpointer else None)

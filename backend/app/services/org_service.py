@@ -1,3 +1,4 @@
+from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Department, User
@@ -11,6 +12,8 @@ class OrgService:
         self.user_repo = UserRepository(db)
 
     async def create_department(self, name: str) -> Department:
+        if await self.dept_repo.get_by(name=name):
+            raise HTTPException(status_code=409, detail=f"部门「{name}」已存在")
         dept = Department(name=name)
         await self.dept_repo.add(dept)
         await self.dept_repo.commit()

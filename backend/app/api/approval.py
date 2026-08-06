@@ -20,10 +20,10 @@ async def list_approvals(
     status: str | None = Query(None),
     category: str | None = Query(None),
     svc: ApprovalService = Depends(get_approval_service),
-    _: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
 ):
-    return await svc.list_pending(category)
+    return await svc.list_pending(user, status, category)
 
 @router.post("/{approval_id}/decide")
 async def decide_approval(approval_id: str, body: DecideRequest, svc: ApprovalService = Depends(get_approval_service), user: User = Depends(get_current_user)):
-    return await svc.decide(approval_id, user.id, body.approve, body.comment)
+    return await svc.decide(approval_id, user, body.approve, body.comment)

@@ -1,5 +1,6 @@
 # backend/app/repositories/trace_repo.py
-from sqlalchemy import select
+from sqlalchemy import String, and_, cast, or_, select
+from app.models.org import User
 from app.models.trace import ExecutionTrace, TraceEvent, Approval
 from app.repositories.base import BaseRepository
 
@@ -27,8 +28,26 @@ class ApprovalRepository(BaseRepository[Approval]):
     """统一审批中心 Repository，替代原 HitlRepository + 经验 ApprovalRepository。"""
     model = Approval
 
-    async def list_pending(self, category: str | None = None) -> list[Approval]:
-        q = select(Approval).where(Approval.status == "pending")
+    async def list_for_user(self, user_id: str, role_code: str | None, department_id: str | None,
+                            status: str | None = None, category: str | None = None) -> list[Approval]:
+        """按可见性过滤审批单：
+        - admin：全部
+        - 其他：我发起的 OR 我审批过的 OR（dept_owner 可见本部门待审批的经验晋升）"""
+        q = select(Approval)
+        if status:
+            q = q.where(Approval.status == status)
         if category:
             q = q.where(Approval.category == category)
-        return list((await self.db.scalars(q.order_by(Approval.submitted_at.desc()))).all())
+        if role_code == "admin":
+            return list((await self.db.scalars(q.order_by(Approval.submitted_at.desc()))).all())
+        q = q.outerjoin(User, cast(User.id, String) == Approval.requester_id)
+        conds = [Approval.requester_id == user_id, Approval.approver_id == user_id]
+        if role_code == "dept_owner" and department_id:
+            conds.append(and_(
+                Approval.status == "pending",
+                Approval.approver_role == "dept_owner",
+                User.department_id == department_id,
+            ))
+        return list((await self.db.scalars(
+            q.where(or_(*conds)).order_by(Approval.submitted_at.desc())
+        )).all())

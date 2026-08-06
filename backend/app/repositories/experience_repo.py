@@ -9,9 +9,10 @@ class ExperienceRepository(BaseRepository[Experience]):
 
     async def vector_search(self, query_vec: list[float], limit: int = 30) -> list[Experience]:
         """按向量相似度召回候选经验（service/memory 层不直接执行 SQL）。"""
+        vec_str = "[" + ",".join(map(str, query_vec)) + "]"  # asyncpg 需要字符串形式的向量
         rows = (await self.db.execute(
             sqltext("SELECT id FROM experiences WHERE embedding IS NOT NULL ORDER BY embedding <=> :q LIMIT :k"),
-            {"q": query_vec, "k": limit},
+            {"q": vec_str, "k": limit},
         )).all()
         result = []
         for r in rows:

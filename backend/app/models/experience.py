@@ -22,4 +22,4 @@ class Experience(Base):
     department_id: Mapped[str | None] = mapped_column(String(36), index=True)  # 逻辑外键
     source_trace_id: Mapped[str | None] = mapped_column(String(36))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    embedding: Mapped[list[float] | None] = mapped_column(Vector(1024))
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(1536))

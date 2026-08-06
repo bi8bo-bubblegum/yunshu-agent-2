@@ -16,6 +16,7 @@ class McpIn(BaseModel):
     name: str
     url: str
     auth_type: str = "none"
+    default_risk: str = "medium"  # 服务级默认风险（任务 38.6）
     config: dict = {}
 
 
@@ -42,7 +43,7 @@ def get_config_service(db: AsyncSession = Depends(get_db)) -> ConfigService:
 async def create_mcp(body: McpIn,
                      svc: ConfigService = Depends(get_config_service),
                      _: User = Depends(get_current_user)):
-    return await svc.create_mcp(body.name, body.url, body.auth_type, body.config)
+    return await svc.create_mcp(body.name, body.url, body.auth_type, body.default_risk, body.config)
 
 
 @router.get("/api/mcp-servers")
@@ -99,6 +100,20 @@ async def update_tool_risks(name: str, body: ToolRisksUpdate,
 
 
 # ---- Agent MCP 绑定 ----
+
+# 内置 Agent 常量（与 agents/graph.py 注册的 code 一致）
+BUILTIN_AGENTS = [
+    {"code": "marketing", "name": "营销助手"},
+    {"code": "sales_analysis", "name": "经营分析"},
+    {"code": "scheduling", "name": "调度优化"},
+]
+
+
+@router.get("/api/agents")
+async def list_agents(_: User = Depends(get_current_user)):
+    """内置 Agent 列表（配置页选择 agent 用）。"""
+    return BUILTIN_AGENTS
+
 
 @router.get("/api/agents/{agent_code}/mcp-bindings")
 async def list_agent_bindings(agent_code: str,

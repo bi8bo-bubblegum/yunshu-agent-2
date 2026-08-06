@@ -43,3 +43,20 @@ class KnowledgeService:
     async def search(self, query: str, top_k: int = 5) -> dict:
         query_vec = await embed_query(query)
         return {"results": await self.chunk_repo.vector_search(query_vec, top_k)}
+
+    async def list(self, uploader_id: str) -> list[dict]:
+        """文档列表（按上传者）。"""
+        rows = await self.document_repo.list_by_user(uploader_id)
+        return [{"id": d.id, "title": d.title, "status": d.status,
+                 "created_at": d.created_at.isoformat() if d.created_at else None} for d in rows]
+
+    async def delete(self, uploader_id: str, doc_id: str) -> None:
+        """删除文档：连带 chunk 与磁盘文件。"""
+        doc = await self.document_repo.get(doc_id)
+        if not doc or doc.uploader_id != uploader_id:
+            raise HTTPException(404, "文档不存在")
+        await self.chunk_repo.delete_by_document(doc_id)
+        if doc.file_path and os.path.exists(doc.file_path):
+            os.remove(doc.file_path)
+        await self.document_repo.delete(doc)
+        await self.document_repo.commit()

@@ -15,8 +15,8 @@ class ConfigService:
 
     # ---- MCP 服务 CRUD ----
 
-    async def create_mcp(self, name: str, url: str, auth_type: str, config: dict) -> McpServer:
-        row = McpServer(name=name, url=url, auth_type=auth_type, config=config)
+    async def create_mcp(self, name: str, url: str, auth_type: str, default_risk: str = "medium", config: dict | None = None) -> McpServer:
+        row = McpServer(name=name, url=url, auth_type=auth_type, default_risk=default_risk, config=config or {})
         await self.mcp_repo.add(row)
         await self.mcp_repo.commit()
         mcp_registry.register({
@@ -31,7 +31,7 @@ class ConfigService:
     async def update_tool_risks(self, name: str, tool_risks: dict[str, str]) -> dict:
         """更新 MCP 服务的 config.tool_risks，覆盖特定工具的风险等级。
         config 在注册时为空，由管理员调用本方法写入。"""
-        server = await self.mcp_repo.get(name)
+        server = await self.mcp_repo.get_by(name=name)
         if not server:
             raise HTTPException(404, "MCP 服务不存在")
         config = server.config or {}
@@ -46,7 +46,7 @@ class ConfigService:
         修改后经 _sync_registry 同步运行时注册表，get_mcp_tools 组装 Authorization header。"""
         if auth_type not in ("none", "api_key", "bearer"):
             raise HTTPException(400, "auth_type 仅支持 none/api_key/bearer")
-        server = await self.mcp_repo.get(name)
+        server = await self.mcp_repo.get_by(name=name)
         if not server:
             raise HTTPException(404, "MCP 服务不存在")
         server.auth_type = auth_type

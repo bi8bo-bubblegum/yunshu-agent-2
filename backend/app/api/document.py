@@ -20,6 +20,15 @@ async def upload_document(file: UploadFile = File(...), svc: KnowledgeService = 
     content = await file.read()
     return await svc.upload(user.id, file.filename, content)
 
+@router.get("/api/documents")
+async def list_documents(svc: KnowledgeService = Depends(get_knowledge_service), user: User = Depends(get_current_user)):
+    return await svc.list(user.id)
+
+@router.delete("/api/documents/{doc_id}")
+async def delete_document(doc_id: str, svc: KnowledgeService = Depends(get_knowledge_service), user: User = Depends(get_current_user)):
+    await svc.delete(user.id, doc_id)
+    return {"ok": True}
+
 @router.post("/api/kb/search")
 async def search_kb(body: SearchRequest, svc: KnowledgeService = Depends(get_knowledge_service), _: User = Depends(get_current_user)):
     return await svc.search(body.query, body.top_k)

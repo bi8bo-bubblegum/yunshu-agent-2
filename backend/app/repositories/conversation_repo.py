@@ -13,13 +13,13 @@ class MessageRepository(BaseRepository[Message]):
     model = Message
 
     async def list_by_conversation(self, conversation_id: str) -> list[Message]:
-        stmt = select(Message).where(Message.conversation_id == conversation_id).order_by(Message.created_at)
+        stmt = select(Message).where(Message.conversation_id == conversation_id).order_by(Message.seq)
         return list((await self.db.scalars(stmt)).all())
 
     async def list_recent(self, conversation_id: str, limit: int = 20) -> list[Message]:
         return list((await self.db.scalars(
             select(Message).where(Message.conversation_id == conversation_id)
-            .order_by(Message.created_at.desc()).limit(limit)
+            .order_by(Message.seq.desc()).limit(limit)
         )).all())
 
     async def count_in_conversation(self, conversation_id: str) -> int:

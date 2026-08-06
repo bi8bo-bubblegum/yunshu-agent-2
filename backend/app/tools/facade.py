@@ -1,8 +1,10 @@
 # backend/app/tools/facade.py
+import inspect
 from typing import Awaitable, Callable
 
 from langgraph.types import interrupt
 from pydantic import BaseModel
+from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import StructuredTool
 
 ToolFunc = Callable[..., Awaitable | object]
@@ -43,7 +45,7 @@ class DataFacade:
             fn = tool.fn
         elif tool.risk == "high":
             # 即时确认：interrupt 冻结，当班人确认后执行
-            async def guarded_high(**kwargs):
+            async def guarded_high(config: RunnableConfig, **kwargs):
                 approved = interrupt({
                     "tool": name, "args": kwargs,
                     "reason": f"高风险操作：{tool.description}",
@@ -56,17 +58,21 @@ class DataFacade:
             fn = guarded_high
         elif tool.risk == "critical":
             # 审批中心：创建审批单，interrupt 冻结图等管理者审批
-            async def guarded_critical(**kwargs):
+            async def guarded_critical(config: RunnableConfig, **kwargs):
                 from app.services.approval_service import ApprovalService
                 from app.core.database import SessionLocal
+                # trace_id / requester_id 通过 RunnableConfig 注入（运行时上下文）
+                cfg = (config or {}).get("configurable", {})
+                eff_trace_id = cfg.get("trace_id", "") or trace_id
+                eff_requester = cfg.get("requester_id", "") or requester_id
                 async with SessionLocal() as db:
                     svc = ApprovalService(db)
                     approval_id = await svc.create_approval(
                         category="tool_call", risk="critical", mode="sync",
-                        ref_type="trace", ref_id=trace_id,
+                        ref_type="trace", ref_id=eff_trace_id,
                         title=f"{name} - {tool.description}",
                         context={"tool": name, "args": kwargs, "reason": tool.description},
-                        requester_id=requester_id, approver_role="admin",
+                        requester_id=eff_requester, approver_role="admin",
                     )
                 # interrupt 冻结图，等待审批中心 decide 后 resume
                 result = interrupt({
@@ -80,7 +86,9 @@ class DataFacade:
             fn = guarded_critical
 
         return StructuredTool.from_function(
-            coroutine=fn, name=tool.name, description=tool.description,
+            coroutine=fn if inspect.iscoroutinefunction(fn) else None,
+            func=None if inspect.iscoroutinefunction(fn) else fn,
+            name=tool.name, description=tool.description,
             args_schema=tool.args_schema,
         )
 

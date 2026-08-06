@@ -1,6 +1,6 @@
 from datetime import datetime
 from uuid import uuid4
-from sqlalchemy import UUID, DateTime, String, Text, func
+from sqlalchemy import UUID, DateTime, Identity, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 from app.core.database import Base
@@ -17,9 +17,9 @@ class Conversation(Base):
 
 class Message(Base):
     __tablename__ = "messages"
-
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4()))
-    conversation_id: Mapped[str] = mapped_column(String(36), index=True)
+    conversation_id: Mapped[str] = mapped_column(String(36), index=True)  # 逻辑外键
+    seq: Mapped[int] = mapped_column(Integer, Identity(), nullable=False)  # 会话内消息顺序（created_at 同事务可能相同，需稳定排序）
     role: Mapped[str] = mapped_column(String(16))
     content: Mapped[str] = mapped_column(Text)
     metadata_: Mapped[dict | None] = mapped_column("metadata", JSONB)

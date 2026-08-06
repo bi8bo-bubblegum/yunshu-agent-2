@@ -1,4 +1,6 @@
 # backend/app/services/experience_service.py
+from datetime import date
+
 from fastapi import HTTPException
 from app.models.experience import Experience
 from app.repositories.experience_repo import ExperienceRepository
@@ -12,9 +14,10 @@ class ExperienceService:
 
     async def create(self, user_id: str, department_id: str | None, data) -> Experience:
         vec = (await embed_texts([f"{data.title} {data.summary}"]))[0]
+        event_time = date.fromisoformat(data.event_time) if data.event_time else None
         exp = Experience(owner_id=user_id, scope="personal", status="draft", title=data.title,
                          summary=data.summary, content=data.content, tags=data.tags,
-                         event_time=data.event_time, result_metrics=data.result_metrics,
+                         event_time=event_time, result_metrics=data.result_metrics,
                          department_id=department_id, embedding=vec)
         await self.experience_repo.add(exp)
         await self.experience_repo.commit()

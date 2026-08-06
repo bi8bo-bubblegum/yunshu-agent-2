@@ -24,4 +24,4 @@ class Chunk(Base):
     seq: Mapped[int] = mapped_column(Integer)
     content: Mapped[str] = mapped_column(Text)
     meta_: Mapped[dict | None] = mapped_column("meta", JSONB)
-    embedding: Mapped[list[float] | None] = mapped_column(Vector(1024))
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(1536))

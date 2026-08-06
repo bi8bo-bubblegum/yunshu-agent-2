@@ -18,7 +18,7 @@ async def load_mcp_tools_with_risk(db: AsyncSession, server_name: str) -> list[T
 
     # 2. 查数据库获取风险配置
     mcp_repo = McpServerRepository(db)
-    server = await mcp_repo.get(server_name)
+    server = await mcp_repo.get_by(name=server_name)
     if not server or not server.enabled:
         return []
 

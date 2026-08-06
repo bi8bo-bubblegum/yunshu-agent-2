@@ -14,7 +14,7 @@ class TraceCollector:
         try:
             self.queue.put_nowait({
                 "trace_id": trace_id, "type": type_, "payload": payload,
-                "created_at": datetime.now(timezone.utc).isoformat(),
+                "created_at": datetime.now(timezone.utc),  # 保持 datetime，writer 直接 insert DateTime 列
             })
         except asyncio.QueueFull:
             pass
