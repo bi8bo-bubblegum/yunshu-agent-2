@@ -1,9 +1,14 @@
 from pydantic import BaseModel, Field
 
 class QueryMarketingCampaignsArgs(BaseModel):
-    status: str = Field(description="活动状态：active（进行中）/ scheduled（待发布）/ ended（已结束）")
+    status: str = Field(description="活动状态过滤：active=进行中、scheduled=待发布、ended=已结束。必填，仅支持这三个取值。")
 
-DESCRIPTION = "查询营销活动列表。返回活动的名称、渠道、预算、状态等概要信息。供营销助手 agent 使用。"
+DESCRIPTION = (
+    "查询营销活动列表，可按状态过滤，返回活动概要：id（活动ID）、name（名称）、"
+    "channel（投放渠道）、budget（预算，元）、status（状态）。"
+    "用于营销策划前了解现有活动、避免重复投放与预算冲突。"
+    "注意：status 为必填参数，仅支持 active（进行中）/ scheduled（待发布）/ ended（已结束）。"
+)
 
 def query_marketing_campaigns(status: str) -> list[dict]:
     all_campaigns = [

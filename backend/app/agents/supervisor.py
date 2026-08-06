@@ -17,8 +17,20 @@ async def route_decision(message: str, agents: list[str], model_key: str = "defa
     llm = ModelFactory.get_llm(model_key).with_structured_output(RouteDecision)
     try:
         result = await llm.ainvoke(
-            f"你是意图路由器。根据用户消息和对话历史，判断下一步交给哪个 agent，"
-            f"可选：{agents}。如果任务已完成，返回 done。\n消息：{message}"
+            f"你是多智能体系统的意图路由器。请根据用户消息与上一轮 agent 的输出，"
+            f"从候选列表中选出唯一一个最合适的 agent 继续执行；"
+            f"仅当任务已经完成、无需再调用任何 agent 时才返回 done。\n"
+            f"\n"
+            f"候选 agent：{agents}\n"
+            f"\n"
+            f"## 判断原则\n"
+            f"1. 营销策划 / 活动管理类 → marketing；\n"
+            f"2. 经营分析 / 销售数据 / 指标查询类 → sales_analysis；\n"
+            f"3. 排班 / 调度 / 资源排期类 → scheduling；\n"
+            f"4. 上一轮 agent 已完整回答用户诉求且无后续协作需求 → done；\n"
+            f"5. 上一轮 agent 只完成部分诉求，或需要其他 agent 补充分析 → 选择对应 agent 继续。\n"
+            f"\n"
+            f"消息：{message}"
         )
         data = result.model_dump()
     except Exception:

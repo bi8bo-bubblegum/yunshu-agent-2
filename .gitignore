@@ -21,5 +21,8 @@ dist/
 # 运行时数据
 backend/storage/
 
+# 抓取缓存
+.firecrawl/
+
 # 系统
 .DS_Store
