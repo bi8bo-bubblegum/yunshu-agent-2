@@ -69,7 +69,6 @@ async def _stubs(monkeypatch):
     monkeypatch.setattr("app.memory.assembly.knowledge.retrieve_knowledge", _kb)
     monkeypatch.setattr("app.services.chat_service.maybe_extract_batch", _extract)
     monkeypatch.setattr("app.services.chat_service.distill_experience", _distill)
-    monkeypatch.setattr("app.services.chat_service.generate_title", _title)
     # 审批恢复路径在函数内按模块导入，需按源模块 stub
     monkeypatch.setattr("app.services.preference_svc.maybe_extract_batch", _extract)
     monkeypatch.setattr("app.services.experience_svc.distill_experience", _distill)

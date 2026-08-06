@@ -9,7 +9,6 @@ from langchain_core.messages import AIMessage, AIMessageChunk
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.graph import get_graph
-from app.core.database import SessionLocal
 from app.memory.assembly import assemble_memory
 from app.models.chat import Conversation, Message
 from app.models.trace import ExecutionTrace
@@ -18,31 +17,11 @@ from app.repositories.trace_repo import TraceRepository
 from app.repositories.user_repo import UserRepository
 from app.services.experience_svc import distill_experience, save_personal_experience
 from app.services.preference_svc import maybe_extract_batch
-from app.services.summary import generate_title, maybe_roll_summary
+from app.services.summary import maybe_roll_summary, schedule_title_generation
 from app.traces.collector import collector
 from app.traces.handlers import StreamEventHandler, TraceCallbackHandler
 
 logger = logging.getLogger(__name__)
-
-
-async def _auto_title_async(conv_id: str, message: str) -> str | None:
-    """后台标题生成通用方法：从独立 session 调用 LLM 生成并写入 DB。
-    仅在当前标题仍为默认值时写入，避免覆盖已有标题。
-    返回生成的标题（可能是 None），供 SSE done 事件携带给前端。"""
-    try:
-        new_title = await generate_title(message)
-        if not new_title or new_title == "新对话":
-            return None
-        async with SessionLocal() as db:
-            repo = ConversationRepository(db)
-            conv = await repo.get(conv_id)
-            if conv and conv.title in ("新对话", "", None):
-                conv.title = new_title
-                await repo.commit()
-                return new_title
-    except Exception as e:
-        logger.warning("后台标题生成失败（已降级）: %s", e)
-    return None
 
 
 class ChatService:
@@ -76,12 +55,11 @@ class ChatService:
         # done 事件携带标题，前端收到后只 patch 列表对应项，不影响消息区。
         _title_result: dict[str, str] = {}
 
-        async def _auto_title():
-            title = await _auto_title_async(conv_id, message)
+        def _on_title(title: str | None):
             if title:
                 _title_result["title"] = title
 
-        asyncio.create_task(_auto_title())
+        schedule_title_generation(conv_id, message, on_done=_on_title)
         yield json.dumps({"event": "start", "trace_id": trace.id}, ensure_ascii=False)
         # 装配多层记忆
         user = await self.user_repo.get(user_id)
@@ -184,6 +162,8 @@ class ChatService:
             await maybe_roll_summary(self.db, conv_id)
         except Exception as e:
             logger.warning("记忆沉淀后处理失败（已降级）: %s", e)
+        # answer 携带完整最终文本（前端在无 token 流式时兜底填充，已流式时跳过避免重复）
+        yield json.dumps({"event": "answer", "content": text}, ensure_ascii=False)
         # done 事件携带标题，前端收到后只 patch 会话列表对应项，不影响消息区
         yield json.dumps({"event": "done", "title": _title_result.get("title")}, ensure_ascii=False)
 
@@ -238,5 +218,5 @@ class ChatService:
             logger.warning("resume 后记忆沉淀处理失败（已降级）: %s", e)
         # 标题生成兜底：stream_chat 被中断时其后台标题任务可能已取消，
         # 在 resume 中重试以确保最终一定能生成标题
-        asyncio.create_task(_auto_title_async(conv_id, user_msg if user_msg else (text[:500])))
+        schedule_title_generation(conv_id, user_msg if user_msg else (text[:500]))
         return {"ok": True, "content": text}

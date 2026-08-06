@@ -194,11 +194,17 @@ async def main() -> int:
         check("消息落库（user+assistant）", r.status_code == 200 and "user" in roles and "assistant" in roles,
               str(roles)[:200])
 
-        # 首次发送后自动生成会话标题
-        r = await client.get("/api/conversations", headers=h_user)
-        cur = next((c for c in r.json() if c.get("id") == conv_id), None)
-        check("首条消息后自动生成会话标题", bool(cur and cur.get("title") not in ("新对话", "", None)),
-              str(cur)[:150])
+        # 首次发送后自动生成会话标题（后台异步生成，轮询等待）
+        title_ok = False
+        cur = None
+        for _ in range(15):
+            r = await client.get("/api/conversations", headers=h_user)
+            cur = next((c for c in r.json() if c.get("id") == conv_id), None)
+            if cur and cur.get("title") not in ("新对话", "", None):
+                title_ok = True
+                break
+            await asyncio.sleep(2)
+        check("首条消息后自动生成会话标题", title_ok, str(cur)[:150])
 
         r = await client.get("/api/traces", headers=h_user)
         traces = r.json() if r.status_code == 200 else []

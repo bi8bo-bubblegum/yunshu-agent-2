@@ -128,7 +128,7 @@ class ApprovalService:
         try:
             from app.services.preference_svc import maybe_extract_batch
             from app.services.experience_svc import distill_experience, save_personal_experience
-            from app.services.summary import generate_title, maybe_roll_summary
+            from app.services.summary import maybe_roll_summary, schedule_title_generation
             all_msgs = await message_repo.list_by_conversation(trace.conversation_id)
             user_msg = next((m.content for m in reversed(all_msgs) if m.role == "user"), "")
             dialog = f"用户：{user_msg}\n助手：{text}"
@@ -137,11 +137,8 @@ class ApprovalService:
             if exp:
                 await save_personal_experience(self.db, exp)
             await maybe_roll_summary(self.db, trace.conversation_id)
-            if conv and conv.title in ("新对话", "", None) and user_msg:
-                new_title = await generate_title(user_msg)
-                if new_title and new_title != "新对话":
-                    conv.title = new_title
-                    await trace_repo.commit()
+            # 标题生成走后台任务（独立 Session + 会话级去重），不阻塞审批响应
+            schedule_title_generation(trace.conversation_id, user_msg or text[:500])
         except Exception as e:
             logger.warning("审批恢复后记忆沉淀处理失败（已降级）: %s", e)
 

@@ -1,7 +1,11 @@
+import asyncio
 import logging
+from collections.abc import Callable
+
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.database import SessionLocal
 from app.llm.factory import ModelFactory
 from app.repositories.conversation_repo import ConversationRepository, MessageRepository
 
@@ -14,6 +18,49 @@ class SummaryOutput(BaseModel):
 
 class TitleOutput(BaseModel):
     title: str = Field(description="简洁的中文会话标题，10~20 字，概括消息核心意图")
+
+
+# 后台标题生成任务管理：持有任务引用防止 GC 提前取消；按会话去重避免重复调用
+_bg_title_tasks: set[asyncio.Task] = set()
+_inflight_titles: set[str] = set()
+
+
+async def auto_title_async(conv_id: str, message: str) -> str | None:
+    """生成会话标题并写库（独立 Session）。仅在标题仍为默认值时写入，返回标题或 None。"""
+    try:
+        new_title = await generate_title(message)
+        if not new_title or new_title == "新对话":
+            return None
+        async with SessionLocal() as db:
+            repo = ConversationRepository(db)
+            conv = await repo.get(conv_id)
+            if conv and conv.title in ("新对话", "", None):
+                conv.title = new_title
+                await repo.commit()
+                return new_title
+    except Exception as e:
+        logger.warning("后台标题生成失败（已降级）: %s", e)
+    return None
+
+
+def schedule_title_generation(conv_id: str, message: str,
+                              on_done: Callable[[str | None], None] | None = None) -> None:
+    """后台调度标题生成：持有任务引用防 GC，同一会话在途时不重复调度。"""
+    if conv_id in _inflight_titles:
+        return
+    _inflight_titles.add(conv_id)
+
+    async def _run():
+        try:
+            title = await auto_title_async(conv_id, message)
+            if on_done:
+                on_done(title)
+        finally:
+            _inflight_titles.discard(conv_id)
+
+    task = asyncio.create_task(_run())
+    _bg_title_tasks.add(task)
+    task.add_done_callback(_bg_title_tasks.discard)
 
 
 async def generate_title(message: str) -> str:

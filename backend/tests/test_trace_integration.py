@@ -44,7 +44,7 @@ async def test_trace_created_per_chat(monkeypatch):
     monkeypatch.setattr("app.memory.assembly.knowledge.retrieve_knowledge", _kb)
     monkeypatch.setattr("app.services.chat_service.maybe_extract_batch", _extract)
     monkeypatch.setattr("app.services.chat_service.distill_experience", _distill)
-    monkeypatch.setattr("app.services.chat_service.generate_title", _title)
+    monkeypatch.setattr("app.services.summary.generate_title", _title)
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
