@@ -17,8 +17,10 @@ const router = useRouter()
 
 onMounted(loadConvs)
 
-// keep-alive 下从其他页面切回时滚动到底部（流式消息可能已推进）
+// keep-alive 下从其他页面切回时刷新消息并滚动到底部
+// （审批中心处理完 critical 后回复可能已落库；流式进行中则保留现场）
 onActivated(async () => {
+  if (currentId.value && !streaming.value && messages.value.length) await selectConv(currentId.value)
   await nextTick()
   listRef.value?.scrollTo({ top: listRef.value.scrollHeight })
 })
@@ -124,7 +126,23 @@ async function decide(approved: boolean) {
   }
   confirmState.value.visible = false
   try {
-    await resumeChat(convId, approved)
+    const { data } = await resumeChat(convId, approved)
+    // 恢复后图内还有后续中断：critical 进审批中心 / high 继续即时确认，需要重新弹窗
+    if (data?.ok === false && data.payload) {
+      const p = data.payload as Record<string, unknown>
+      const critical = Boolean(p.approval_id)
+      confirmState.value = {
+        visible: true,
+        conversationId: convId,
+        tool: String(p.tool ?? '未知工具'),
+        args: p.args ?? {},
+        reason: String(p.reason ?? '高风险操作需要确认'),
+        critical,
+        approvalId: String(p.approval_id ?? ''),
+      }
+      toast(critical ? '该操作已提交审批中心，请管理员审批' : '还有下一步操作需要确认', 'info')
+      return
+    }
     toast(approved ? '已确认执行' : '已驳回', approved ? 'success' : 'info')
     await selectConv(convId) // 恢复后刷新消息
   } catch (e: any) {
