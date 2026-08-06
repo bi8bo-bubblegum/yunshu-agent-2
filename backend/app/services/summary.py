@@ -19,12 +19,26 @@ class TitleOutput(BaseModel):
 async def generate_title(message: str) -> str:
     """根据用户消息生成简洁会话标题（首次发送时调用）。"""
     llm = ModelFactory.get_llm().with_structured_output(TitleOutput)
-    result = await llm.ainvoke(
+    prompt = (
         "根据用户消息为会话生成一个简洁的中文标题（10~20 字），"
         "概括消息的核心意图，不要包含引号、标点或多余修饰。\n消息："
         + message[:500]
     )
-    return (result.title or "").strip()[:30] or "新对话"
+    # LLM 偶发解析失败：重试一次并强调输出约束；仍失败则兜底取消息前 20 字，
+    # 保证真实消息一定会获得非默认标题
+    for attempt, hint in enumerate((
+        "",
+        "\n注意：只输出标题文本本身，不要加引号、解释或额外内容。",
+    )):
+        try:
+            result = await llm.ainvoke(prompt + hint)
+            title = (result.title or "").strip()[:30]
+            if title:
+                return title
+        except Exception as e:
+            logger.warning("标题生成 LLM 调用失败（第 %d 次）: %s", attempt + 1, e)
+    fallback = message.strip()[:20]
+    return fallback or "新对话"
 
 
 async def summarize_text(messages_text: str) -> str:
