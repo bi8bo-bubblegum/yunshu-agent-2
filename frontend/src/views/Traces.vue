@@ -2,6 +2,7 @@
 import { ref, onMounted } from 'vue'
 import client from '../api/client'
 import { toast } from '../api/toast'
+import { fmtTime } from '../api/format'
 import type { TraceItem, TraceEventItem } from '../api/types'
 
 const traces = ref<TraceItem[]>([])
@@ -83,7 +84,7 @@ function fmtPayload(p: Record<string, unknown>): string {
             <div class="tl-body">
               <div class="row-between">
                 <span class="tag" :class="typeTag[e.type] ?? 'tag-gray'">{{ typeLabel[e.type] ?? e.type }}</span>
-                <span class="muted mono text-sm">{{ e.created_at?.slice(11, 19) }}</span>
+                <span class="muted mono text-sm">{{ fmtTime(e.created_at) }}</span>
               </div>
               <pre class="mono tl-payload">{{ fmtPayload(e.payload) }}</pre>
             </div>

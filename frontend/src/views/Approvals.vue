@@ -2,6 +2,7 @@
 import { ref, onMounted } from 'vue'
 import client from '../api/client'
 import { toast } from '../api/toast'
+import { fmtDateTime } from '../api/format'
 import type { ApprovalItem } from '../api/types'
 
 const status = ref('pending')
@@ -85,7 +86,7 @@ function fmtArgs(ctx: Record<string, unknown> | null): string {
               </td>
               <td class="muted text-sm mono" style="max-width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ fmtArgs(a.context) }}</td>
               <td class="muted text-sm">{{ a.requester_id?.slice(0, 8) }}</td>
-              <td class="muted text-sm">{{ a.submitted_at?.slice(0, 16) }}</td>
+              <td class="muted text-sm">{{ fmtDateTime(a.submitted_at) }}</td>
               <td><span class="tag" :class="statusTag[a.status] ?? 'tag-gray'">{{ a.status }}</span></td>
               <td style="text-align:right">
                 <button v-if="a.status === 'pending'" class="btn btn-sm btn-primary" @click="openDecide(a)">审批</button>

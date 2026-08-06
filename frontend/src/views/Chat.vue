@@ -5,6 +5,7 @@ import { useRouter } from 'vue-router'
 import { streamChat, resumeChat, type SSEEvent } from '../api/chat'
 import client from '../api/client'
 import { toast } from '../api/toast'
+import { fmtDateTime } from '../api/format'
 import type { Conversation, Message } from '../api/types'
 
 const convs = ref<Conversation[]>([])
@@ -264,7 +265,7 @@ const activeConv = computed(() => convs.value.find(c => c.id === currentId.value
              :data-active="c.id === currentId" @click="selectConv(c.id)">
           <button class="conv-del" title="删除会话" @click.stop="removeConv(c)">✕</button>
           <div class="conv-title">{{ c.title || '新会话' }}</div>
-          <div class="conv-meta">{{ c.created_at?.slice(0, 16) }}</div>
+          <div class="conv-meta">{{ fmtDateTime(c.created_at) }}</div>
         </div>
         <div v-if="!convs.length" class="empty"><span class="icon">💬</span>暂无会话</div>
       </div>

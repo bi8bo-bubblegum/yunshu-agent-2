@@ -2,6 +2,7 @@
 import { ref, onMounted } from 'vue'
 import client from '../api/client'
 import { toast } from '../api/toast'
+import { fmtDateTime } from '../api/format'
 import type { DocumentItem, SearchHit } from '../api/types'
 
 const docs = ref<DocumentItem[]>([])
@@ -86,7 +87,7 @@ const statusTag: Record<string, string> = { ready: 'tag-green', parsing: 'tag-bl
               <tr v-for="d in docs" :key="d.id">
                 <td>{{ d.title }}</td>
                 <td><span class="tag" :class="statusTag[d.status] ?? 'tag-gray'">{{ d.status }}</span></td>
-                <td class="muted text-sm">{{ d.created_at?.slice(0, 16) }}</td>
+                <td class="muted text-sm">{{ fmtDateTime(d.created_at) }}</td>
                 <td style="text-align:right">
                   <button class="btn btn-danger btn-sm" @click="removeDoc(d.id, d.title)">删除</button>
                 </td>
