@@ -66,7 +66,10 @@ async def list_mcp_tools(name: str,
         raise HTTPException(404, "MCP 服务未注册")
 
     # 连接 MCP 服务发现工具
-    raw_tools = await get_mcp_tools(name)
+    try:
+        raw_tools = await get_mcp_tools(name)
+    except Exception as e:
+        raise HTTPException(502, f"连接 MCP 服务失败: {e}")
 
     # 查风险配置
     mcp_repo = McpServerRepository(db)

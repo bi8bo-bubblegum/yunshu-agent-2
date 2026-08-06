@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+*.egg-info/
+
+# 环境与密钥（密钥文件绝不入库）
+.env
+!.env.example
+
+# 前端
+node_modules/
+dist/
+*.tsbuildinfo
+
+# IDE
+.idea/
+.vscode/
+
+# 运行时数据
+backend/storage/
+
+# 系统
+.DS_Store

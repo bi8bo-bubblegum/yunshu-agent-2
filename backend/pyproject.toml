@@ -15,6 +15,9 @@ dependencies = [
     "langchain-core>=0.3.0",
     "langchain-openai>=0.2.0",
     "langchain-mcp-adapters>=0.1.0",
+    # langchain-mcp-adapters 0.3.1 依赖 mcp.shared.context.RequestContext，
+    # 该符号在 mcp 2.0 已移除，钉在 1.x 保证兼容
+    "mcp>=1.24.0,<2",
     "langchain-text-splitters>=0.2.0",
     "pgvector>=0.3.0",
     "pyjwt>=2.9",

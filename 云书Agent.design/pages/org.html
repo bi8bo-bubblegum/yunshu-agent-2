@@ -1,0 +1,907 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>组织架构</title>
+    <style id="theme-vars">
+/* @dark-only */
+/* TikTok color and type tokens */
+/* Source: structured-spec */
+
+:root {
+  
+  /* solo-design consumption aliases: explicit prefix for fill-html-head.mjs */
+  --tk-background: var(--background, #ffffff);
+  --tk-foreground: var(--foreground, #0f172a);
+  --tk-card: var(--card, var(--background));
+  --tk-card-foreground: var(--card-foreground, var(--foreground));
+  --tk-popover: var(--popover, var(--card));
+  --tk-popover-foreground: var(--popover-foreground, var(--card-foreground, var(--foreground)));
+  --tk-primary: var(--primary, #111827);
+  --tk-primary-foreground: var(--primary-foreground, #ffffff);
+  --tk-secondary: var(--secondary, var(--muted, var(--card)));
+  --tk-secondary-foreground: var(--secondary-foreground, var(--foreground));
+  --tk-muted: var(--muted, var(--card));
+  --tk-muted-foreground: var(--muted-foreground, var(--foreground));
+  --tk-accent: var(--accent, var(--secondary, var(--muted, var(--card))));
+  --tk-accent-foreground: var(--accent-foreground, var(--foreground));
+  --tk-destructive: var(--destructive, #ef4444);
+  --tk-destructive-foreground: var(--destructive-foreground, #ffffff);
+  --tk-border: var(--border, currentColor);
+  --tk-input: var(--input, var(--border));
+  --tk-ring: var(--ring, var(--primary));
+  --tk-chart-1: var(--chart-1, var(--primary));
+  --tk-chart-2: var(--chart-2, var(--secondary, var(--primary)));
+  --tk-chart-3: var(--chart-3, var(--accent, var(--primary)));
+  --tk-chart-4: var(--chart-4, var(--muted-foreground, var(--foreground)));
+  --tk-chart-5: var(--chart-5, var(--foreground));
+  --tk-sidebar: var(--sidebar, var(--background));
+  --tk-sidebar-foreground: var(--sidebar-foreground, var(--foreground));
+  --tk-sidebar-primary: var(--sidebar-primary, var(--primary));
+  --tk-sidebar-primary-foreground: var(--sidebar-primary-foreground, var(--primary-foreground));
+  --tk-sidebar-accent: var(--sidebar-accent, var(--accent, var(--muted, var(--card))));
+  --tk-sidebar-accent-foreground: var(--sidebar-accent-foreground, var(--accent-foreground, var(--foreground)));
+
+/* Source: structured-spec */
+  /* Brand colors */
+  /* --tk-red: #FE2C55;
+  --tk-cyan: #25F4EE;
+  --tk-black: #161823;
+  --tk-white: #FFFFFF; */
+
+  /* tk-red scale · 默认 --tk-red-500 = #FE2C55 */
+  --tk-red-100: #FFE9EE;
+  --tk-red-200: #FFC9D5;
+  --tk-red-300: #FFA0B5;
+  --tk-red-400: #FF6485;
+  --tk-red-500: #FE2C55;
+  --tk-red-600: #E61E45;
+  --tk-red-700: #C01338;
+  --tk-red-800: #990C2B;
+  --tk-red-900: #6B061D;
+  --tk-red-1000: #3D0210;
+
+  /* tk-cyan scale · 默认 --tk-cyan-400 = #25F4EE */
+  --tk-cyan-100: #E3FEFD;
+  --tk-cyan-200: #BAFCFA;
+  --tk-cyan-300: #7CF8F4;
+  --tk-cyan-400: #25F4EE;
+  --tk-cyan-500: #14D6D0;
+  --tk-cyan-600: #0FB3AE;
+  --tk-cyan-700: #0C8F8B;
+  --tk-cyan-800: #086B68;
+  --tk-cyan-900: #054745;
+  --tk-cyan-1000: #022322;
+
+  /* tk-black scale · 默认 --tk-black-1000 = #161823 */
+  --tk-black-100: #EBEBED;
+  --tk-black-200: #D2D3D7;
+  --tk-black-300: #ABACB4;
+  --tk-black-400: #84868F;
+  --tk-black-500: #5D5F6B;
+  --tk-black-600: #44454F;
+  --tk-black-700: #313340;
+  --tk-black-800: #232533;
+  --tk-black-900: #1B1D29;
+  --tk-black-1000: #161823;
+
+  /* tk-white scale · 默认 --tk-white-100 = #FFFFFF */
+  --tk-white-100: #FFFFFF;
+  --tk-white-200: #FAFAFB;
+  --tk-white-300: #F2F2F4;
+  --tk-white-400: #E8E8EC;
+  --tk-white-500: #DCDCE2;
+  --tk-white-600: #C9C9D1;
+  --tk-white-700: #ABABB5;
+  --tk-white-800: #87878F;
+  --tk-white-900: #5E5E66;
+  --tk-white-1000: #36363B;
+
+  /* Brand · 品牌强调色（红主青辅，小面积高识别） */
+  --primary: #FE2C55;
+  --secondary: #25F4EE;
+
+  /* Surface · 表面层级 */
+  --background: #0B0B10;
+  --card: #161823;
+  --card-elevated: #1C1E2A;
+  --video-bg: #16161C;
+
+  /* Content · 前景内容（on-media/on-accent 为深底或强调底上的固定前景） */
+  --foreground: #F5F5F7;
+  --muted-foreground: #AEB2C0;
+  --on-media: #FFFFFF;
+  --on-accent: #161823;
+
+  /* Border · 分隔线 */
+  --border: #3A3D52;
+
+  /* Radius · 克制、偏利落的圆角语言 */
+  /* shell 仅用于 UI Kit 展示外壳；大多数真实产品容器以 sm / md / lg 为主 */
+  --radius-xs: 2px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-shell: 32px;
+  --radius-pill: 999px;
+
+  /* Success · 成功状态 */
+  --success: #10B981;
+  --success-bg: #0E2A22;
+  --success-fg: #34D399;
+
+  /* Error · 错误状态 */
+  --destructive: #E5484D;
+  --error-bg: #2E1416;
+  --error-fg: #FF6485;
+
+  /* Type families */
+  --font-display: Inter, "TikTok Display", ui-sans-serif, sans-serif;
+  --font-sans: Inter, "TikTok Sans", ui-sans-serif, sans-serif;
+  --font-serif: Georgia, Times, serif;
+  --font-mono: "JetBrains Mono", monospace;
+
+  /* Type metrics */
+  --display-size: clamp(48px, 7vw, 96px);
+  --display-weight: 600-700;
+  --display-line-height: 0.95;
+  --display-letter-spacing: -0.02em;
+  --h2-size: 28-32;
+  --h2-weight: 600;
+  --h2-line-height: 1.15;
+  --h3-size: 18-20;
+  --h3-weight: 600;
+  --h3-line-height: 1.3;
+  --body-size: 14-15;
+  --body-weight: 400;
+  --body-line-height: 1.6;
+  --kicker-size: 11;
+  --kicker-weight: 400;
+  --kicker-letter-spacing: 0.14em;
+  --kicker-text-transform: uppercase;
+}
+
+/* Semantic radius aliases for solo-design head contract */
+:root {
+  --tk-radius-sm: var(--radius-sm, 6px);
+  --tk-radius-md: var(--radius-md, 8px);
+  --tk-radius-lg: var(--radius-lg, 12px);
+  --tk-radius-xl: var(--radius-xl, 16px);
+}
+
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.1/dist/index.global.js"></script>
+    <script src="https://unpkg.com/lucide@1.8.0/dist/umd/lucide.min.js"></script>
+    <style type="text/tailwindcss">
+  @theme inline {
+    --color-background: var(--tk-background);
+    --color-foreground: var(--tk-foreground);
+    --color-card: var(--tk-card);
+    --color-card-foreground: var(--tk-card-foreground);
+    --color-popover: var(--tk-popover);
+    --color-popover-foreground: var(--tk-popover-foreground);
+    --color-primary: var(--tk-primary);
+    --color-primary-foreground: var(--tk-primary-foreground);
+    --color-secondary: var(--tk-secondary);
+    --color-secondary-foreground: var(--tk-secondary-foreground);
+    --color-muted: var(--tk-muted);
+    --color-muted-foreground: var(--tk-muted-foreground);
+    --color-accent: var(--tk-accent);
+    --color-accent-foreground: var(--tk-accent-foreground);
+    --color-destructive: var(--tk-destructive);
+    --color-destructive-foreground: var(--tk-destructive-foreground);
+    --color-border: var(--tk-border);
+    --color-input: var(--tk-input);
+    --color-ring: var(--tk-ring);
+    --color-chart-1: var(--tk-chart-1);
+    --color-chart-2: var(--tk-chart-2);
+    --color-chart-3: var(--tk-chart-3);
+    --color-chart-4: var(--tk-chart-4);
+    --color-chart-5: var(--tk-chart-5);
+    --color-sidebar: var(--tk-sidebar);
+    --color-sidebar-foreground: var(--tk-sidebar-foreground);
+    --color-sidebar-primary: var(--tk-sidebar-primary);
+    --color-sidebar-primary-foreground: var(--tk-sidebar-primary-foreground);
+    --color-sidebar-accent: var(--tk-sidebar-accent);
+    --color-sidebar-accent-foreground: var(--tk-sidebar-accent-foreground);
+    --radius-sm: var(--tk-radius-sm);
+    --radius-md: var(--tk-radius-md);
+    --radius-lg: var(--tk-radius-lg);
+    --radius-xl: var(--tk-radius-xl);
+  }
+  @layer base {
+    body { background: var(--tk-background); color: var(--tk-foreground); }
+    td, th { @apply break-words; word-break: break-all; word-break: auto-phrase; }
+    th { @apply whitespace-nowrap; }
+  }
+    </style>
+    <style id="semantic-token-fallback">
+      .bg-background { background-color: var(--tk-background); }
+      .text-background { color: var(--tk-background); }
+      .border-background { border-color: var(--tk-background); }
+      .ring-background { --tw-ring-color: var(--tk-background); }
+      .bg-foreground { background-color: var(--tk-foreground); }
+      .text-foreground { color: var(--tk-foreground); }
+      .border-foreground { border-color: var(--tk-foreground); }
+      .ring-foreground { --tw-ring-color: var(--tk-foreground); }
+      .bg-card { background-color: var(--tk-card); }
+      .text-card { color: var(--tk-card); }
+      .border-card { border-color: var(--tk-card); }
+      .ring-card { --tw-ring-color: var(--tk-card); }
+      .bg-card-foreground { background-color: var(--tk-card-foreground); }
+      .text-card-foreground { color: var(--tk-card-foreground); }
+      .border-card-foreground { border-color: var(--tk-card-foreground); }
+      .ring-card-foreground { --tw-ring-color: var(--tk-card-foreground); }
+      .bg-popover { background-color: var(--tk-popover); }
+      .text-popover { color: var(--tk-popover); }
+      .border-popover { border-color: var(--tk-popover); }
+      .ring-popover { --tw-ring-color: var(--tk-popover); }
+      .bg-popover-foreground { background-color: var(--tk-popover-foreground); }
+      .text-popover-foreground { color: var(--tk-popover-foreground); }
+      .border-popover-foreground { border-color: var(--tk-popover-foreground); }
+      .ring-popover-foreground { --tw-ring-color: var(--tk-popover-foreground); }
+      .bg-primary { background-color: var(--tk-primary); }
+      .text-primary { color: var(--tk-primary); }
+      .border-primary { border-color: var(--tk-primary); }
+      .ring-primary { --tw-ring-color: var(--tk-primary); }
+      .bg-primary-foreground { background-color: var(--tk-primary-foreground); }
+      .text-primary-foreground { color: var(--tk-primary-foreground); }
+      .border-primary-foreground { border-color: var(--tk-primary-foreground); }
+      .ring-primary-foreground { --tw-ring-color: var(--tk-primary-foreground); }
+      .bg-secondary { background-color: var(--tk-secondary); }
+      .text-secondary { color: var(--tk-secondary); }
+      .border-secondary { border-color: var(--tk-secondary); }
+      .ring-secondary { --tw-ring-color: var(--tk-secondary); }
+      .bg-secondary-foreground { background-color: var(--tk-secondary-foreground); }
+      .text-secondary-foreground { color: var(--tk-secondary-foreground); }
+      .border-secondary-foreground { border-color: var(--tk-secondary-foreground); }
+      .ring-secondary-foreground { --tw-ring-color: var(--tk-secondary-foreground); }
+      .bg-muted { background-color: var(--tk-muted); }
+      .text-muted { color: var(--tk-muted); }
+      .border-muted { border-color: var(--tk-muted); }
+      .ring-muted { --tw-ring-color: var(--tk-muted); }
+      .bg-muted-foreground { background-color: var(--tk-muted-foreground); }
+      .text-muted-foreground { color: var(--tk-muted-foreground); }
+      .border-muted-foreground { border-color: var(--tk-muted-foreground); }
+      .ring-muted-foreground { --tw-ring-color: var(--tk-muted-foreground); }
+      .bg-accent { background-color: var(--tk-accent); }
+      .text-accent { color: var(--tk-accent); }
+      .border-accent { border-color: var(--tk-accent); }
+      .ring-accent { --tw-ring-color: var(--tk-accent); }
+      .bg-accent-foreground { background-color: var(--tk-accent-foreground); }
+      .text-accent-foreground { color: var(--tk-accent-foreground); }
+      .border-accent-foreground { border-color: var(--tk-accent-foreground); }
+      .ring-accent-foreground { --tw-ring-color: var(--tk-accent-foreground); }
+      .bg-destructive { background-color: var(--tk-destructive); }
+      .text-destructive { color: var(--tk-destructive); }
+      .border-destructive { border-color: var(--tk-destructive); }
+      .ring-destructive { --tw-ring-color: var(--tk-destructive); }
+      .bg-destructive-foreground { background-color: var(--tk-destructive-foreground); }
+      .text-destructive-foreground { color: var(--tk-destructive-foreground); }
+      .border-destructive-foreground { border-color: var(--tk-destructive-foreground); }
+      .ring-destructive-foreground { --tw-ring-color: var(--tk-destructive-foreground); }
+      .bg-border { background-color: var(--tk-border); }
+      .text-border { color: var(--tk-border); }
+      .border-border { border-color: var(--tk-border); }
+      .ring-border { --tw-ring-color: var(--tk-border); }
+      .bg-input { background-color: var(--tk-input); }
+      .text-input { color: var(--tk-input); }
+      .border-input { border-color: var(--tk-input); }
+      .ring-input { --tw-ring-color: var(--tk-input); }
+      .bg-ring { background-color: var(--tk-ring); }
+      .text-ring { color: var(--tk-ring); }
+      .border-ring { border-color: var(--tk-ring); }
+      .ring-ring { --tw-ring-color: var(--tk-ring); }
+      .bg-chart-1 { background-color: var(--tk-chart-1); }
+      .text-chart-1 { color: var(--tk-chart-1); }
+      .border-chart-1 { border-color: var(--tk-chart-1); }
+      .ring-chart-1 { --tw-ring-color: var(--tk-chart-1); }
+      .bg-chart-2 { background-color: var(--tk-chart-2); }
+      .text-chart-2 { color: var(--tk-chart-2); }
+      .border-chart-2 { border-color: var(--tk-chart-2); }
+      .ring-chart-2 { --tw-ring-color: var(--tk-chart-2); }
+      .bg-chart-3 { background-color: var(--tk-chart-3); }
+      .text-chart-3 { color: var(--tk-chart-3); }
+      .border-chart-3 { border-color: var(--tk-chart-3); }
+      .ring-chart-3 { --tw-ring-color: var(--tk-chart-3); }
+      .bg-chart-4 { background-color: var(--tk-chart-4); }
+      .text-chart-4 { color: var(--tk-chart-4); }
+      .border-chart-4 { border-color: var(--tk-chart-4); }
+      .ring-chart-4 { --tw-ring-color: var(--tk-chart-4); }
+      .bg-chart-5 { background-color: var(--tk-chart-5); }
+      .text-chart-5 { color: var(--tk-chart-5); }
+      .border-chart-5 { border-color: var(--tk-chart-5); }
+      .ring-chart-5 { --tw-ring-color: var(--tk-chart-5); }
+      .bg-sidebar { background-color: var(--tk-sidebar); }
+      .text-sidebar { color: var(--tk-sidebar); }
+      .border-sidebar { border-color: var(--tk-sidebar); }
+      .ring-sidebar { --tw-ring-color: var(--tk-sidebar); }
+      .bg-sidebar-foreground { background-color: var(--tk-sidebar-foreground); }
+      .text-sidebar-foreground { color: var(--tk-sidebar-foreground); }
+      .border-sidebar-foreground { border-color: var(--tk-sidebar-foreground); }
+      .ring-sidebar-foreground { --tw-ring-color: var(--tk-sidebar-foreground); }
+      .bg-sidebar-primary { background-color: var(--tk-sidebar-primary); }
+      .text-sidebar-primary { color: var(--tk-sidebar-primary); }
+      .border-sidebar-primary { border-color: var(--tk-sidebar-primary); }
+      .ring-sidebar-primary { --tw-ring-color: var(--tk-sidebar-primary); }
+      .bg-sidebar-primary-foreground { background-color: var(--tk-sidebar-primary-foreground); }
+      .text-sidebar-primary-foreground { color: var(--tk-sidebar-primary-foreground); }
+      .border-sidebar-primary-foreground { border-color: var(--tk-sidebar-primary-foreground); }
+      .ring-sidebar-primary-foreground { --tw-ring-color: var(--tk-sidebar-primary-foreground); }
+      .bg-sidebar-accent { background-color: var(--tk-sidebar-accent); }
+      .text-sidebar-accent { color: var(--tk-sidebar-accent); }
+      .border-sidebar-accent { border-color: var(--tk-sidebar-accent); }
+      .ring-sidebar-accent { --tw-ring-color: var(--tk-sidebar-accent); }
+      .bg-sidebar-accent-foreground { background-color: var(--tk-sidebar-accent-foreground); }
+      .text-sidebar-accent-foreground { color: var(--tk-sidebar-accent-foreground); }
+      .border-sidebar-accent-foreground { border-color: var(--tk-sidebar-accent-foreground); }
+      .ring-sidebar-accent-foreground { --tw-ring-color: var(--tk-sidebar-accent-foreground); }
+    </style>
+    <style>
+      .no-scrollbar::-webkit-scrollbar { display: none; }
+      .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+      [data-icon] {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        -webkit-mask-size: contain;
+        mask-size: contain;
+        -webkit-mask-repeat: no-repeat;
+        mask-repeat: no-repeat;
+        -webkit-mask-position: center;
+        mask-position: center;
+        background-color: currentColor;
+      }
+    </style>
+</head>
+<body class="font-sans antialiased">
+    <main>
+    <style id="critical-layout">
+  /* ===== App Shell · critical layout (static, no Tailwind dependency) ===== */
+  html, body { margin: 0; padding: 0; background: var(--background); color: var(--foreground); font-family: var(--font-sans); }
+  .app-shell { display: flex; height: 100vh; overflow: hidden; background: var(--background); }
+  .app-sidebar { width: 232px; flex-shrink: 0; display: flex; flex-direction: column; background: var(--video-bg); border-right: 1px solid var(--border); }
+  .app-main-col { flex: 1; min-width: 0; display: flex; flex-direction: column; height: 100vh; }
+  .app-topbar { height: 56px; flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 20px; border-bottom: 1px solid var(--border); background: var(--background); }
+  .app-content { flex: 1; min-height: 0; overflow-y: auto; }
+  .brand-block { display: flex; align-items: center; gap: 10px; height: 56px; padding: 0 16px; text-decoration: none; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+  .brand-mark { width: 28px; height: 28px; border-radius: var(--radius-md); background: var(--primary); color: var(--primary-foreground); display: inline-flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 700; flex-shrink: 0; }
+  .brand-name { color: var(--foreground); font-size: 14px; font-weight: 600; line-height: 1.1; letter-spacing: 0.01em; }
+  .brand-sub { display: block; color: var(--muted-foreground); font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase; margin-top: 3px; }
+  .sidebar-nav { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 10px 8px; }
+  .nav-label { margin: 0 10px 6px; font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted-foreground); opacity: 0.85; }
+  .nav-label + .nav-label { margin-top: 14px; }
+  .nav-item { display: flex; align-items: center; gap: 10px; height: 38px; padding: 0 10px; border-radius: var(--radius-md); color: var(--muted-foreground); font-size: 13.5px; text-decoration: none; transition: background-color 0.18s ease, color 0.18s ease; }
+  .nav-item:hover, .nav-item:focus-visible { color: var(--foreground); background: var(--card); outline: none; }
+  .nav-item[data-active="true"] { background: var(--card-elevated); color: var(--foreground); font-weight: 600; }
+  .nav-item[data-active="true"] .nav-icon-dot { display: inline-block; }
+  .nav-icon-dot { display: none; width: 6px; height: 6px; border-radius: 999px; background: var(--primary); margin-left: auto; }
+  .sidebar-foot { flex-shrink: 0; padding: 10px; border-top: 1px solid var(--border); }
+  .topbar-title { display: flex; align-items: baseline; gap: 12px; min-width: 0; }
+  .topbar-kicker { margin: 0; font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted-foreground); }
+  .topbar-heading { margin: 0; font-size: 16px; font-weight: 600; color: var(--foreground); letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .topbar-actions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+  .icon-btn { position: relative; width: 34px; height: 34px; border-radius: var(--radius-md); border: 1px solid var(--border); background: var(--card); color: var(--muted-foreground); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; transition: color 0.18s ease, border-color 0.18s ease; }
+  .icon-btn:hover, .icon-btn:focus-visible { color: var(--foreground); border-color: var(--muted-foreground); outline: none; }
+  .dot-badge { position: absolute; top: -3px; right: -3px; min-width: 15px; height: 15px; padding: 0 4px; border-radius: 999px; background: var(--primary); color: var(--primary-foreground); font-size: 9px; font-weight: 700; line-height: 15px; text-align: center; border: 2px solid var(--background); }
+  .avatar-sm { width: 30px; height: 30px; border-radius: 999px; background: var(--tk-red-700); color: var(--primary-foreground); display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; }
+  .kicker { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted-foreground); }
+  .app-content::-webkit-scrollbar, .sidebar-nav::-webkit-scrollbar, .panel-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
+  .app-content::-webkit-scrollbar-thumb, .sidebar-nav::-webkit-scrollbar-thumb, .panel-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 999px; }
+  .app-content::-webkit-scrollbar-track, .sidebar-nav::-webkit-scrollbar-track, .panel-scroll::-webkit-scrollbar-track { background: transparent; }
+  @media (max-width: 1024px) {
+    .app-sidebar { width: 64px; }
+    .brand-text, .nav-label, .nav-item span:not([data-icon]) { display: none; }
+    .nav-item { justify-content: center; padding: 0; }
+    .nav-icon-dot { margin-left: 0; position: absolute; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .nav-item, .icon-btn { transition: none; }
+  }
+</style>
+    <div class="app-shell" data-viewport-mode="app-shell">
+  <aside class="app-sidebar">
+    <a class="brand-block" href="#" data-dom-id="brand-chat" aria-label="云书 Agent 首页">
+      <span class="brand-mark">云</span>
+      <span class="brand-text">
+        <span class="brand-name">云书 Agent</span>
+        <span class="brand-sub">Multi-Agent Platform</span>
+      </span>
+    </a>
+    <nav class="sidebar-nav" aria-label="主导航">
+      <p class="nav-label">核心工作</p>
+      <a class="nav-item" data-nav-key="chat" data-dom-id="nav-chat" href="#" aria-current="false">
+        <span data-icon="chat-circle" style="width:18px;height:18px;mask-image:url(../assets/icons/dl_builtin_tik_tok/chat-circle.svg);flex-shrink:0"></span>
+        <span>聊天工作台</span>
+      </a>
+      <a class="nav-item" data-nav-key="knowledge" data-dom-id="nav-knowledge" href="#" aria-current="false">
+        <span data-icon="bookmark-simple" style="width:18px;height:18px;mask-image:url(../assets/icons/dl_builtin_tik_tok/bookmark-simple.svg);flex-shrink:0"></span>
+        <span>知识库</span>
+      </a>
+      <a class="nav-item" data-nav-key="experience" data-dom-id="nav-experience" href="#" aria-current="false">
+        <span data-icon="share-fat" style="width:18px;height:18px;mask-image:url(../assets/icons/dl_builtin_tik_tok/share-fat.svg);flex-shrink:0"></span>
+        <span>经验中心</span>
+      </a>
+      <p class="nav-label">组织与治理</p>
+      <a class="nav-item" data-nav-key="approval" data-dom-id="nav-approval" href="#" aria-current="false">
+        <i data-lucide="clipboard-check" style="width:18px;height:18px;flex-shrink:0"></i>
+        <span>审批中心</span>
+        <span class="nav-icon-dot"></span>
+      </a>
+      <a class="nav-item" data-nav-key="org" data-dom-id="nav-org" href="#" data-active="true" aria-current="page">
+        <span data-icon="user" style="width:18px;height:18px;mask-image:url(../assets/icons/dl_builtin_tik_tok/user.svg);flex-shrink:0"></span>
+        <span>组织架构</span>
+      </a>
+      <a class="nav-item" data-nav-key="config" data-dom-id="nav-config" href="#" aria-current="false">
+        <span data-icon="gear" style="width:18px;height:18px;mask-image:url(../assets/icons/dl_builtin_tik_tok/gear.svg);flex-shrink:0"></span>
+        <span>配置中心</span>
+      </a>
+      <a class="nav-item" data-nav-key="monitor" data-dom-id="nav-monitor" href="#" aria-current="false">
+        <span data-icon="play" style="width:18px;height:18px;mask-image:url(../assets/icons/dl_builtin_tik_tok/play.svg);flex-shrink:0"></span>
+        <span>监测中心</span>
+      </a>
+    </nav>
+    <div class="sidebar-foot">
+      <div style="display:flex;align-items:center;gap:10px;padding:4px 6px;">
+        <span class="avatar-sm">晚</span>
+        <div style="flex:1;min-width:0;">
+          <p style="margin:0;font-size:13px;font-weight:600;color:var(--foreground);line-height:1.2;">林晚晴</p>
+          <p style="margin:2px 0 0;font-size:11px;color:var(--muted-foreground);line-height:1.2;">市场总监 · 运营</p>
+        </div>
+        <button class="icon-btn" type="button" style="width:28px;height:28px;" aria-label="账户设置">
+          <i data-lucide="settings" style="width:15px;height:15px;"></i>
+        </button>
+      </div>
+    </div>
+  </aside>
+  <div class="app-main-col">
+    <header class="app-topbar">
+      <div class="topbar-title">
+        <p class="topbar-kicker" data-slot="topbar-kicker">ORGANIZATION</p>
+        <h1 class="topbar-heading" data-slot="topbar-heading">组织架构</h1>
+      </div>
+      <div class="topbar-actions">
+        <button class="icon-btn" type="button" data-dom-id="top-approval" aria-label="审批中心，2 个待办">
+          <i data-lucide="bell" style="width:17px;height:17px;"></i>
+          <span class="dot-badge">2</span>
+        </button>
+        <span class="avatar-sm" aria-label="当前用户头像">晚</span>
+      </div>
+    </header>
+    <div class="app-content overflow-y-auto" data-slot="page-content" data-scroll-region="primary" role="region" aria-label="页面内容">
+      <div class="org-page">
+
+        <!-- 顶部统计行 -->
+        <div class="stats-row">
+          <div class="stat-card">
+            <p class="stat-kicker">Total Members</p>
+            <p class="stat-value">128</p>
+            <p class="stat-note">总人数</p>
+          </div>
+          <div class="stat-card">
+            <p class="stat-kicker">Departments</p>
+            <p class="stat-value">8</p>
+            <p class="stat-note">部门数</p>
+          </div>
+          <div class="stat-card">
+            <p class="stat-kicker">New This Month</p>
+            <p class="stat-value">6</p>
+            <p class="stat-note">本月新增</p>
+          </div>
+        </div>
+
+        <!-- 主体两栏 -->
+        <div class="org-grid">
+
+          <!-- 左：部门列表 -->
+          <aside class="dept-panel" aria-label="部门列表">
+            <div class="dept-head">
+              <div class="dept-head-text">
+                <p class="dept-kicker"><i data-lucide="building-2" class="dept-ic" style="width:14px;height:14px;"></i>Departments</p>
+                <h2 class="dept-title">部门</h2>
+              </div>
+              <button class="btn btn-primary btn-sm" type="button">
+                <span data-icon="plus" style="width:13px;height:13px;mask-image:url(../assets/icons/dl_builtin_tik_tok/plus.svg);"></span>
+                新建部门
+              </button>
+            </div>
+            <div class="dept-list">
+              <button class="dept-item" type="button" data-active="true">
+                <span class="dept-name">市场部</span>
+                <span class="dept-count">18 人</span>
+              </button>
+              <button class="dept-item" type="button">
+                <span class="dept-name">运营部</span>
+                <span class="dept-count">22 人</span>
+              </button>
+              <button class="dept-item" type="button">
+                <span class="dept-name">销售部</span>
+                <span class="dept-count">35 人</span>
+              </button>
+              <button class="dept-item" type="button">
+                <span class="dept-name">调度部</span>
+                <span class="dept-count">12 人</span>
+              </button>
+              <button class="dept-item" type="button">
+                <span class="dept-name">客服部</span>
+                <span class="dept-count">16 人</span>
+              </button>
+              <button class="dept-item" type="button">
+                <span class="dept-name">技术部</span>
+                <span class="dept-count">25 人</span>
+              </button>
+            </div>
+            <button class="dept-add" type="button">
+              <span data-icon="plus" style="width:13px;height:13px;mask-image:url(../assets/icons/dl_builtin_tik_tok/plus.svg);"></span>
+              + Add Department
+            </button>
+          </aside>
+
+          <!-- 右：用户列表 -->
+          <section class="member-panel" aria-label="成员列表">
+            <div class="member-toolbar">
+              <div class="member-title">
+                <h2>市场部 · 成员</h2>
+                <span class="member-count">18 人</span>
+              </div>
+              <div class="toolbar-actions">
+                <div class="search-box">
+                  <i data-lucide="search" class="search-ic" style="width:14px;height:14px;"></i>
+                  <input class="search-input" type="search" placeholder="搜索成员" aria-label="搜索成员">
+                </div>
+                <button class="btn btn-ghost" type="button">分配负责人</button>
+                <button class="btn btn-primary" type="button">
+                  <i data-lucide="user-plus" style="width:14px;height:14px;"></i>
+                  添加成员
+                </button>
+              </div>
+            </div>
+
+            <div class="table-wrap">
+              <table class="member-table">
+                <thead>
+                  <tr>
+                    <th>成员</th>
+                    <th>部门</th>
+                    <th>角色</th>
+                    <th>加入时间</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>
+                      <div class="member-cell">
+                        <span class="member-avatar">晚</span>
+                        <div>
+                          <span class="member-name">林晚晴</span>
+                          <span class="member-mail">lin.wanqing@yunshu.agent</span>
+                        </div>
+                      </div>
+                    </td>
+                    <td class="dept-cell">市场部</td>
+                    <td>
+                      <div class="role-select">
+                        <select aria-label="林晚晴 的角色">
+                          <option selected>部门负责人</option>
+                          <option>分析师</option>
+                          <option>专员</option>
+                          <option>管理员</option>
+                        </select>
+                        <i data-lucide="chevron-down" class="role-caret" style="width:13px;height:13px;"></i>
+                      </div>
+                    </td>
+                    <td class="time-cell">2024-03</td>
+                    <td>
+                      <button class="btn btn-ghost btn-sm" type="button">修改角色</button>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>
+                      <div class="member-cell">
+                        <span class="member-avatar alt">默</span>
+                        <div>
+                          <span class="member-name">陈默</span>
+                          <span class="member-mail">chen.mo@yunshu.agent</span>
+                        </div>
+                      </div>
+                    </td>
+                    <td class="dept-cell">市场部</td>
+                    <td>
+                      <div class="role-select">
+                        <select aria-label="陈默 的角色">
+                          <option>部门负责人</option>
+                          <option selected>分析师</option>
+                          <option>专员</option>
+                          <option>管理员</option>
+                        </select>
+                        <i data-lucide="chevron-down" class="role-caret" style="width:13px;height:13px;"></i>
+                      </div>
+                    </td>
+                    <td class="time-cell">2024-06</td>
+                    <td>
+                      <button class="btn btn-ghost btn-sm" type="button">修改角色</button>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>
+                      <div class="member-cell">
+                        <span class="member-avatar">芮</span>
+                        <div>
+                          <span class="member-name">苏芮</span>
+                          <span class="member-mail">su.rui@yunshu.agent</span>
+                        </div>
+                      </div>
+                    </td>
+                    <td class="dept-cell">市场部</td>
+                    <td>
+                      <div class="role-select">
+                        <select aria-label="苏芮 的角色">
+                          <option>部门负责人</option>
+                          <option>分析师</option>
+                          <option selected>专员</option>
+                          <option>管理员</option>
+                        </select>
+                        <i data-lucide="chevron-down" class="role-caret" style="width:13px;height:13px;"></i>
+                      </div>
+                    </td>
+                    <td class="time-cell">2024-09</td>
+                    <td>
+                      <button class="btn btn-ghost btn-sm" type="button">修改角色</button>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>
+                      <div class="member-cell">
+                        <span class="member-avatar">野</span>
+                        <div>
+                          <span class="member-name">周野</span>
+                          <span class="member-mail">zhou.ye@yunshu.agent</span>
+                        </div>
+                      </div>
+                    </td>
+                    <td class="dept-cell">市场部</td>
+                    <td>
+                      <div class="role-select">
+                        <select aria-label="周野 的角色">
+                          <option>部门负责人</option>
+                          <option>分析师</option>
+                          <option selected>专员</option>
+                          <option>管理员</option>
+                        </select>
+                        <i data-lucide="chevron-down" class="role-caret" style="width:13px;height:13px;"></i>
+                      </div>
+                    </td>
+                    <td class="time-cell">2025-01</td>
+                    <td>
+                      <button class="btn btn-ghost btn-sm" type="button">修改角色</button>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>
+                      <div class="member-cell">
+                        <span class="member-avatar">言</span>
+                        <div>
+                          <span class="member-name">顾言</span>
+                          <span class="member-mail">gu.yan@yunshu.agent</span>
+                        </div>
+                      </div>
+                    </td>
+                    <td class="dept-cell">市场部</td>
+                    <td>
+                      <div class="role-select">
+                        <select aria-label="顾言 的角色">
+                          <option>部门负责人</option>
+                          <option selected>分析师</option>
+                          <option>专员</option>
+                          <option>管理员</option>
+                        </select>
+                        <i data-lucide="chevron-down" class="role-caret" style="width:13px;height:13px;"></i>
+                      </div>
+                    </td>
+                    <td class="time-cell">2025-04</td>
+                    <td>
+                      <button class="btn btn-ghost btn-sm" type="button">修改角色</button>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>
+                      <div class="member-cell">
+                        <span class="member-avatar alt">夏</span>
+                        <div>
+                          <span class="member-name">江夏</span>
+                          <span class="member-mail">jiang.xia@yunshu.agent</span>
+                        </div>
+                      </div>
+                    </td>
+                    <td class="dept-cell">市场部</td>
+                    <td>
+                      <div class="role-select">
+                        <select aria-label="江夏 的角色">
+                          <option>部门负责人</option>
+                          <option>分析师</option>
+                          <option selected>专员</option>
+                          <option>管理员</option>
+                        </select>
+                        <i data-lucide="chevron-down" class="role-caret" style="width:13px;height:13px;"></i>
+                      </div>
+                    </td>
+                    <td class="time-cell">2025-07</td>
+                    <td>
+                      <button class="btn btn-ghost btn-sm" type="button">修改角色</button>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>
+                      <div class="member-cell">
+                        <span class="member-avatar">一</span>
+                        <div>
+                          <span class="member-name">罗一</span>
+                          <span class="member-mail">luo.yi@yunshu.agent</span>
+                        </div>
+                      </div>
+                    </td>
+                    <td class="dept-cell">市场部</td>
+                    <td>
+                      <div class="role-select">
+                        <select aria-label="罗一 的角色">
+                          <option>部门负责人</option>
+                          <option>分析师</option>
+                          <option selected>专员</option>
+                          <option>管理员</option>
+                        </select>
+                        <i data-lucide="chevron-down" class="role-caret" style="width:13px;height:13px;"></i>
+                      </div>
+                    </td>
+                    <td class="time-cell">2025-10</td>
+                    <td>
+                      <button class="btn btn-ghost btn-sm" type="button">修改角色</button>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>
+                      <div class="member-cell">
+                        <span class="member-avatar">果</span>
+                        <div>
+                          <span class="member-name">唐果</span>
+                          <span class="member-mail">tang.guo@yunshu.agent</span>
+                        </div>
+                      </div>
+                    </td>
+                    <td class="dept-cell">市场部</td>
+                    <td>
+                      <div class="role-select">
+                        <select aria-label="唐果 的角色">
+                          <option>部门负责人</option>
+                          <option>分析师</option>
+                          <option selected>专员</option>
+                          <option>管理员</option>
+                        </select>
+                        <i data-lucide="chevron-down" class="role-caret" style="width:13px;height:13px;"></i>
+                      </div>
+                    </td>
+                    <td class="time-cell">2026-02</td>
+                    <td>
+                      <button class="btn btn-ghost btn-sm" type="button">修改角色</button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="table-foot">
+              <span class="table-foot-info">共 8 位成员</span>
+              <div class="pager">
+                <button class="btn btn-ghost btn-sm" type="button">上一页</button>
+                <button class="btn btn-ghost btn-sm" type="button">下一页</button>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <p class="org-note">角色权限：部门负责人可审批经验晋升与高风险操作；管理员可管理组织与配置。</p>
+
+      </div>
+    </div>
+  </div>
+</div>
+    <style id="critical-layout">
+  /* ===== Page · 组织架构 (static, no Tailwind dependency) ===== */
+  .org-page { max-width: 1180px; margin: 0 auto; padding: 24px; box-sizing: border-box; }
+
+  /* 顶部统计行 */
+  .stats-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .stat-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 18px 20px; }
+  .stat-kicker { margin: 0; font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted-foreground); }
+  .stat-value { margin: 8px 0 0; font-family: var(--font-mono); font-size: 26px; font-weight: 600; line-height: 1.1; color: var(--foreground); }
+  .stat-note { margin: 6px 0 0; font-size: 12px; color: var(--muted-foreground); }
+
+  /* 主体两栏 */
+  .org-grid { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 16px; margin-top: 16px; align-items: start; }
+
+  /* 通用按钮 */
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; border-radius: var(--radius-md); font-size: 12.5px; font-weight: 600; line-height: 1; cursor: pointer; white-space: nowrap; transition: background-color 0.18s ease, color 0.18s ease, border-color 0.18s ease, opacity 0.18s ease; }
+  .btn:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+  .btn-primary { background: var(--primary); color: var(--on-media); border: 1px solid transparent; padding: 8px 14px; }
+  .btn-primary:hover { background: var(--tk-red-600); }
+  .btn-primary:active { background: var(--tk-red-700); }
+  .btn-ghost { background: transparent; color: var(--muted-foreground); border: 1px solid var(--border); padding: 8px 12px; }
+  .btn-ghost:hover, .btn-ghost:focus-visible { color: var(--foreground); border-color: var(--muted-foreground); background: var(--card); }
+  .btn-sm { padding: 5px 10px; font-size: 12px; }
+
+  /* 左栏 · 部门列表 */
+  .dept-panel { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 14px 16px 16px; }
+  .dept-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+  .dept-head-text { min-width: 0; }
+  .dept-kicker { margin: 0; display: flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted-foreground); }
+  .dept-ic { color: var(--muted-foreground); flex-shrink: 0; }
+  .dept-title { margin: 4px 0 0; font-size: 14px; font-weight: 600; color: var(--foreground); }
+  .dept-list { display: flex; flex-direction: column; gap: 2px; }
+  .dept-item { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; padding: 10px 12px; border: 0; border-radius: var(--radius-md); background: transparent; color: var(--foreground); font-family: var(--font-sans); font-size: 13px; font-weight: 600; text-align: left; cursor: pointer; transition: background-color 0.18s ease, color 0.18s ease; }
+  .dept-item:hover, .dept-item:focus-visible { background: var(--video-bg); outline: none; }
+  .dept-item[data-active="true"] { background: var(--card-elevated); }
+  .dept-item[data-active="true"]::before { content: ""; position: absolute; left: 0; top: 22%; bottom: 22%; width: 3px; border-radius: 0 var(--radius-sm) var(--radius-sm) 0; background: var(--primary); }
+  .dept-count { font-family: var(--font-mono); font-size: 11px; font-weight: 400; color: var(--muted-foreground); }
+  .dept-add { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; margin-top: 12px; padding: 10px; border: 1px dashed var(--border); border-radius: var(--radius-md); background: transparent; color: var(--muted-foreground); font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; cursor: pointer; transition: color 0.18s ease, border-color 0.18s ease, background-color 0.18s ease; }
+  .dept-add:hover, .dept-add:focus-visible { color: var(--foreground); border-color: var(--muted-foreground); background: var(--video-bg); outline: none; }
+
+  /* 右栏 · 成员面板 */
+  .member-panel { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-lg); min-width: 0; }
+  .member-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+  .member-title { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+  .member-title h2 { margin: 0; font-size: 14px; font-weight: 600; color: var(--foreground); }
+  .member-count { font-family: var(--font-mono); font-size: 11px; color: var(--muted-foreground); }
+  .toolbar-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .search-box { position: relative; display: flex; align-items: center; }
+  .search-ic { position: absolute; left: 10px; color: var(--muted-foreground); pointer-events: none; flex-shrink: 0; }
+  .search-input { width: 190px; padding: 7px 10px 7px 30px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--video-bg); color: var(--foreground); font-family: var(--font-sans); font-size: 12.5px; transition: border-color 0.18s ease, background-color 0.18s ease; }
+  .search-input::placeholder { color: var(--muted-foreground); }
+  .search-input:hover { border-color: var(--muted-foreground); }
+  .search-input:focus { outline: none; border-color: var(--primary); background: var(--card); }
+
+  /* 成员表格 */
+  .table-wrap { overflow-x: auto; }
+  .member-table { width: 100%; min-width: 700px; border-collapse: collapse; }
+  .member-table th { padding: 10px 16px; font-family: var(--font-mono); font-size: 11px; font-weight: 400; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted-foreground); text-align: left; white-space: nowrap; border-bottom: 1px solid var(--border); }
+  .member-table td { padding: 10px 16px; font-size: 13px; color: var(--foreground); border-bottom: 1px solid var(--border); vertical-align: middle; }
+  .member-table tbody tr { transition: background-color 0.18s ease; }
+  .member-table tbody tr:hover { background: var(--video-bg); }
+  .member-table tbody tr:last-child td { border-bottom: 0; }
+  .member-cell { display: flex; align-items: center; gap: 10px; }
+  .member-avatar { width: 24px; height: 24px; border-radius: 999px; background: var(--tk-red-700); color: var(--on-media); display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; flex-shrink: 0; }
+  .member-avatar.alt { background: var(--tk-cyan-700); }
+  .member-name { display: block; font-weight: 600; color: var(--foreground); line-height: 1.3; }
+  .member-mail { display: block; font-family: var(--font-mono); font-size: 11px; color: var(--muted-foreground); margin-top: 1px; }
+  .dept-cell { color: var(--muted-foreground); }
+  .time-cell { font-family: var(--font-mono); font-size: 12px; color: var(--muted-foreground); }
+
+  /* 角色下拉 */
+  .role-select { position: relative; display: inline-flex; align-items: center; }
+  .role-select select { appearance: none; -webkit-appearance: none; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--video-bg); color: var(--foreground); font-family: var(--font-sans); font-size: 12px; padding: 5px 26px 5px 10px; cursor: pointer; transition: border-color 0.18s ease, background-color 0.18s ease; }
+  .role-select select:hover, .role-select select:focus-visible { border-color: var(--muted-foreground); background: var(--card); outline: none; }
+  .role-select select:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+  .role-caret { position: absolute; right: 8px; color: var(--muted-foreground); pointer-events: none; }
+
+  /* 底部行 */
+  .table-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px; }
+  .table-foot-info { font-family: var(--font-mono); font-size: 11px; color: var(--muted-foreground); }
+  .pager { display: flex; gap: 8px; }
+
+  /* 底部说明 */
+  .org-note { margin: 16px 0 0; font-size: 12px; line-height: 1.6; color: var(--muted-foreground); }
+
+  @media (max-width: 960px) {
+    .stats-row { grid-template-columns: 1fr; }
+    .org-grid { grid-template-columns: 1fr; }
+    .member-toolbar { flex-direction: column; align-items: flex-start; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .btn, .dept-item, .dept-add, .search-input, .role-select select, .member-table tbody tr { transition: none; }
+  }
+</style>
+    </main>
+    <script>lucide.createIcons();</script>
+</body>
+</html>

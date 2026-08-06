@@ -61,19 +61,28 @@ class DataFacade:
             async def guarded_critical(config: RunnableConfig, **kwargs):
                 from app.services.approval_service import ApprovalService
                 from app.core.database import SessionLocal
+                import json as _json
+                import uuid as _uuid
                 # trace_id / requester_id 通过 RunnableConfig 注入（运行时上下文）
                 cfg = (config or {}).get("configurable", {})
                 eff_trace_id = cfg.get("trace_id", "") or trace_id
                 eff_requester = cfg.get("requester_id", "") or requester_id
+                # LangGraph 恢复时会重放 interrupt() 之前的代码：审批单 ID 用
+                # trace+工具+参数的确定性 UUID，重放时直接复用已存在的审批单，
+                # 避免“审批通过→重放→重复建单→再审批”的循环。
+                stable_key = f"{eff_trace_id}:{name}:{_json.dumps(kwargs, sort_keys=True, ensure_ascii=False)}"
+                approval_id = str(_uuid.uuid5(_uuid.NAMESPACE_DNS, stable_key))
                 async with SessionLocal() as db:
                     svc = ApprovalService(db)
-                    approval_id = await svc.create_approval(
-                        category="tool_call", risk="critical", mode="sync",
-                        ref_type="trace", ref_id=eff_trace_id,
-                        title=f"{name} - {tool.description}",
-                        context={"tool": name, "args": kwargs, "reason": tool.description},
-                        requester_id=eff_requester, approver_role="admin",
-                    )
+                    if await svc.approval_repo.get(approval_id) is None:
+                        await svc.create_approval(
+                            category="tool_call", risk="critical", mode="sync",
+                            ref_type="trace", ref_id=eff_trace_id,
+                            title=f"{name} - {tool.description}",
+                            context={"tool": name, "args": kwargs, "reason": tool.description},
+                            requester_id=eff_requester, approver_role="admin",
+                            approval_id=approval_id,
+                        )
                 # interrupt 冻结图，等待审批中心 decide 后 resume
                 result = interrupt({
                     "approval_id": approval_id, "stage": "review",

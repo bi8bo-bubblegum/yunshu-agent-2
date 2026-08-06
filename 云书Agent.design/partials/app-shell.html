@@ -1,0 +1,117 @@
+<style id="critical-layout">
+  /* ===== App Shell · critical layout (static, no Tailwind dependency) ===== */
+  html, body { margin: 0; padding: 0; background: var(--background); color: var(--foreground); font-family: var(--font-sans); }
+  .app-shell { display: flex; height: 100vh; overflow: hidden; background: var(--background); }
+  .app-sidebar { width: 232px; flex-shrink: 0; display: flex; flex-direction: column; background: var(--video-bg); border-right: 1px solid var(--border); }
+  .app-main-col { flex: 1; min-width: 0; display: flex; flex-direction: column; height: 100vh; }
+  .app-topbar { height: 56px; flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 20px; border-bottom: 1px solid var(--border); background: var(--background); }
+  .app-content { flex: 1; min-height: 0; overflow-y: auto; }
+  .brand-block { display: flex; align-items: center; gap: 10px; height: 56px; padding: 0 16px; text-decoration: none; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+  .brand-mark { width: 28px; height: 28px; border-radius: var(--radius-md); background: var(--primary); color: #fff; display: inline-flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 700; flex-shrink: 0; }
+  .brand-name { color: var(--foreground); font-size: 14px; font-weight: 600; line-height: 1.1; letter-spacing: 0.01em; }
+  .brand-sub { display: block; color: var(--muted-foreground); font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase; margin-top: 3px; }
+  .sidebar-nav { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 10px 8px; }
+  .nav-label { margin: 0 10px 6px; font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted-foreground); opacity: 0.85; }
+  .nav-label + .nav-label { margin-top: 14px; }
+  .nav-item { display: flex; align-items: center; gap: 10px; height: 38px; padding: 0 10px; border-radius: var(--radius-md); color: var(--muted-foreground); font-size: 13.5px; text-decoration: none; transition: background-color 0.18s ease, color 0.18s ease; }
+  .nav-item:hover, .nav-item:focus-visible { color: var(--foreground); background: var(--card); outline: none; }
+  .nav-item[data-active="true"] { background: var(--card-elevated); color: var(--foreground); font-weight: 600; }
+  .nav-item[data-active="true"] .nav-icon-dot { display: inline-block; }
+  .nav-icon-dot { display: none; width: 6px; height: 6px; border-radius: 999px; background: var(--primary); margin-left: auto; }
+  .sidebar-foot { flex-shrink: 0; padding: 10px; border-top: 1px solid var(--border); }
+  .topbar-title { display: flex; align-items: baseline; gap: 12px; min-width: 0; }
+  .topbar-kicker { margin: 0; font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted-foreground); }
+  .topbar-heading { margin: 0; font-size: 16px; font-weight: 600; color: var(--foreground); letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .topbar-actions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+  .icon-btn { position: relative; width: 34px; height: 34px; border-radius: var(--radius-md); border: 1px solid var(--border); background: var(--card); color: var(--muted-foreground); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; transition: color 0.18s ease, border-color 0.18s ease; }
+  .icon-btn:hover, .icon-btn:focus-visible { color: var(--foreground); border-color: var(--muted-foreground); outline: none; }
+  .dot-badge { position: absolute; top: -3px; right: -3px; min-width: 15px; height: 15px; padding: 0 4px; border-radius: 999px; background: var(--primary); color: #fff; font-size: 9px; font-weight: 700; line-height: 15px; text-align: center; border: 2px solid var(--background); }
+  .avatar-sm { width: 30px; height: 30px; border-radius: 999px; background: var(--tk-red-700); color: #fff; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; }
+  .kicker { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted-foreground); }
+  .app-content::-webkit-scrollbar, .sidebar-nav::-webkit-scrollbar, .panel-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
+  .app-content::-webkit-scrollbar-thumb, .sidebar-nav::-webkit-scrollbar-thumb, .panel-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 999px; }
+  .app-content::-webkit-scrollbar-track, .sidebar-nav::-webkit-scrollbar-track, .panel-scroll::-webkit-scrollbar-track { background: transparent; }
+  @media (max-width: 1024px) {
+    .app-sidebar { width: 64px; }
+    .brand-text, .nav-label, .nav-item span:not([data-icon]) { display: none; }
+    .nav-item { justify-content: center; padding: 0; }
+    .nav-icon-dot { margin-left: 0; position: absolute; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .nav-item, .icon-btn { transition: none; }
+  }
+</style>
+<div class="app-shell">
+  <aside class="app-sidebar">
+    <a class="brand-block" href="#" data-dom-id="brand-chat" aria-label="云书 Agent 首页">
+      <span class="brand-mark">云</span>
+      <span class="brand-text">
+        <span class="brand-name">云书 Agent</span>
+        <span class="brand-sub">Multi-Agent Platform</span>
+      </span>
+    </a>
+    <nav class="sidebar-nav" aria-label="主导航">
+      <p class="nav-label">核心工作</p>
+      <a class="nav-item" data-nav-key="chat" data-dom-id="nav-chat" href="#" aria-current="false">
+        <span data-icon="chat-circle" style="width:18px;height:18px;mask-image:url(../assets/icons/dl_builtin_tik_tok/chat-circle.svg);flex-shrink:0"></span>
+        <span>聊天工作台</span>
+      </a>
+      <a class="nav-item" data-nav-key="knowledge" data-dom-id="nav-knowledge" href="#" aria-current="false">
+        <span data-icon="bookmark-simple" style="width:18px;height:18px;mask-image:url(../assets/icons/dl_builtin_tik_tok/bookmark-simple.svg);flex-shrink:0"></span>
+        <span>知识库</span>
+      </a>
+      <a class="nav-item" data-nav-key="experience" data-dom-id="nav-experience" href="#" aria-current="false">
+        <span data-icon="share-fat" style="width:18px;height:18px;mask-image:url(../assets/icons/dl_builtin_tik_tok/share-fat.svg);flex-shrink:0"></span>
+        <span>经验中心</span>
+      </a>
+      <p class="nav-label">组织与治理</p>
+      <a class="nav-item" data-nav-key="approval" data-dom-id="nav-approval" href="#" aria-current="false">
+        <i data-lucide="clipboard-check" style="width:18px;height:18px;flex-shrink:0"></i>
+        <span>审批中心</span>
+        <span class="nav-icon-dot"></span>
+      </a>
+      <a class="nav-item" data-nav-key="org" data-dom-id="nav-org" href="#" aria-current="false">
+        <span data-icon="user" style="width:18px;height:18px;mask-image:url(../assets/icons/dl_builtin_tik_tok/user.svg);flex-shrink:0"></span>
+        <span>组织架构</span>
+      </a>
+      <a class="nav-item" data-nav-key="config" data-dom-id="nav-config" href="#" aria-current="false">
+        <span data-icon="gear" style="width:18px;height:18px;mask-image:url(../assets/icons/dl_builtin_tik_tok/gear.svg);flex-shrink:0"></span>
+        <span>配置中心</span>
+      </a>
+      <a class="nav-item" data-nav-key="monitor" data-dom-id="nav-monitor" href="#" aria-current="false">
+        <span data-icon="play" style="width:18px;height:18px;mask-image:url(../assets/icons/dl_builtin_tik_tok/play.svg);flex-shrink:0"></span>
+        <span>监测中心</span>
+      </a>
+    </nav>
+    <div class="sidebar-foot">
+      <div style="display:flex;align-items:center;gap:10px;padding:4px 6px;">
+        <span class="avatar-sm">晚</span>
+        <div style="flex:1;min-width:0;">
+          <p style="margin:0;font-size:13px;font-weight:600;color:var(--foreground);line-height:1.2;">林晚晴</p>
+          <p style="margin:2px 0 0;font-size:11px;color:var(--muted-foreground);line-height:1.2;">市场总监 · 运营</p>
+        </div>
+        <button class="icon-btn" type="button" style="width:28px;height:28px;" aria-label="账户设置">
+          <i data-lucide="settings" style="width:15px;height:15px;"></i>
+        </button>
+      </div>
+    </div>
+  </aside>
+  <div class="app-main-col">
+    <header class="app-topbar">
+      <div class="topbar-title">
+        <p class="topbar-kicker" data-slot="topbar-kicker">WORKSPACE</p>
+        <h1 class="topbar-heading" data-slot="topbar-heading">聊天工作台</h1>
+      </div>
+      <div class="topbar-actions">
+        <button class="icon-btn" type="button" data-dom-id="top-approval" aria-label="审批中心，2 个待办">
+          <i data-lucide="bell" style="width:17px;height:17px;"></i>
+          <span class="dot-badge">2</span>
+        </button>
+        <span class="avatar-sm" aria-label="当前用户头像">晚</span>
+      </div>
+    </header>
+    <div class="app-content" data-slot="page-content" role="region" aria-label="页面内容">
+      <!-- PAGE CONTENT SLOT -->
+    </div>
+  </div>
+</div>

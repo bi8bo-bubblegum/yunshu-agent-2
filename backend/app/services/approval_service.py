@@ -6,6 +6,7 @@ from app.models.trace import Approval
 from app.repositories.trace_repo import ApprovalRepository, TraceRepository
 from app.repositories.experience_repo import ExperienceRepository
 from app.repositories.user_repo import UserRepository
+from app.traces.handlers import TraceCallbackHandler
 
 
 class ApprovalService:
@@ -34,9 +35,12 @@ class ApprovalService:
     async def create_approval(self, category: str, risk: str | None, mode: str,
                               ref_type: str, ref_id: str, title: str,
                               context: dict | None, requester_id: str,
-                              approver_role: str | None = None) -> str:
-        """创建审批单，返回审批单 ID。供 facade.guarded_critical 和 ExperienceService.submit 调用。"""
+                              approver_role: str | None = None,
+                              approval_id: str | None = None) -> str:
+        """创建审批单，返回审批单 ID。供 facade.guarded_critical 和 ExperienceService.submit 调用。
+        approval_id 用于 critical 工具场景传入确定性 ID（interrupt 恢复重放时幂等，避免重复建单）。"""
         approval = Approval(
+            id=approval_id,
             category=category, risk=risk, mode=mode,
             ref_type=ref_type, ref_id=ref_id, title=title,
             context=context, status="pending", requester_id=requester_id,
@@ -95,7 +99,8 @@ class ApprovalService:
         conv_repo = ConversationRepository(self.db)
         config = {"configurable": {"thread_id": trace.conversation_id,
                                    "trace_id": trace.id,
-                                   "requester_id": trace.user_id}}
+                                   "requester_id": trace.user_id},
+                  "callbacks": [TraceCallbackHandler(trace.id)]}
         graph = await get_graph()
         result = await graph.ainvoke(
             Command(resume={"approved": approved, "approval_id": approval_id}),
@@ -116,6 +121,18 @@ class ApprovalService:
             await trace_repo.commit()
         from app.traces.collector import collector
         collector.emit(trace.id, "route", {"routes": trace.supervisor_routes})
+        # 与 ChatService.stream_chat 完成路径对齐：偏好提取 / 经验提炼 / 摘要滚动
+        from app.services.preference_svc import extract_and_save
+        from app.services.experience_svc import distill_experience, save_personal_experience
+        from app.services.summary import maybe_roll_summary
+        all_msgs = await message_repo.list_by_conversation(trace.conversation_id)
+        user_msg = next((m.content for m in reversed(all_msgs) if m.role == "user"), "")
+        dialog = f"用户：{user_msg}\n助手：{text}"
+        await extract_and_save(self.db, trace.user_id, dialog)
+        exp = await distill_experience(dialog, trace.user_id, trace.id)
+        if exp:
+            await save_personal_experience(self.db, exp)
+        await maybe_roll_summary(self.db, trace.conversation_id)
 
     async def _promote_experience(self, experience_id: str, to_scope: str):
         """经验层级晋升。"""

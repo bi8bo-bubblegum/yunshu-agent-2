@@ -1,9 +1,14 @@
 # backend/app/tools/loader.py —— 统一工具加载器
+import asyncio
+import logging
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.tools.facade import facade, Tool
 from app.tools.mcp_adapter import mcp_registry, get_mcp_tools
 from app.tools.risk import get_mcp_risk
+
+logger = logging.getLogger(__name__)
 
 
 async def load_mcp_tools_with_risk(db: AsyncSession, server_name: str) -> list[Tool]:
@@ -23,7 +28,13 @@ async def load_mcp_tools_with_risk(db: AsyncSession, server_name: str) -> list[T
         return []
 
     # 3. 连接 MCP 服务，发现所有工具（返回 LangChain Tool 列表）
-    raw_tools = await get_mcp_tools(server_name)
+    try:
+        # 加显式超时：不可达/域名解析慢的 MCP 服务不应拖住应用启动
+        raw_tools = await asyncio.wait_for(get_mcp_tools(server_name), timeout=10)
+    except Exception as e:
+        # 单个 MCP 服务不可达不应拖垮整个应用启动/图构建，跳过并告警
+        logger.warning("连接 MCP 服务 %s 失败，已跳过其工具: %s", server_name, e)
+        return []
 
     # 4. 注入 risk，包装为 DataFacade.Tool
     result = []

@@ -17,6 +17,8 @@ from app.core.config import settings
 from app.core.database import SessionLocal
 from app.tools.facade import facade
 from app.tools.builtin import register_builtin_tools
+from app.tools.mcp_adapter import load_mcp_servers
+from app.traces.collector import collector
 
 # 模块加载时注册内置工具到 facade 单例
 register_builtin_tools(facade)
@@ -30,6 +32,9 @@ async def _build_registry(db) -> AgentRegistry:
     """异步构建注册中心：从数据库加载各 agent 的 MCP 绑定并构建子图。
     子图以 checkpointer=True 编译：作为父图节点时继承父图 checkpointer（wrap_subgraph 注入），
     使子图内 interrupt（high/critical 工具）正常工作。"""
+    # 将数据库中已启用的 MCP 服务加载进运行时注册表，否则应用重启后
+    # mcp_registry 为空，绑定在 agent 上的 MCP 工具会被 loader 静默跳过。
+    await load_mcp_servers(db)
     registry = AgentRegistry()
     registry.register("marketing", await build_marketing_agent(db, enable_checkpointer=True))
     registry.register("sales_analysis", await build_sales_agent(db, enable_checkpointer=True))
@@ -100,6 +105,14 @@ def build_graph(registry: AgentRegistry, checkpointer=None):
             last_msg = msgs[-1].content if hasattr(msgs[-1], "content") else str(msgs[-1])
             context += f"\n\n上一轮 agent 输出：{last_msg}"
         decision = await route_decision(context, agents_with_done)
+        # 每次路由决策即时留痕（interrupt 挂起时也能看到完整路由轨迹）
+        trace_id = state.get("trace_id")
+        if trace_id:
+            collector.emit(trace_id, "route", {
+                "agent": decision["agent"],
+                "reason": decision.get("reason", ""),
+                "confidence": decision.get("confidence"),
+            })
         return {"pending_agent": decision["agent"], "route_history": [decision["agent"]]}
 
     def router(state: AgentState) -> str:

@@ -15,6 +15,7 @@ from app.services.experience_svc import distill_experience, save_personal_experi
 from app.services.preference_svc import extract_and_save
 from app.services.summary import maybe_roll_summary
 from app.traces.collector import collector
+from app.traces.handlers import TraceCallbackHandler
 
 
 class ChatService:
@@ -53,7 +54,10 @@ class ChatService:
             "conversation_id": conv_id, "user_id": user_id,
             "user_message": message, "memory_context": mem,
             "trace_id": trace.id, "messages": [],
-        }, config={"configurable": {"thread_id": conv_id, "trace_id": trace.id, "requester_id": user_id}})
+        }, config={
+            "configurable": {"thread_id": conv_id, "trace_id": trace.id, "requester_id": user_id},
+            "callbacks": [TraceCallbackHandler(trace.id)],
+        })
         # high 风险工具 interrupt：挂起图，等待前端即时确认
         interrupts = result.get("__interrupt__")
         if interrupts:
@@ -104,7 +108,8 @@ class ChatService:
                                          "thread_id": conv_id,
                                          "trace_id": trace.id if trace else "",
                                          "requester_id": user_id,
-                                     }})
+                                     },
+                                         "callbacks": [TraceCallbackHandler(trace.id if trace else "")]})
         interrupts = result.get("__interrupt__")
         if interrupts:
             # 图内还有后续 interrupt（多级确认），保持挂起

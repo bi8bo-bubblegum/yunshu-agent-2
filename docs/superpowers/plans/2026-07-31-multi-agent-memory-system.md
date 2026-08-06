@@ -2,9 +2,9 @@
 
 > **面向 AI 代理的工作者：** 必需子技能：使用 superpowers:subagent-driven-development（推荐）或 superpowers:executing-plans 逐任务实现此计划。步骤使用复选框（`- [ ]`）语法来跟踪进度。
 
-**目标：** 实现 supervisor 统一意图分发 + 四层记忆管理（短期/偏好/经验/知识）+ 全链路留痕 + HITL 的多 Agent 系统，Python 3.11 + LangGraph + PostgreSQL + SQLAlchemy + FastAPI 全异步。
+**目标：** 实现 supervisor 统一意图分发 + 四层记忆管理（短期/偏好/经验/知识）+ 全链路留痕 + 风险分级审批（high 即时确认 / critical 统一审批中心）的多 Agent 系统，Python 3.11 + LangGraph + PostgreSQL + SQLAlchemy + FastAPI 全异步。
 
-**架构：** FastAPI 异步层 → LangGraph 主图（Supervisor 循环路由）→ Agent 子图（营销助手/经营分析/调度优化）→ 记忆装配层（四层记忆注入 prompt）→ 数据门面（内置工具 + MCP）。状态用 langgraph-checkpoint-postgres 持久化；HITL 用 interrupt()；留痕用异步队列批量落库不阻塞主流程。
+**架构：** FastAPI 异步层 → LangGraph 主图（Supervisor 循环路由）→ Agent 子图（营销助手/经营分析/调度优化）→ 记忆装配层（四层记忆注入 prompt）→ 数据门面（内置工具 + MCP）。状态用 langgraph-checkpoint-postgres 持久化；高风险工具按风险分级处理（high interrupt 即时确认 / critical 进统一审批中心）；留痕用异步队列批量落库不阻塞主流程。
 
 **技术栈：** Python 3.11、FastAPI、SQLAlchemy 2.0 async（asyncpg）、Alembic、LangGraph、langgraph-checkpoint-postgres、pgvector、langchain-openai（OpenAI 兼容多模型）、langchain-mcp-adapters、sse-starlette、pytest。
 
@@ -34,17 +34,17 @@ backend/
 │   │   ├── org.py              # User / Department / Role
 │   │   ├── chat.py             # Conversation / Message
 │   │   ├── preferences.py      # Preference
-│   │   ├── experience.py       # Experience / ExperienceApproval
+│   │   ├── experience.py       # Experience
 │   │   ├── knowledge.py        # Document / Chunk
-│   │   ├── trace.py            # ExecutionTrace / TraceEvent / HitlTask
-│   │   └── configs.py          # AgentConfig / McpServer
+│   │   ├── trace.py            # ExecutionTrace / TraceEvent / Approval（统一审批中心）
+│   │   ├── configs.py          # McpServer, AgentMcpBinding
 │   ├── repositories/           # ★ 数据访问层：原子 CRUD（每实体一个 repo）
 │   │   ├── base.py             # BaseRepository（通用 get/add/update/delete/list）
 │   │   ├── user_repo.py / department_repo.py / role_repo.py
 │   │   ├── conversation_repo.py / message_repo.py
-│   │   ├── preference_repo.py / experience_repo.py / approval_repo.py
+│   │   ├── preference_repo.py / experience_repo.py
 │   │   ├── document_repo.py / chunk_repo.py
-│   │   ├── trace_repo.py / event_repo.py / hitl_repo.py
+│   │   ├── trace_repo.py / event_repo.py / approval_repo.py
 │   │   └── config_repo.py
 │   ├── schemas/                # Pydantic 请求/响应模型
 │   ├── api/                    # ★ 接口层：薄路由，只做参数校验+调 service
@@ -52,9 +52,8 @@ backend/
 │   │   ├── auth_service.py     # 注册/登录/JWT
 │   │   ├── chat_service.py     # 会话+消息+记忆装配+图执行
 │   │   ├── knowledge_service.py# 文档上传解析/RAG
-│   │   ├── experience_service.py  # 经验提炼/审批/晋升
-│   │   ├── approval_service.py    # 审批流
-│   │   ├── hitl_service.py        # HITL 任务
+│   │   ├── experience_service.py  # 经验提炼/晋升
+│   │   ├── approval_service.py    # 统一审批中心（tool_call + experience_promotion）
 │   │   ├── trace_service.py       # 留痕查询
 │   │   ├── document_parser.py  # PDF/Word/Markdown 解析+切分
 │   │   ├── embedding.py        # embedding 客户端封装
@@ -76,11 +75,17 @@ backend/
 │   │   ├── experiences.py
 │   │   └── knowledge.py
 │   ├── tools/
-│   │   ├── facade.py           # DataFacade 统一门面
+│   │   ├── facade.py           # DataFacade 统一门面（Tool 类 + DataFacade 类 + facade 单例）
+│   │   ├── loader.py           # load_tools 共享工具加载（内置 + MCP）
 │   │   ├── risk.py             # 风险评估器
-│   │   ├── builtin/sql_tool.py
-│   │   ├── builtin/http_tool.py
-│   │   ├── builtin/calc_tool.py
+│   │   ├── builtin/__init__.py # register_builtin_tools 统一注册
+│   │   ├── builtin/query_sales_data.py
+│   │   ├── builtin/query_marketing_campaigns.py
+│   │   ├── builtin/query_schedule.py
+│   │   ├── builtin/create_marketing_campaign.py
+│   │   ├── builtin/adjust_schedule.py
+│   │   ├── builtin/publish_campaign.py
+│   │   ├── builtin/delete_order.py
 │   │   └── mcp_adapter.py
 │   ├── traces/
 │   │   ├── collector.py        # 留痕采集器（队列+批量落库）
@@ -91,7 +96,7 @@ backend/
     ├── conftest.py
     ├── test_auth.py / test_org.py / test_chat.py / test_summary.py
     ├── test_memory.py / test_experience.py / test_knowledge.py
-    ├── test_supervisor.py / test_traces.py / test_hitl.py
+    ├── test_supervisor.py / test_traces.py / test_approvals.py
 ```
 
 ---
@@ -346,8 +351,6 @@ async def db_session():
 ```python
 # backend/tests/test_org.py
 import pytest
-from sqlalchemy import select
-from sqlalchemy.orm import selectinload
 from app.models.org import Department, Role, User
 
 @pytest.mark.asyncio
@@ -358,16 +361,16 @@ async def test_create_user_with_department(db_session):
     role = Role(code="member", name="成员")
     db_session.add(role)
     await db_session.flush()
-    user = User(username="alice", password_hash="x", department_id=dept.id, role_id=role.id, display_name="爱丽丝")
+    user = User(username="alice", password_hash="x", department_id=dept.id, role_code=role.code, display_name="爱丽丝")
     db_session.add(user)
     await db_session.flush()
-    # 异步下访问 relationship 必须 selectinload 预加载，否则抛 MissingGreenlet
-    result = await db_session.scalar(
-        select(User).where(User.username == "alice")
-        .options(selectinload(User.department), selectinload(User.role))
-    )
-    assert result.department.name == "市场部"
-    assert result.role.code == "member"
+    # 不使用 relationship，通过 department_id 手动查关联
+    result = await db_session.get(User, user.id)
+    assert result.department_id == dept.id
+    dept_result = await db_session.get(Department, result.department_id)
+    assert dept_result.name == "市场部"
+    role_result = await db_session.get(Role, result.role_code)
+    assert role_result.code == "member"
 ```
 
 - [ ] **步骤 2：运行测试确认失败**
@@ -382,11 +385,12 @@ async def test_create_user_with_department(db_session):
 from datetime import datetime
 from uuid import uuid4
 from sqlalchemy import UUID, DateTime, String, func
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column
 from app.core.database import Base
 
 # 全项目约定：不使用物理外键（数据库不建 FOREIGN KEY 约束）；
-# 全库主键统一 UUID 字符串（应用层 uuid4 生成），关联列用普通 String(36) + relationship(foreign_keys=...) 保持 ORM 关联能力。
+# 全库主键统一 UUID 字符串（应用层 uuid4 生成），关联列用普通 String(36) + index；
+# 不使用 relationship，关联查询在 repo/service 层用 id 手动查。
 
 class Role(Base):
     __tablename__ = "roles"
@@ -399,8 +403,6 @@ class Department(Base):
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4()))
     name: Mapped[str] = mapped_column(String(128), unique=True)
     owner_id: Mapped[str | None] = mapped_column(String(36), index=True)  # 逻辑外键
-    owner: Mapped["User | None"] = relationship(foreign_keys="Department.owner_id")
-    users: Mapped[list["User"]] = relationship(back_populates="department", foreign_keys="User.department_id")
 
 class User(Base):
     __tablename__ = "users"
@@ -408,11 +410,9 @@ class User(Base):
     username: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(String(128))
     department_id: Mapped[str | None] = mapped_column(String(36), index=True)  # 逻辑外键
-    role_id: Mapped[str | None] = mapped_column(String(36), index=True)        # 逻辑外键
+    role_code: Mapped[str | None] = mapped_column(String(32), index=True)      # 逻辑外键，关联 Role.code
     display_name: Mapped[str] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    department: Mapped[Department | None] = relationship(back_populates="users", foreign_keys=[department_id])
-    role: Mapped[Role | None] = relationship(foreign_keys=[role_id])
 ```
 
 ```python
@@ -448,7 +448,6 @@ git commit -m "feat: 组织模型 User/Department/Role"
 # backend/tests/test_chat_models.py
 import pytest
 from sqlalchemy import select
-from sqlalchemy.orm import selectinload
 from app.models.chat import Conversation, Message
 from app.models.org import User
 
@@ -462,13 +461,13 @@ async def test_conversation_with_messages(db_session):
     await db_session.flush()
     db_session.add(Message(conversation_id=conv.id, role="user", content="策划国庆方案"))
     await db_session.commit()
-    # 异步下访问 conversation.messages 必须 selectinload 预加载
-    result = await db_session.scalar(
-        select(Conversation).where(Conversation.id == conv.id)
-        .options(selectinload(Conversation.messages))
-    )
-    assert len(result.messages) == 1
-    assert result.messages[0].role == "user"
+    # 不使用 relationship，通过 conversation_id 手动查消息
+    result = await db_session.get(Conversation, conv.id)
+    messages = (await db_session.scalars(
+        select(Message).where(Message.conversation_id == conv.id).order_by(Message.created_at)
+    )).all()
+    assert len(messages) == 1
+    assert messages[0].role == "user"
 ```
 
 - [ ] **步骤 2：运行测试确认失败**
@@ -484,7 +483,7 @@ from datetime import datetime
 from uuid import uuid4
 from sqlalchemy import UUID, DateTime, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column
 from app.core.database import Base
 
 class Conversation(Base):
@@ -495,10 +494,6 @@ class Conversation(Base):
     summary: Mapped[str | None] = mapped_column(Text)
     current_trace_id: Mapped[str | None] = mapped_column(String(36))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    messages: Mapped[list["Message"]] = relationship(
-        back_populates="conversation", cascade="all, delete-orphan", order_by="Message.created_at",
-        foreign_keys="Message.conversation_id",
-    )
 
 class Message(Base):
     __tablename__ = "messages"
@@ -508,7 +503,6 @@ class Message(Base):
     content: Mapped[str] = mapped_column(Text)
     metadata_: Mapped[dict | None] = mapped_column("metadata", JSONB)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    conversation: Mapped[Conversation] = relationship(back_populates="messages", foreign_keys=[conversation_id])
 ```
 
 ```python
@@ -575,7 +569,7 @@ from datetime import date, datetime
 from uuid import uuid4
 from sqlalchemy import UUID, Date, DateTime, String, Text, func
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column
 from pgvector.sqlalchemy import Vector
 from app.core.database import Base
 
@@ -595,22 +589,8 @@ class Experience(Base):
     source_trace_id: Mapped[str | None] = mapped_column(String(36))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     embedding: Mapped[list[float] | None] = mapped_column(Vector(1024))
-    approvals: Mapped[list["ExperienceApproval"]] = relationship(
-        back_populates="experience", cascade="all, delete-orphan",
-        foreign_keys="ExperienceApproval.experience_id",
-    )
 
-class ExperienceApproval(Base):
-    __tablename__ = "experience_approvals"
-    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4()))
-    experience_id: Mapped[str] = mapped_column(String(36), index=True)  # 逻辑外键
-    from_scope: Mapped[str] = mapped_column(String(16))
-    to_scope: Mapped[str] = mapped_column(String(16))
-    approver_id: Mapped[str | None] = mapped_column(String(36), index=True)  # 逻辑外键
-    status: Mapped[str] = mapped_column(String(16), default="pending")
-    comment: Mapped[str | None] = mapped_column(Text)
-    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    experience: Mapped[Experience] = relationship(back_populates="approvals", foreign_keys=[experience_id])
+# ExperienceApproval 已删除，统一审批中心 Approval 模型定义在 trace.py 中（见任务 6）
 ```
 
 ```python
@@ -619,7 +599,7 @@ from datetime import datetime
 from uuid import uuid4
 from sqlalchemy import UUID, DateTime, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column
 from pgvector.sqlalchemy import Vector
 from app.core.database import Base
 
@@ -632,10 +612,6 @@ class Document(Base):
     uploader_id: Mapped[str] = mapped_column(String(36), index=True)  # 逻辑外键
     department_id: Mapped[str | None] = mapped_column(String(36), index=True)  # 逻辑外键
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    chunks: Mapped[list["Chunk"]] = relationship(
-        back_populates="document", cascade="all, delete-orphan",
-        foreign_keys="Chunk.document_id",
-    )
 
 class Chunk(Base):
     __tablename__ = "chunks"
@@ -645,14 +621,13 @@ class Chunk(Base):
     content: Mapped[str] = mapped_column(Text)
     meta_: Mapped[dict | None] = mapped_column("meta", JSONB)
     embedding: Mapped[list[float] | None] = mapped_column(Vector(1024))
-    document: Mapped[Document] = relationship(back_populates="chunks", foreign_keys=[document_id])
 ```
 
 ```python
 # backend/app/models/__init__.py 追加
-from app.models.experience import Experience, ExperienceApproval
+from app.models.experience import Experience
 from app.models.knowledge import Document, Chunk
-__all__ += ["Experience", "ExperienceApproval", "Document", "Chunk"]
+__all__ += ["Experience", "Document", "Chunk"]
 ```
 
 - [ ] **步骤 4：运行测试验证通过**
@@ -682,9 +657,8 @@ git commit -m "feat: 经验与知识模型（pgvector 向量列）"
 # backend/tests/test_trace_models.py
 import pytest
 from sqlalchemy import select
-from sqlalchemy.orm import selectinload
-from app.models.trace import ExecutionTrace, TraceEvent, HitlTask
-from app.models.configs import AgentConfig, McpServer
+from app.models.trace import ExecutionTrace, TraceEvent, Approval
+from app.models.configs import McpServer
 
 @pytest.mark.asyncio
 async def test_trace_event_flow(db_session):
@@ -692,15 +666,21 @@ async def test_trace_event_flow(db_session):
     db_session.add(trace)
     await db_session.flush()
     db_session.add(TraceEvent(trace_id=trace.id, type="llm_call", payload={"model": "x", "tokens": 100}))
-    db_session.add(HitlTask(trace_id=trace.id, node_id="n1", reason="高风险操作", status="pending"))
+    db_session.add(Approval(category="tool_call", risk="critical", mode="sync", ref_type="trace",
+                            ref_id=trace.id, title="删除文件", context={"path": "/tmp/x"},
+                            status="pending", requester_id="u1"))
     await db_session.commit()
-    # 异步下访问 events/hitl_tasks 必须 selectinload 预加载
-    result = await db_session.scalar(
-        select(ExecutionTrace).where(ExecutionTrace.id == trace.id)
-        .options(selectinload(ExecutionTrace.events), selectinload(ExecutionTrace.hitl_tasks))
-    )
+    # 不使用 relationship，通过 ref_id 手动查关联
+    result = await db_session.get(ExecutionTrace, trace.id)
     assert result.supervisor_routes[0]["agent"] == "marketing"
-    assert result.hitl_tasks[0].status == "pending"
+    events = (await db_session.scalars(
+        select(TraceEvent).where(TraceEvent.trace_id == trace.id)
+    )).all()
+    assert len(events) == 1
+    approvals = (await db_session.scalars(
+        select(Approval).where(Approval.ref_id == trace.id)
+    )).all()
+    assert approvals[0].status == "pending"
 ```
 
 - [ ] **步骤 2：运行测试确认失败**
@@ -716,7 +696,7 @@ from datetime import datetime
 from uuid import uuid4
 from sqlalchemy import UUID, BigInteger, DateTime, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column
 from app.core.database import Base
 
 class ExecutionTrace(Base):
@@ -727,62 +707,75 @@ class ExecutionTrace(Base):
     status: Mapped[str] = mapped_column(String(16), default="running")  # running/completed/interrupted/failed
     supervisor_routes: Mapped[list | None] = mapped_column(JSONB, default=list)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    events: Mapped[list["TraceEvent"]] = relationship(back_populates="trace", foreign_keys="TraceEvent.trace_id")
-    hitl_tasks: Mapped[list["HitlTask"]] = relationship(back_populates="trace", foreign_keys="HitlTask.trace_id")
 
 class TraceEvent(Base):
     __tablename__ = "trace_events"
     # 全库唯一自增主键特例：留痕为高频批量写入，顺序自增比 UUID 更省索引与页分裂
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     trace_id: Mapped[str] = mapped_column(String(36), index=True)  # 逻辑外键
-    type: Mapped[str] = mapped_column(String(16))  # route/llm/tool/memory/hitl
+    type: Mapped[str] = mapped_column(String(16))  # route/llm/tool/memory/approval
     payload: Mapped[dict] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    trace: Mapped[ExecutionTrace] = relationship(back_populates="events", foreign_keys=[trace_id])
 
-class HitlTask(Base):
-    __tablename__ = "hitl_tasks"
+class Approval(Base):
+    """统一审批中心。合并原 HitlTask + ExperienceApproval。
+    - high 风险工具调用：interrupt 即时确认，不进审批中心（不创建本表记录）
+    - critical 风险工具调用：创建本表记录，interrupt 冻结图等管理者审批
+    - 经验晋升：创建本表记录，不阻塞图，等管理者审批"""
+    __tablename__ = "approvals"
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4()))
-    trace_id: Mapped[str] = mapped_column(String(36), index=True)  # 逻辑外键
-    node_id: Mapped[str] = mapped_column(String(128))
-    reason: Mapped[str] = mapped_column(Text)
-    context: Mapped[dict | None] = mapped_column(JSONB)
+    category: Mapped[str] = mapped_column(String(32), index=True)  # tool_call / experience_promotion
+    risk: Mapped[str | None] = mapped_column(String(16))           # high / critical（仅 tool_call 有值）
+    mode: Mapped[str] = mapped_column(String(16))                  # sync（阻塞图）/ async（不阻塞）
+    ref_type: Mapped[str] = mapped_column(String(32))              # trace / experience
+    ref_id: Mapped[str] = mapped_column(String(36), index=True)    # 关联对象 ID
+    title: Mapped[str] = mapped_column(String(200))
+    context: Mapped[dict | None] = mapped_column(JSONB)            # 工具参数 / 经验摘要
     status: Mapped[str] = mapped_column(String(16), default="pending")  # pending/approved/rejected
-    approver_id: Mapped[str | None] = mapped_column(String(36), index=True)  # 逻辑外键
+    requester_id: Mapped[str] = mapped_column(String(36), index=True)   # 发起人
+    approver_id: Mapped[str | None] = mapped_column(String(36), index=True)  # 审批人
+    approver_role: Mapped[str | None] = mapped_column(String(32))  # 要求的审批角色（admin/dept_owner）
+    comment: Mapped[str | None] = mapped_column(Text)
+    submitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    trace: Mapped[ExecutionTrace] = relationship(back_populates="hitl_tasks", foreign_keys=[trace_id])
 ```
 
 ```python
 # backend/app/models/configs.py
-from sqlalchemy import Boolean, String, Text
+from datetime import datetime
+from uuid import uuid4
+from sqlalchemy import UUID, Boolean, DateTime, String, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 from app.core.database import Base
-
-class AgentConfig(Base):
-    __tablename__ = "agents"
-    code: Mapped[str] = mapped_column(String(32), primary_key=True)
-    name: Mapped[str] = mapped_column(String(64))
-    description: Mapped[str] = mapped_column(Text, default="")
-    model_key: Mapped[str] = mapped_column(String(64), default="default")
-    config: Mapped[dict] = mapped_column(JSONB, default=dict)  # system_prompt / tool_whitelist
-    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
 
 class McpServer(Base):
     __tablename__ = "mcp_servers"
     name: Mapped[str] = mapped_column(String(64), primary_key=True)
     url: Mapped[str] = mapped_column(String(512))
     auth_type: Mapped[str] = mapped_column(String(16), default="none")
+    # config 为 MCP 服务级通用 JSONB 配置，目前用于存工具风险覆盖：
+    #   {"tool_risks": {"delete_order": "critical", "adjust_schedule": "high"}}
+    # 注册时为空 {}，由管理员通过"查看工具 → 配置风险"两步操作写入（任务 38.6）
     config: Mapped[dict] = mapped_column(JSONB, default=dict)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    default_risk: Mapped[str] = mapped_column(String(16), default="medium")  # 服务级默认风险：low/medium/high/critical
+
+class AgentMcpBinding(Base):
+    """agent 与 MCP 服务的绑定关系，运行时动态加载。内置工具仍由 agent 硬编码声明。"""
+    __tablename__ = "agent_mcp_bindings"
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4()))
+    agent_code: Mapped[str] = mapped_column(String(32), index=True)   # marketing/sales_analysis/scheduling
+    mcp_server_name: Mapped[str] = mapped_column(String(64))           # 关联 mcp_servers.name
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 ```
 
 ```python
 # backend/app/models/__init__.py 追加
-from app.models.trace import ExecutionTrace, TraceEvent, HitlTask
-from app.models.configs import AgentConfig, McpServer
-__all__ += ["ExecutionTrace", "TraceEvent", "HitlTask", "AgentConfig", "McpServer"]
+from app.models.trace import ExecutionTrace, TraceEvent, Approval
+from app.models.configs import McpServer, AgentMcpBinding
+__all__ += ["ExecutionTrace", "TraceEvent", "Approval", "McpServer", "AgentMcpBinding"]
 ```
 
 - [ ] **步骤 4：全部模型测试通过并生成迁移**
@@ -907,7 +900,7 @@ class UserOut(BaseModel):
     username: str
     display_name: str
     department_id: str | None = None
-    role_id: str | None = None
+    role_code: str | None = None
     model_config = {"from_attributes": True}
 ```
 
@@ -999,43 +992,41 @@ async def test_login_wrong_password(db_session):
 
 ```python
 # backend/app/repositories/base.py
+from typing import ClassVar, Generic, Type, TypeVar
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-class BaseRepository:
-    """通用原子 CRUD：一个方法一个数据库操作，业务组合放 service 层。
-    service 层禁止直接操作 db，一律通过本类方法（含事务 commit）。"""
-    model = None  # 子类指定
+ModelType = TypeVar("ModelType")
+
+class BaseRepository(Generic[ModelType]):
+    """通用原子 CRUD：一个方法一个数据库操作，不自行 commit（保证 service 层事务原子性）。
+    service 层组合多个 repo 操作后统一调用 db.commit()。"""
+    model: ClassVar[Type[ModelType]]  # 子类指定
 
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def get(self, pk):
-        return await self.db.get(self.model, pk)
+    async def get(self, pk) -> ModelType | None:
+        return (await self.db.scalars(select(self.model).where(self.model.id == pk))).first()
 
-    async def get_by(self, **filters):
+    async def get_by(self, **filters) -> ModelType | None:
         return (await self.db.scalars(select(self.model).filter_by(**filters))).first()
 
-    async def list(self, **filters):
-        return (await self.db.scalars(select(self.model).filter_by(**filters))).all()
+    async def list(self, **filters) -> list[ModelType]:
+        return list((await self.db.scalars(select(self.model).filter_by(**filters))).all())
 
-    async def add(self, obj) -> None:
+    async def add(self, obj: ModelType) -> None:
+        """加入会话并 flush（拿到 id），不 commit。"""
         self.db.add(obj)
-        await self.db.commit()
-        await self.db.refresh(obj)
+        await self.db.flush()
 
-    async def add_all(self, objs) -> None:
+    async def add_all(self, objs: list[ModelType]) -> None:
         self.db.add_all(objs)
-        await self.db.commit()
+        await self.db.flush()
 
-    async def delete(self, obj) -> None:
+    async def delete(self, obj: ModelType) -> None:
         await self.db.delete(obj)
-        await self.db.commit()
-
-    async def update(self, obj) -> None:
-        """修改已有对象后提交并刷新。"""
-        await self.db.commit()
-        await self.db.refresh(obj)
+        await self.db.flush()
 
     async def commit(self) -> None:
         """service 组合多个 repo 操作后统一提交事务。"""
@@ -1053,7 +1044,7 @@ class BaseRepository:
 from app.models.org import User
 from app.repositories.base import BaseRepository
 
-class UserRepository(BaseRepository):
+class UserRepository(BaseRepository[User]):
     model = User
 
     async def get_by_username(self, username: str) -> User | None:
@@ -1072,17 +1063,18 @@ from app.core.security import hash_password, verify_password, create_access_toke
 class AuthService:
     """业务组合：注册去重 + 密码校验 + 签发 token，数据库操作委托 repository。"""
     def __init__(self, db):
-        self.users = UserRepository(db)
+        self.user_repo = UserRepository(db)
 
     async def register(self, username: str, password: str, display_name: str) -> User:
-        if await self.users.get_by_username(username):
+        if await self.user_repo.get_by_username(username):
             raise HTTPException(400, "用户名已存在")
         user = User(username=username, password_hash=hash_password(password), display_name=display_name)
-        await self.users.add(user)
+        await self.user_repo.add(user)
+        await self.user_repo.commit()
         return user
 
     async def login(self, username: str, password: str) -> str:
-        user = await self.users.get_by_username(username)
+        user = await self.user_repo.get_by_username(username)
         if not user or not verify_password(password, user.password_hash):
             raise HTTPException(401, "用户名或密码错误")
         return create_access_token(user.id, user.username)
@@ -1216,7 +1208,7 @@ async def test_department_crud():
 from app.models.org import Department
 from app.repositories.base import BaseRepository
 
-class DepartmentRepository(BaseRepository):
+class DepartmentRepository(BaseRepository[Department]):
     model = Department
 ```
 
@@ -1230,19 +1222,20 @@ from app.repositories.user_repo import UserRepository
 
 class OrgService:
     def __init__(self, db):
-        self.departments = DepartmentRepository(db)
-        self.users = UserRepository(db)
+        self.dept_repo = DepartmentRepository(db)
+        self.user_repo = UserRepository(db)
 
     async def create_department(self, name: str) -> Department:
         dept = Department(name=name)
-        await self.departments.add(dept)
+        await self.dept_repo.add(dept)
+        await self.dept_repo.commit()
         return dept
 
     async def list_departments(self) -> list[Department]:
-        return await self.departments.list()
+        return await self.dept_repo.list()
 
     async def list_users(self) -> list[User]:
-        return await self.users.list()
+        return await self.user_repo.list()
 ```
 
 - [ ] **步骤 5：实现薄路由并在 main.py 注册**
@@ -1322,17 +1315,13 @@ git commit -m "feat: 组织架构 API"
 import pytest
 from sqlalchemy import select
 from app.models.org import Role
-from app.models.configs import AgentConfig
-from app.services.seed import seed_roles, seed_agents
+from app.services.seed import seed_roles
 
 @pytest.mark.asyncio
 async def test_seed_creates_defaults(db_session):
     await seed_roles(db_session)
-    await seed_agents(db_session)
     roles = (await db_session.scalars(select(Role))).all()
-    agents = (await db_session.scalars(select(AgentConfig))).all()
     assert {r.code for r in roles} >= {"member", "dept_owner", "admin"}
-    assert {a.code for a in agents} >= {"marketing", "sales_analysis", "scheduling"}
 ```
 
 - [ ] **步骤 2：运行测试确认失败**
@@ -1346,47 +1335,30 @@ async def test_seed_creates_defaults(db_session):
 # backend/app/services/seed.py —— 种子业务也只走 repo，不直查 DB
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.org import Role
-from app.models.configs import AgentConfig
 from app.repositories.base import BaseRepository
 
-class RoleRepository(BaseRepository):
+class RoleRepository(BaseRepository[Role]):
     model = Role
 
-class AgentConfigRepository(BaseRepository):
-    model = AgentConfig  # 种子用极简封装；任务 38 的 config_repo 提供更丰富的管理方法
-
 ROLES = [("member", "成员"), ("dept_owner", "部门负责人"), ("admin", "公司管理员")]
-# (code, name, description, tool_whitelist) —— whitelist 仅作管理端展示；运行时工具绑定由各 agent 模块的 TOOL_NAMES 决定（任务 27/28/32.5）
-AGENTS = [
-    ("marketing", "营销助手", "营销方案策划与效果复盘", ["calc", "http_get"]),
-    ("sales_analysis", "经营分析", "经营数据查询与分析", ["sql_query", "calc"]),
-    ("scheduling", "调度优化", "资源与排期优化", ["sql_query", "calc"]),
-]
 
 async def seed_roles(db: AsyncSession) -> None:
     roles = RoleRepository(db)
     for code, name in ROLES:
         if not await roles.get_by(code=code):
             await roles.add(Role(code=code, name=name))
-
-async def seed_agents(db: AsyncSession) -> None:
-    agents = AgentConfigRepository(db)
-    for code, name, desc, whitelist in AGENTS:
-        if not await agents.get_by(code=code):
-            await agents.add(AgentConfig(code=code, name=name, description=desc,
-                                         config={"system_prompt": "", "tool_whitelist": whitelist}))
+    await roles.commit()
 ```
 
 ```python
 # backend/scripts/seed.py
 import asyncio
 from app.core.database import SessionLocal
-from app.services.seed import seed_roles, seed_agents
+from app.services.seed import seed_roles
 
 async def main():
     async with SessionLocal() as db:
         await seed_roles(db)
-        await seed_agents(db)
     print("seeded")
 
 if __name__ == "__main__":
@@ -1473,11 +1445,10 @@ class MessageOut(BaseModel):
 ```python
 # backend/app/repositories/conversation_repo.py
 from sqlalchemy import select, func
-from sqlalchemy.orm import selectinload
 from app.models.chat import Conversation, Message
 from app.repositories.base import BaseRepository
 
-class ConversationRepository(BaseRepository):
+class ConversationRepository(BaseRepository[Conversation]):
     model = Conversation
 
     async def list_by_user(self, user_id: str) -> list[Conversation]:
@@ -1485,52 +1456,47 @@ class ConversationRepository(BaseRepository):
             select(Conversation).where(Conversation.user_id == user_id).order_by(Conversation.created_at.desc())
         )).all()
 
-    async def get_with_messages(self, conv_id: str) -> Conversation | None:
-        # 异步下访问 messages 必须 selectinload 预加载，否则抛 MissingGreenlet
-        return await self.db.get(Conversation, conv_id, options=[selectinload(Conversation.messages)])
-
-    async def update_summary(self, conv: Conversation, summary: str) -> None:
-        conv.summary = summary
-        await self.commit()
-
-class MessageRepository(BaseRepository):
+class MessageRepository(BaseRepository[Message]):
     model = Message
+
+    async def list_by_conversation(self, conversation_id: str) -> list[Message]:
+        return (await self.db.scalars(
+            select(Message).where(Message.conversation_id == conversation_id)
+            .order_by(Message.created_at)
+        )).all()
 
     async def list_recent(self, conversation_id: str, limit: int = 20) -> list[Message]:
         return (await self.db.scalars(
             select(Message).where(Message.conversation_id == conversation_id)
             .order_by(Message.created_at.desc()).limit(limit)
         )).all()
-
-    async def count_in_conversation(self, conversation_id: str) -> int:
-        return (await self.db.scalar(
-            select(func.count()).select_from(Message).where(Message.conversation_id == conversation_id)
-        )) or 0
 ```
 
 ```python
 # backend/app/services/conversation_service.py
 from fastapi import HTTPException
 from app.models.chat import Conversation
-from app.repositories.conversation_repo import ConversationRepository
+from app.repositories.conversation_repo import ConversationRepository, MessageRepository
 
 class ConversationService:
     def __init__(self, db):
-        self.conversations = ConversationRepository(db)
+        self.conversation_repo = ConversationRepository(db)
+        self.message_repo = MessageRepository(db)
 
     async def create(self, user_id: str, title: str) -> Conversation:
         conv = Conversation(user_id=user_id, title=title)
-        await self.conversations.add(conv)
+        await self.conversation_repo.add(conv)
+        await self.conversation_repo.commit()
         return conv
 
     async def list_by_user(self, user_id: str) -> list[Conversation]:
-        return await self.conversations.list_by_user(user_id)
+        return await self.conversation_repo.list_by_user(user_id)
 
     async def list_messages(self, user_id: str, conv_id: str):
-        conv = await self.conversations.get_with_messages(conv_id)
+        conv = await self.conversation_repo.get(conv_id)
         if not conv or conv.user_id != user_id:
             raise HTTPException(404, "会话不存在")
-        return conv.messages
+        return await self.message_repo.list_by_conversation(conv_id)
 ```
 
 ```python
@@ -1732,7 +1698,9 @@ async def test_maybe_roll_summary_updates(db_session, monkeypatch):
     conv = Conversation(user_id="u1", title="t", summary=None)
     db_session.add(conv)
     await db_session.commit()
-    monkeypatch.setattr("app.services.summary.summarize_text", lambda text: "压缩后的摘要")
+    async def fake_summarize(text):
+        return "压缩后的摘要"
+    monkeypatch.setattr("app.services.summary.summarize_text", fake_summarize)
     await maybe_roll_summary(db_session, conv.id, force=True)
     await db_session.refresh(conv)
     assert conv.summary == "压缩后的摘要"
@@ -1747,29 +1715,35 @@ async def test_maybe_roll_summary_updates(db_session, monkeypatch):
 
 ```python
 # backend/app/services/summary.py
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.repositories.conversation_repo import ConversationRepository, MessageRepository
 from app.llm.factory import ModelFactory
 
+class SummaryOutput(BaseModel):
+    """对话摘要结构化输出"""
+    summary: str = Field(description="简洁的中文摘要，保留关键决策、数字与结论")
+
 async def summarize_text(messages_text: str) -> str:
-    llm = ModelFactory.get_llm()
-    resp = await llm.ainvoke(
-        f"将以下对话压缩为简洁的中文摘要，保留关键决策、数字与结论：\n{messages_text}\n摘要："
+    llm = ModelFactory.get_llm().with_structured_output(SummaryOutput)
+    result = await llm.ainvoke(
+        f"将以下对话压缩为简洁的中文摘要，保留关键决策、数字与结论：\n{messages_text}"
     )
-    return resp.content if hasattr(resp, "content") else str(resp)
+    return result.summary
 
 async def maybe_roll_summary(db: AsyncSession, conversation_id: str, force: bool = False, max_messages: int = 20) -> None:
     # 数据库操作委托 repository
     conv_repo = ConversationRepository(db)
     msg_repo = MessageRepository(db)
     conv = await conv_repo.get(conversation_id)
-    count = await msg_repo.count_in_conversation(conversation_id)
+    count = await msg_repo.count(conversation_id=conversation_id)
     if not force and count < max_messages:
         return
     recent = await msg_repo.list_recent(conversation_id, 10)
     text = "\n".join(f"{m.role}: {m.content}" for m in reversed(recent))
     old = f"已有摘要：{conv.summary}\n" if conv.summary else ""
-    await conv_repo.update_summary(conv, await summarize_text(old + text))
+    conv.summary = await summarize_text(old + text)
+    await conv_repo.commit()
 ```
 
 - [ ] **步骤 4：运行测试验证通过**
@@ -1842,7 +1816,7 @@ class AgentState(TypedDict, total=False):
     agent_response: str
     route_history: Annotated[list[str], add]  # 已路由过的 agent，防死循环
     pending_agent: str           # supervisor 本次路由目标
-    hitl_decision: str | None    # approved/rejected
+    approval_result: dict | None  # 审批结果（critical 工具调用恢复时携带）
     trace_id: str
 ```
 
@@ -1878,11 +1852,11 @@ from app.agents.graph import graph
 class ChatService:
     """聊天业务：校验归属 + 持久化消息 + 执行图 + 产出 SSE 事件（后续任务 15/30/35 在此扩展）。"""
     def __init__(self, db):
-        self.conversations = ConversationRepository(db)
-        self.messages = MessageRepository(db)
+        self.conversation_repo = ConversationRepository(db)
+        self.message_repo = MessageRepository(db)
 
     async def _ensure_owned(self, user_id: str, conv_id: str) -> Conversation:
-        conv = await self.conversations.get(conv_id)
+        conv = await self.conversation_repo.get(conv_id)
         if not conv or conv.user_id != user_id:
             raise HTTPException(404, "会话不存在")
         return conv
@@ -1890,14 +1864,16 @@ class ChatService:
     async def stream_chat(self, user_id: str, conv_id: str, message: str):
         """SSE 事件异步生成器：start → token → done。"""
         await self._ensure_owned(user_id, conv_id)
-        await self.messages.add(Message(conversation_id=conv_id, role="user", content=message))
+        await self.message_repo.add(Message(conversation_id=conv_id, role="user", content=message))
+        await self.message_repo.commit()
         yield json.dumps({"event": "start"}, ensure_ascii=False)
         result = await graph.ainvoke({
             "conversation_id": conv_id, "user_id": user_id,
             "user_message": message, "messages": [],
         })
         text = result.get("agent_response", "")
-        await self.messages.add(Message(conversation_id=conv_id, role="assistant", content=text))
+        await self.message_repo.add(Message(conversation_id=conv_id, role="assistant", content=text))
+        await self.message_repo.commit()
         yield json.dumps({"event": "token", "content": text}, ensure_ascii=False)
         yield json.dumps({"event": "done"}, ensure_ascii=False)
 ```
@@ -1994,12 +1970,13 @@ from app.services.summary import maybe_roll_summary
 class ChatService:
     def __init__(self, db):
         self.db = db
-        self.conversations = ConversationRepository(db)
-        self.messages = MessageRepository(db)
+        self.conversation_repo = ConversationRepository(db)
+        self.message_repo = MessageRepository(db)
 
     async def stream_chat(self, user_id: str, conv_id: str, message: str):
         await self._ensure_owned(user_id, conv_id)
-        await self.messages.add(Message(conversation_id=conv_id, role="user", content=message))
+        await self.message_repo.add(Message(conversation_id=conv_id, role="user", content=message))
+        await self.message_repo.commit()
         yield json.dumps({"event": "start"}, ensure_ascii=False)
         history = await build_context(self.db, conv_id, recent_rounds=10)  # 短期记忆装配
         result = await graph.ainvoke({
@@ -2007,7 +1984,8 @@ class ChatService:
             "user_message": message, "history": history, "messages": [],
         })
         text = result.get("agent_response", "")
-        await self.messages.add(Message(conversation_id=conv_id, role="assistant", content=text))
+        await self.message_repo.add(Message(conversation_id=conv_id, role="assistant", content=text))
+        await self.message_repo.commit()
         await maybe_roll_summary(self.db, conv_id)  # 消息超阈值滚动摘要
         yield json.dumps({"event": "token", "content": text}, ensure_ascii=False)
         yield json.dumps({"event": "done"}, ensure_ascii=False)
@@ -2071,6 +2049,62 @@ async def embed_texts(texts: list[str]) -> list[list[float]]:
 async def embed_query(text: str) -> list[float]:
     emb = ModelFactory.get_embedding()
     return await emb.aembed_query(text)
+```
+
+> **Rerank 服务**：向量召回后再用 LLM 精排，提高检索准确率。在任务 16 之后新增。
+
+```python
+# backend/app/services/rerank.py
+from pydantic import BaseModel, Field
+from app.llm.factory import ModelFactory
+
+class RerankItem(BaseModel):
+    """单条候选相关性评分"""
+    score: float = Field(description="相关性评分 0~1")
+    reason: str = Field(description="评分理由")
+
+class RerankOutput(BaseModel):
+    """rerank 结构化输出"""
+    items: list[RerankItem] = Field(description="与输入candidates顺序一致的评分列表")
+
+async def rerank(query: str, candidates: list[str]) -> list[float]:
+    """LLM 对每条候选打分，返回与 candidates 等长的分数列表（0~1，越高越相关）。
+    两阶段检索：向量 over-fetch → rerank 精排 → 截断 top_k。"""
+    if not candidates:
+        return []
+    llm = ModelFactory.get_llm().with_structured_output(RerankOutput)
+    numbered = "\n".join(f"{i}. {c[:500]}" for i, c in enumerate(candidates))
+    result = await llm.ainvoke(
+        f"根据用户问题对以下候选内容逐一打分（0~1，越高越相关）。\n"
+        f"问题：{query}\n候选：\n{numbered}"
+    )
+    return [item.score for item in result.items]
+```
+
+```python
+# backend/tests/test_rerank.py
+import pytest
+from app.services.rerank import rerank, RerankOutput
+
+@pytest.mark.asyncio
+async def test_rerank_returns_scores(monkeypatch):
+    class FakeLLM:
+        def with_structured_output(self, schema):
+            return self
+        async def ainvoke(self, prompt):
+            return RerankOutput(items=[
+                RerankItem(score=0.9, reason="高度相关"),
+                RerankItem(score=0.3, reason="弱相关"),
+            ])
+    monkeypatch.setattr("app.services.rerank.ModelFactory.get_llm", lambda: FakeLLM())
+    scores = await rerank("国庆营销", ["国庆大促方案", "春节红包活动"])
+    assert len(scores) == 2
+    assert scores[0] > scores[1]
+
+@pytest.mark.asyncio
+async def test_rerank_empty():
+    scores = await rerank("test", [])
+    assert scores == []
 ```
 
 - [ ] **步骤 4：运行测试验证通过**
@@ -2231,15 +2265,11 @@ from sqlalchemy.sql import text as sqltext
 from app.models.knowledge import Document, Chunk
 from app.repositories.base import BaseRepository
 
-class DocumentRepository(BaseRepository):
+class DocumentRepository(BaseRepository[Document]):
     model = Document
 
-class ChunkRepository(BaseRepository):
+class ChunkRepository(BaseRepository[Chunk]):
     model = Chunk
-
-    async def add_chunks(self, chunks: list[Chunk]) -> None:
-        self.db.add_all(chunks)
-        await self.db.commit()
 
     async def vector_search(self, query_vec: list[float], top_k: int = 5) -> list[dict]:
         """pgvector 相似度检索（service/memory 层不再直接执行 SQL）。"""
@@ -2268,8 +2298,8 @@ UPLOAD_DIR = "storage/documents"
 class KnowledgeService:
     """知识库业务：上传→解析→切分→embedding→入库；语义检索。数据库操作全部委托 repository。"""
     def __init__(self, db):
-        self.documents = DocumentRepository(db)
-        self.chunks = ChunkRepository(db)
+        self.document_repo = DocumentRepository(db)
+        self.chunk_repo = ChunkRepository(db)
 
     async def upload(self, uploader_id: str, filename: str, content: bytes) -> Document:
         ext = filename.rsplit(".", 1)[-1]
@@ -2279,26 +2309,26 @@ class KnowledgeService:
         with open(path, "wb") as f:
             f.write(content)
         doc = Document(id=doc_id, title=filename, file_path=path, status="parsing", uploader_id=uploader_id)
-        await self.documents.add(doc)
+        await self.document_repo.add(doc)
         try:
             text = parse_text(content, ext)
             chunks = split_chunks(text, ext=ext)
             vecs = await embed_texts(chunks)
-            await self.chunks.add_chunks([
+            await self.chunk_repo.add_all([
                 Chunk(document_id=doc_id, seq=i, content=t, embedding=v)
                 for i, (t, v) in enumerate(zip(chunks, vecs))
             ])
             doc.status = "ready"
-            await self.documents.update(doc)
+            await self.document_repo.commit()
         except Exception as e:
             doc.status = "failed"
-            await self.documents.update(doc)
+            await self.document_repo.commit()
             raise HTTPException(500, f"解析失败: {e}")
         return doc
 
     async def search(self, query: str, top_k: int = 5) -> dict:
         query_vec = await embed_query(query)
-        return {"results": await self.chunks.vector_search(query_vec, top_k)}
+        return {"results": await self.chunk_repo.vector_search(query_vec, top_k)}
 ```
 
 ```python
@@ -2378,12 +2408,20 @@ async def test_retrieve_knowledge_format(monkeypatch):
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.repositories.document_repo import ChunkRepository
 from app.services.embedding import embed_query
+from app.services.rerank import rerank
 
 async def search_chunks(db: AsyncSession, query: str, top_k: int = 5) -> list[dict]:
-    # 向量检索委托 repository
+    # 两阶段检索：向量 over-fetch → rerank 精排 → 截断 top_k
     query_vec = await embed_query(query)
-    hits = await ChunkRepository(db).vector_search(query_vec, top_k)
-    return [{"id": h["id"], "content": h["content"], "document_id": h["document_id"]} for h in hits]
+    hits = await ChunkRepository(db).vector_search(query_vec, top_k=20)  # over-fetch 20条
+    if not hits:
+        return []
+    texts = [h["content"] for h in hits]
+    scores = await rerank(query, texts)  # rerank 精排
+    for i, h in enumerate(hits):
+        h["score"] = scores[i]
+    hits.sort(key=lambda x: -x["score"])
+    return [{"id": h["id"], "content": h["content"], "document_id": h["document_id"]} for h in hits[:top_k]]
 
 async def retrieve_knowledge(db: AsyncSession, query: str, top_k: int = 5) -> str:
     hits = await search_chunks(db, query, top_k)
@@ -2466,23 +2504,22 @@ from sqlalchemy import select
 from app.models.preferences import Preference
 from app.repositories.base import BaseRepository
 
-class PreferenceRepository(BaseRepository):
+class PreferenceRepository(BaseRepository[Preference]):
     model = Preference
 
     async def list_by_user(self, user_id: str) -> list[Preference]:
         return (await self.db.scalars(select(Preference).where(Preference.user_id == user_id))).all()
 
     async def merge(self, user_id: str, category: str, content: str, confidence: float, source: str) -> None:
-        """相同 category+content 的偏好合并（取更高 confidence），数据库操作集中在 repo。"""
+        """相同 category+content 的偏好合并（取更高 confidence），只 flush 不 commit。"""
         existing = (await self.db.scalars(
             select(Preference).where(Preference.user_id == user_id, Preference.category == category, Preference.content == content)
         )).first()
         if existing:
             existing.confidence = max(existing.confidence, confidence)
-            await self.update(existing)
         else:
             self.db.add(Preference(user_id=user_id, category=category, content=content, confidence=confidence, source=source))
-            await self.commit()
+        await self.db.flush()
 ```
 
 ```python
@@ -2496,28 +2533,35 @@ async def merge_preference(db: AsyncSession, user_id: str, category: str, conten
 
 ```python
 # backend/app/services/preference_svc.py 追加：LLM 结构化提取
-import json
+from typing import Literal
+from pydantic import BaseModel, Field
 from app.llm.factory import ModelFactory
 
-PREF_EXTRACT_PROMPT = (
-    "你是用户偏好分析器。根据对话提取用户偏好，输出 JSON 数组，元素格式 "
-    '{"category": "style|decision|habit", "content": "偏好描述", "confidence": 0~1}。'
-    "没有偏好时输出 []。只输出 JSON。\n对话：{text}"
-)
+class PreferenceItem(BaseModel):
+    """单条用户偏好"""
+    category: Literal["style", "decision", "habit"] = Field(description="偏好类别")
+    content: str = Field(description="偏好描述")
+    confidence: float = Field(description="置信度 0~1")
 
-async def extract_preferences(text: str) -> list[dict]:
-    llm = ModelFactory.get_llm()
-    resp = await llm.ainvoke(PREF_EXTRACT_PROMPT.format(text=text))
-    raw = resp.content if hasattr(resp, "content") else str(resp)
-    try:
-        return json.loads(raw)
-    except Exception:
-        return []
+class PreferenceOutput(BaseModel):
+    """用户偏好提取结果"""
+    preferences: list[PreferenceItem] = Field(default_factory=list, description="提取到的偏好列表，没有则为空")
+
+async def extract_preferences(text: str) -> list[PreferenceItem]:
+    llm = ModelFactory.get_llm().with_structured_output(PreferenceOutput)
+    result = await llm.ainvoke(
+        f"你是用户偏好分析器。根据对话提取用户偏好，提取偏好类别（style/decision/habit）、"
+        f"偏好内容和置信度。没有偏好时返回空列表。\n对话：{text}"
+    )
+    return result.preferences
 
 async def extract_and_save(db: AsyncSession, user_id: str, text: str) -> None:
+    repo = PreferenceRepository(db)
     prefs = await extract_preferences(text)
     for p in prefs:
-        await merge_preference(db, user_id, p.get("category", "habit"), p.get("content", ""), float(p.get("confidence", 0.5)), "auto")
+        await repo.merge(user_id, p.category, p.content, p.confidence, "auto")
+    if prefs:
+        await repo.commit()
 ```
 
 ```python
@@ -2563,15 +2607,19 @@ git commit -m "feat: 偏好提取与合并去重"
 import pytest
 from sqlalchemy import select
 from app.models.experience import Experience
-from app.services.experience_svc import distill_experience, save_personal_experience
+from app.services.experience_svc import distill_experience, save_personal_experience, DistillOutput
 
 @pytest.mark.asyncio
 async def test_distill_and_save(db_session, monkeypatch):
-    async def fake_llm(text):
-        class R:
-            content = '{"title": "国庆大促", "summary": "满减+直播", "content": "详情", "tags": ["营销"], "event_time": "2025-10-01", "result_metrics": {"gmv": 320}}'
-        return R()
-    monkeypatch.setattr("app.services.experience_svc.ModelFactory.get_llm", lambda: Fake())
+    class FakeLLM:
+        def with_structured_output(self, schema):
+            return self
+        async def ainvoke(self, prompt):
+            return DistillOutput(
+                title="国庆大促", summary="满减+直播", content="详情",
+                tags=["营销"], event_time="2025-10-01", result_metrics={"gmv": 320}
+            )
+    monkeypatch.setattr("app.services.experience_svc.ModelFactory.get_llm", lambda: FakeLLM())
     monkeypatch.setattr("app.services.experience_svc.embed_texts", lambda t: [[0.1, 0.2, 0.3]])
 
     exp = await distill_experience("用户：策划国庆营销方案\n助手：建议满减+直播", user_id="u1", trace_id="t1")
@@ -2592,7 +2640,7 @@ from sqlalchemy.sql import text as sqltext
 from app.models.experience import Experience
 from app.repositories.base import BaseRepository
 
-class ExperienceRepository(BaseRepository):
+class ExperienceRepository(BaseRepository[Experience]):
     model = Experience
 
     async def vector_search(self, query_vec: list[float], limit: int = 30) -> list[Experience]:
@@ -2611,40 +2659,43 @@ class ExperienceRepository(BaseRepository):
 
 ```python
 # backend/app/services/experience_svc.py
-import json
+from datetime import date
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.experience import Experience
 from app.repositories.experience_repo import ExperienceRepository
 from app.services.embedding import embed_texts
 from app.llm.factory import ModelFactory
 
-DISTILL_PROMPT = (
-    "你是企业经验提炼器。从对话中提炼有价值的历史决策/策略/教训，输出一个 JSON 对象，字段："
-    '{"title": 标题, "summary": 要点摘要, "content": 完整决策过程, "tags": [业务标签], '
-    '"event_time": 事件日期 YYYY-MM-DD, "result_metrics": {效果指标}}。'
-    "营销/策略类必须包含 event_time 和 result_metrics，否则视为无价值输出 null。只输出 JSON。\n对话：{text}"
-)
+class DistillOutput(BaseModel):
+    """经验提炼结构化输出"""
+    title: str | None = Field(default=None, description="标题，无价值时为 null")
+    summary: str = Field(default="", description="要点摘要")
+    content: str = Field(default="", description="完整决策过程")
+    tags: list[str] = Field(default_factory=list, description="业务标签")
+    event_time: date | None = Field(default=None, description="事件日期 YYYY-MM-DD，营销/策略类必填")
+    result_metrics: dict | None = Field(default=None, description="效果指标，营销/策略类必填")
 
 async def distill_experience(text: str, user_id: str, trace_id: str) -> Experience | None:
-    llm = ModelFactory.get_llm()
-    resp = await llm.ainvoke(DISTILL_PROMPT.format(text=text[:6000]))
-    raw = resp.content if hasattr(resp, "content") else str(resp)
-    try:
-        data = json.loads(raw)
-    except Exception:
+    llm = ModelFactory.get_llm().with_structured_output(DistillOutput)
+    result = await llm.ainvoke(
+        f"你是企业经验提炼器。从对话中提炼有价值的历史决策/策略/教训。"
+        f"营销/策略类必须包含 event_time 和 result_metrics，否则视为无价值将 title 设为 null。\n对话：{text[:6000]}"
+    )
+    if not result.title:
         return None
-    if not data or data.get("title") is None:
-        return None
-    vec = (await embed_texts([f"{data.get('title','')} {data.get('summary','')}"]))[0]
+    vec = (await embed_texts([f"{result.title} {result.summary}"]))[0]
     return Experience(
         owner_id=user_id, scope="personal", status="draft",
-        title=data["title"], summary=data.get("summary", ""), content=data.get("content", ""),
-        tags=data.get("tags", []), event_time=data.get("event_time"), result_metrics=data.get("result_metrics"),
+        title=result.title, summary=result.summary, content=result.content,
+        tags=result.tags, event_time=result.event_time, result_metrics=result.result_metrics,
         source_trace_id=trace_id, embedding=vec,
     )
 
 async def save_personal_experience(db: AsyncSession, exp: Experience) -> None:
-    await ExperienceRepository(db).add(exp)
+    repo = ExperienceRepository(db)
+    await repo.add(exp)
+    await repo.commit()
 ```
 
 - [ ] **步骤 4：运行测试验证通过**
@@ -2682,6 +2733,7 @@ async def test_build_experience_context(db_session, monkeypatch):
                               summary="满减+直播", event_time="2025-10-01", embedding=[0.1, 0.2, 0.3]))
     await db_session.commit()
     monkeypatch.setattr("app.memory.experiences.embed_query", lambda t: [0.1, 0.2, 0.3])
+    monkeypatch.setattr("app.memory.experiences.rerank", lambda q, c: [0.9] * len(c))
     ctx = await build_experience_context(db_session, user_id="u1", department_id=None, query="国庆营销")
     assert "国庆大促" in ctx
 ```
@@ -2691,7 +2743,7 @@ async def test_build_experience_context(db_session, monkeypatch):
 运行：`cd backend && pytest tests/test_experience_retrieve.py -v`
 预期：FAIL，ImportError
 
-- [ ] **步骤 3：实现经验检索（可见范围 + 同期加权 + 层级偏好）**
+- [ ] **步骤 3：实现经验检索（可见范围过滤 → rerank 精排 → 同期加权）**
 
 ```python
 # backend/app/memory/experiences.py
@@ -2699,26 +2751,35 @@ from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.repositories.experience_repo import ExperienceRepository
 from app.services.embedding import embed_query
-
-SCOPE_ORDER = {"personal": 0, "dept": 1, "company": 2}
+from app.services.rerank import rerank
 
 async def build_experience_context(db: AsyncSession, user_id: str, department_id: str | None, query: str, top_k: int = 5) -> str:
-    # 向量召回委托 repository，本层只做可见范围过滤 + 同期加权 + 层级偏好（非 DB 操作）
+    # 第1步：向量召回（over-fetch 30条候选）
     qv = await embed_query(query)
     candidates = await ExperienceRepository(db).vector_search(qv, 30)
-    hits = []
-    now_month = datetime.now().month
+    # 第2步：可见范围过滤（先过滤再 rerank，减少 LLM 打分数量）
+    visible = []
     for exp in candidates:
         if exp.scope == "personal" and exp.owner_id != user_id:
             continue
         if exp.scope == "dept" and (department_id is None or exp.department_id != department_id):
             continue
-        score = SCOPE_ORDER.get(exp.scope, 3)
-        if exp.event_time and exp.event_time.month == now_month:  # 同期加权
-            score -= 0.5
-        hits.append((score, exp))
-    hits.sort(key=lambda x: x[0])
-    selected = [e for _, e in hits[:top_k]]
+        visible.append(exp)
+    if not visible:
+        return ""
+    # 第3步：rerank 精排（LLM 对每条候选打分）
+    texts = [f"{e.title} {e.summary}" for e in visible]
+    scores = await rerank(query, texts)
+    # 第4步：同期加权叠加
+    now_month = datetime.now().month
+    scored = []
+    for i, exp in enumerate(visible):
+        final = scores[i]
+        if exp.event_time and exp.event_time.month == now_month:
+            final += 0.1  # 同期加权（叠加在 rerank 分数上）
+        scored.append((final, exp))
+    scored.sort(key=lambda x: -x[0])  # 按最终分数降序
+    selected = [e for _, e in scored[:top_k]]
     if not selected:
         return ""
     parts = [f"- [{e.scope}] {e.title}：{e.summary}（{e.event_time or '无日期'}）" for e in selected]
@@ -2742,7 +2803,7 @@ git commit -m "feat: 经验向量检索与加权"
 ### 任务 23：经验中心 API（三层：分层视图 + 提交审批）
 
 **文件：**
-- 修改：`backend/app/repositories/experience_repo.py`（追加 list_visible / ApprovalRepository，任务 21 已建 ExperienceRepository）
+- 修改：`backend/app/repositories/experience_repo.py`（追加 list_visible，任务 21 已建 ExperienceRepository）
 - 创建：`backend/app/services/experience_service.py`
 - 创建：`backend/app/api/experiences.py`（薄层）
 - 创建：`backend/tests/test_experiences_api.py`
@@ -2783,9 +2844,9 @@ async def test_submit_experience_for_approval(monkeypatch):
 - [ ] **步骤 3：实现经验路由**
 
 ```python
-# backend/app/repositories/experience_repo.py 修改：ExperienceRepository 类内追加 list_visible（任务 21 已建类），并新增 ApprovalRepository
+# backend/app/repositories/experience_repo.py 修改：ExperienceRepository 类内追加 list_visible（任务 21 已建类）
 from sqlalchemy import select
-from app.models.experience import Experience, ExperienceApproval
+from app.models.experience import Experience
 from app.repositories.base import BaseRepository
 
 async def list_visible(self, user_id: str, department_id: str | None) -> list[Experience]:
@@ -2799,25 +2860,21 @@ async def list_visible(self, user_id: str, department_id: str | None) -> list[Ex
     )).all()
 
 ExperienceRepository.list_visible = list_visible  # 类内追加
-
-class ApprovalRepository(BaseRepository):
-    model = ExperienceApproval
-
-    async def list_pending(self) -> list[ExperienceApproval]:
-        return (await self.db.scalars(select(ExperienceApproval).where(ExperienceApproval.status == "pending"))).all()
 ```
 
 ```python
 # backend/app/services/experience_service.py
 from fastapi import HTTPException
-from app.models.experience import Experience, ExperienceApproval
-from app.repositories.experience_repo import ExperienceRepository, ApprovalRepository
+from app.models.experience import Experience
+from app.models.trace import Approval
+from app.repositories.experience_repo import ExperienceRepository
+from app.repositories.trace_repo import ApprovalRepository
 from app.services.embedding import embed_texts
 
 class ExperienceService:
     def __init__(self, db):
-        self.experiences = ExperienceRepository(db)
-        self.approvals = ApprovalRepository(db)
+        self.experience_repo = ExperienceRepository(db)
+        self.approval_repo = ApprovalRepository(db)
 
     async def create(self, user_id: str, department_id: str | None, data) -> Experience:
         vec = (await embed_texts([f"{data.title} {data.summary}"]))[0]
@@ -2825,21 +2882,31 @@ class ExperienceService:
                          summary=data.summary, content=data.content, tags=data.tags,
                          event_time=data.event_time, result_metrics=data.result_metrics,
                          department_id=department_id, embedding=vec)
-        await self.experiences.add(exp)
+        await self.experience_repo.add(exp)
+        await self.experience_repo.commit()
         return exp
 
     async def submit(self, user_id: str, exp_id: str, to_scope: str) -> Experience:
-        exp = await self.experiences.get(exp_id)
+        exp = await self.experience_repo.get(exp_id)
         if not exp or exp.owner_id != user_id or exp.scope != "personal":
             raise HTTPException(404, "经验不存在或不可提交")
         if to_scope not in ("dept", "company"):
             raise HTTPException(400, "目标层级无效")
         exp.status = "pending"
-        await self.approvals.add(ExperienceApproval(experience_id=exp.id, from_scope="personal", to_scope=to_scope, status="pending"))
+        # 创建统一审批单（经验晋升，非阻塞）
+        approver_role = "dept_owner" if to_scope == "dept" else "admin"
+        await self.approval_repo.add(Approval(
+            category="experience_promotion", mode="async",
+            ref_type="experience", ref_id=exp.id,
+            title=f"经验晋升：{exp.title}",
+            context={"experience_id": exp.id, "from_scope": "personal", "to_scope": to_scope},
+            status="pending", requester_id=user_id, approver_role=approver_role,
+        ))
+        await self.approval_repo.commit()
         return exp
 
     async def list_visible(self, user_id: str, department_id: str | None) -> list[Experience]:
-        return await self.experiences.list_visible(user_id, department_id)
+        return await self.experience_repo.list_visible(user_id, department_id)
 ```
 
 ```python
@@ -2849,9 +2916,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
 from app.core.deps import get_db, get_current_user
 from app.models.org import User
-from app.services.experience_service import ExperienceService
+from app.services.experience_svc import ExperienceService
 
 router = APIRouter(prefix="/api/experiences", tags=["experiences"])
+
 
 class ExperienceCreate(BaseModel):
     title: str
@@ -2861,19 +2929,26 @@ class ExperienceCreate(BaseModel):
     event_time: str | None = None
     result_metrics: dict | None = None
 
+
 class SubmitRequest(BaseModel):
     to_scope: str  # dept/company
+
 
 def get_exp_service(db: AsyncSession = Depends(get_db)) -> ExperienceService:
     return ExperienceService(db)
 
+
 @router.post("")
-async def create_experience(body: ExperienceCreate, svc: ExperienceService = Depends(get_exp_service), user: User = Depends(get_current_user)):
+async def create_experience(body: ExperienceCreate, svc: ExperienceService = Depends(get_exp_service),
+                            user: User = Depends(get_current_user)):
     return await svc.create(user.id, user.department_id, body)
 
+
 @router.post("/{exp_id}/submit")
-async def submit_experience(exp_id: str, body: SubmitRequest, svc: ExperienceService = Depends(get_exp_service), user: User = Depends(get_current_user)):
+async def submit_experience(exp_id: str, body: SubmitRequest, svc: ExperienceService = Depends(get_exp_service),
+                            user: User = Depends(get_current_user)):
     return await svc.submit(user.id, exp_id, body.to_scope)
+
 
 @router.get("")
 async def list_experiences(svc: ExperienceService = Depends(get_exp_service), user: User = Depends(get_current_user)):
@@ -2895,7 +2970,9 @@ git commit -m "feat: 经验中心 API（分层视图+提交审批）"
 
 ---
 
-### 任务 24：审批 API（三层：部门负责人/管理员审批晋升）
+### 任务 24：统一审批中心 API（三层：审批中心 + decide 分发）
+
+> **统一审批中心：** 合并原 HITL 审批（任务 33）与经验审批。`approvals` 表通过 `category` 区分审批类型（tool_call / experience_promotion），`mode` 区分阻塞/非阻塞（sync/async）。`decide` 方法按 `category` 分发后处理：tool_call + sync → 恢复图执行；experience_promotion → 经验层级晋升。
 
 **文件：**
 - 创建：`backend/app/services/approval_service.py`
@@ -2910,10 +2987,12 @@ git commit -m "feat: 经验中心 API（分层视图+提交审批）"
 import pytest
 from httpx import AsyncClient, ASGITransport
 from app.main import app
-from app.models.experience import Experience, ExperienceApproval
+from app.models.experience import Experience
+from app.models.trace import Approval
 
 @pytest.mark.asyncio
-async def test_approve_promotes_to_dept(db_session, monkeypatch):
+async def test_approve_experience_promotion(db_session, monkeypatch):
+    """经验晋升审批：通过后经验层级晋升。"""
     monkeypatch.setattr("app.services.experience_service.embed_texts", lambda t: [[0.1, 0.2, 0.3]])
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
@@ -2924,14 +3003,35 @@ async def test_approve_promotes_to_dept(db_session, monkeypatch):
         r = await c.post("/api/experiences", json={"title": "t", "summary": "s"}, headers=h)
         exp_id = r.json()["id"]
         await c.post(f"/api/experiences/{exp_id}/submit", json={"to_scope": "dept"}, headers=h)
-        # 审批
-        r = await c.get("/api/approvals", headers=h)
+        # 审批中心查看待办
+        r = await c.get("/api/approvals?status=pending", headers=h)
         assert len(r.json()) >= 1
         ap_id = r.json()[0]["id"]
+        # 审批通过
         r = await c.post(f"/api/approvals/{ap_id}/decide", json={"approve": True, "comment": "ok"}, headers=h)
         assert r.status_code == 200
         exp = await db_session.get(Experience, exp_id)
         assert exp.scope == "dept" and exp.status == "approved"
+
+@pytest.mark.asyncio
+async def test_list_approvals_by_category(db_session):
+    """按 category 筛选审批单。"""
+    db_session.add(Approval(category="tool_call", risk="critical", mode="sync", ref_type="trace",
+                            ref_id="t1", title="删除文件", status="pending", requester_id="u1"))
+    db_session.add(Approval(category="experience_promotion", mode="async", ref_type="experience",
+                            ref_id="e1", title="经验晋升", status="pending", requester_id="u2"))
+    await db_session.commit()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        await c.post("/api/auth/register", json={"username": "admin", "password": "x123456", "display_name": "Admin"})
+        r = await c.post("/api/auth/login", json={"username": "admin", "password": "x123456"})
+        h = {"Authorization": f"Bearer {r.json()['access_token']}"}
+        r = await c.get("/api/approvals?status=pending&category=tool_call", headers=h)
+        assert len(r.json()) == 1
+        assert r.json()[0]["category"] == "tool_call"
+        r = await c.get("/api/approvals?status=pending&category=experience_promotion", headers=h)
+        assert len(r.json()) == 1
+        assert r.json()[0]["category"] == "experience_promotion"
 ```
 
 - [ ] **步骤 2：运行测试确认失败**
@@ -2939,45 +3039,77 @@ async def test_approve_promotes_to_dept(db_session, monkeypatch):
 运行：`cd backend && pytest tests/test_approvals_api.py -v`
 预期：FAIL，404
 
-- [ ] **步骤 3：实现审批路由**
+- [ ] **步骤 3：实现统一审批中心 Service + 路由**
 
 ```python
 # backend/app/services/approval_service.py
 from datetime import datetime, timezone
 from fastapi import HTTPException
-from app.repositories.experience_repo import ApprovalRepository, ExperienceRepository
+from app.models.trace import Approval
+from app.repositories.trace_repo import ApprovalRepository, TraceRepository
+from app.repositories.experience_repo import ExperienceRepository
 
 class ApprovalService:
-    """审批业务：列出待办 + 审批通过则晋升经验层级。"""
+    """统一审批中心：列出待办 + decide 按 category 分发后处理。
+    - tool_call + sync（critical 工具调用）：更新审批单状态 + 恢复图执行
+    - experience_promotion（经验晋升）：更新审批单状态 + 经验层级晋升"""
     def __init__(self, db):
-        self.approvals = ApprovalRepository(db)
-        self.experiences = ExperienceRepository(db)
+        self.approval_repo = ApprovalRepository(db)
+        self.trace_repo = TraceRepository(db)
+        self.experience_repo = ExperienceRepository(db)
 
-    async def list_pending(self):
-        rows = await self.approvals.list_pending()
-        return [{"id": a.id, "experience_id": a.experience_id, "from_scope": a.from_scope, "to_scope": a.to_scope} for a in rows]
+    async def list_pending(self, category: str | None = None):
+        rows = await self.approval_repo.list_pending(category)
+        return [{"id": a.id, "category": a.category, "risk": a.risk, "mode": a.mode,
+                 "title": a.title, "context": a.context, "requester_id": a.requester_id,
+                 "submitted_at": a.submitted_at.isoformat() if a.submitted_at else None} for a in rows]
 
     async def decide(self, approval_id: str, approver_id: str, approve: bool, comment: str = ""):
-        ap = await self.approvals.get(approval_id)
+        ap = await self.approval_repo.get(approval_id)
         if not ap or ap.status != "pending":
-            raise HTTPException(404, "审批不存在")
-        exp = await self.experiences.get(ap.experience_id)
+            raise HTTPException(404, "审批单不存在或已处理")
+
+        # 1. 更新审批单（公共逻辑）
         ap.status = "approved" if approve else "rejected"
         ap.approver_id = approver_id
         ap.comment = comment
         ap.decided_at = datetime.now(timezone.utc)
-        if approve:
-            exp.scope = ap.to_scope
-            exp.status = "approved"
-        else:
-            exp.status = "rejected"
-        await self.approvals.commit()  # 事务提交走 repository
+        await self.approval_repo.commit()
+
+        # 2. 按 category 分发后处理
+        if ap.category == "tool_call" and ap.mode == "sync":
+            # critical 工具调用：恢复 LangGraph 图执行
+            await self._resume_graph(ap.id, approve, ap.ref_id)
+        elif ap.category == "experience_promotion":
+            # 经验晋升：通过则层级晋升
+            if approve:
+                await self._promote_experience(ap.ref_id, ap.context.get("to_scope", "dept"))
         return {"ok": True}
+
+    async def _resume_graph(self, approval_id: str, approved: bool, trace_id: str):
+        """审批通过/驳回后恢复图执行。"""
+        from langgraph.types import Command
+        from app.agents.graph import graph
+        trace = await self.trace_repo.get(trace_id)
+        if trace and trace.conversation_id:
+            config = {"configurable": {"thread_id": trace.conversation_id}}
+            await graph.ainvoke(
+                Command(resume={"approved": approved, "approval_id": approval_id}),
+                config=config,
+            )
+
+    async def _promote_experience(self, experience_id: str, to_scope: str):
+        """经验层级晋升。"""
+        exp = await self.experience_repo.get(experience_id)
+        if exp:
+            exp.scope = to_scope
+            exp.status = "approved"
+            await self.experience_repo.commit()
 ```
 
 ```python
 # backend/app/api/approvals.py —— 薄路由
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
 from app.core.deps import get_db, get_current_user
@@ -2994,8 +3126,13 @@ def get_approval_service(db: AsyncSession = Depends(get_db)) -> ApprovalService:
     return ApprovalService(db)
 
 @router.get("")
-async def list_approvals(svc: ApprovalService = Depends(get_approval_service), _: User = Depends(get_current_user)):
-    return await svc.list_pending()
+async def list_approvals(
+    status: str | None = Query(None),
+    category: str | None = Query(None),
+    svc: ApprovalService = Depends(get_approval_service),
+    _: User = Depends(get_current_user),
+):
+    return await svc.list_pending(category)
 
 @router.post("/{approval_id}/decide")
 async def decide_approval(approval_id: str, body: DecideRequest, svc: ApprovalService = Depends(get_approval_service), user: User = Depends(get_current_user)):
@@ -3011,7 +3148,7 @@ async def decide_approval(approval_id: str, body: DecideRequest, svc: ApprovalSe
 
 ```bash
 git add backend/app backend/tests
-git commit -m "feat: 经验审批与晋升"
+git commit -m "feat: 统一审批中心（tool_call + experience_promotion）"
 ```
 
 ---
@@ -3092,20 +3229,33 @@ git commit -m "feat: MemoryAssembly 四层记忆统一装配"
 ```python
 # backend/tests/test_supervisor.py
 import pytest
-from app.agents.supervisor import route_decision, ROUTE_SCHEMA
+from app.agents.supervisor import route_decision, RouteDecision, ROUTE_SCHEMA
 
 def test_route_schema_fields():
-    assert {"agent", "reason", "confidence"} <= set(ROUTE_SCHEMA.keys())
+    assert {"agent", "reason", "confidence"} <= set(ROUTE_SCHEMA["properties"].keys())
 
 @pytest.mark.asyncio
 async def test_route_decision_parses(monkeypatch):
-    async def fake_invoke(prompt):
-        class R:
-            content = '{"agent": "marketing", "reason": "营销策划", "confidence": 0.9}'
-        return R()
-    monkeypatch.setattr("app.agents.supervisor.ModelFactory.get_llm", lambda k: Fake())
-    decision = await route_decision("策划国庆营销方案", ["marketing", "sales_analysis", "scheduling"])
+    class FakeLLM:
+        def with_structured_output(self, schema):
+            return self
+        async def ainvoke(self, prompt):
+            return RouteDecision(agent="marketing", reason="营销策划", confidence=0.9)
+    monkeypatch.setattr("app.agents.supervisor.ModelFactory.get_llm", lambda k: FakeLLM())
+    decision = await route_decision("策划国庆营销方案", ["marketing", "sales_analysis", "scheduling", "done"])
     assert decision["agent"] == "marketing"
+
+@pytest.mark.asyncio
+async def test_route_decision_done(monkeypatch):
+    """验证 supervisor 可返回 done 终止循环。"""
+    class FakeLLM:
+        def with_structured_output(self, schema):
+            return self
+        async def ainvoke(self, prompt):
+            return RouteDecision(agent="done", reason="任务已完成", confidence=0.95)
+    monkeypatch.setattr("app.agents.supervisor.ModelFactory.get_llm", lambda k: FakeLLM())
+    decision = await route_decision("已完成", ["marketing", "sales_analysis", "scheduling", "done"])
+    assert decision["agent"] == "done"
 ```
 
 - [ ] **步骤 2：运行测试确认失败**
@@ -3117,36 +3267,33 @@ async def test_route_decision_parses(monkeypatch):
 
 ```python
 # backend/app/agents/supervisor.py
-import json
+from pydantic import BaseModel, Field
 from app.llm.factory import ModelFactory
 
-ROUTE_SCHEMA = {"agent": "str", "reason": "str", "confidence": "float"}
+class RouteDecision(BaseModel):
+    """意图路由结构化输出。agent 可选：注册的 agent 代码 + done（终止循环）。"""
+    agent: str = Field(description="目标 agent 编码，从可选列表中选择；任务完成时返回 done")
+    reason: str = Field(description="路由理由")
+    confidence: float = Field(description="置信度 0~1")
+
+ROUTE_SCHEMA = RouteDecision.model_json_schema()
 AGENT_CODES = ["marketing", "sales_analysis", "scheduling", "general"]
 
-ROUTE_PROMPT = (
-    "你是意图路由器。从用户消息判断交给哪个 agent，可选：{agents}。"
-    "输出 JSON：{{\"agent\": 其中一个, \"reason\": 理由, \"confidence\": 0~1}}。只输出 JSON。\n消息：{message}"
-)
-
 async def route_decision(message: str, agents: list[str], model_key: str = "default") -> dict:
-    llm = ModelFactory.get_llm(model_key)
-    resp = await llm.ainvoke(ROUTE_PROMPT.format(agents=agents, message=message))
-    raw = resp.content if hasattr(resp, "content") else str(resp)
+    """LLM 判断目标 agent，可选列表包含所有注册的 agent + done。
+    agent 完成后再次调用此函数决定是否需要其他 agent 协作或结束。"""
+    llm = ModelFactory.get_llm(model_key).with_structured_output(RouteDecision)
     try:
-        data = json.loads(raw)
+        result = await llm.ainvoke(
+            f"你是意图路由器。根据用户消息和对话历史，判断下一步交给哪个 agent，"
+            f"可选：{agents}。如果任务已完成，返回 done。\n消息：{message}"
+        )
+        data = result.model_dump()
     except Exception:
-        return {"agent": "general", "reason": "解析失败兜底", "confidence": 0.1}
+        return {"agent": "done", "reason": "解析失败，默认结束", "confidence": 0.1}
     if data.get("agent") not in agents:
-        data["agent"] = "general"
+        data["agent"] = "done"
     return data
-
-async def decide_done(agent_response: str, model_key: str = "default") -> bool:
-    llm = ModelFactory.get_llm(model_key)
-    resp = await llm.ainvoke(
-        f"判断以下回答是否已完整解决问题，仅输出 true 或 false。\n回答：{agent_response[:2000]}"
-    )
-    raw = resp.content if hasattr(resp, "content") else str(resp)
-    return "false" not in raw.lower()
 ```
 
 - [ ] **步骤 4：运行测试验证通过**
@@ -3158,7 +3305,235 @@ async def decide_done(agent_response: str, model_key: str = "default") -> bool:
 
 ```bash
 git add backend/app backend/tests
-git commit -m "feat: Supervisor 循环路由"
+git commit -m "feat: Supervisor 循环路由（支持 done 终止）"
+```
+
+---
+
+### 任务 26.5：DataFacade 基础门面 + Mock 内置工具
+
+> **目标：** 在 agent 子图（任务 27/28）之前提供可用的工具门面和 Mock 工具，确保 agent 能直接加载工具进行 ReAct 循环。本阶段只实现基础门面（注册、获取、转 LangChain Tool）和 Mock 工具；**风险分级包装、MCP 工具加载在任务 31 中增强。**
+
+**文件：**
+- 创建：`backend/app/tools/facade.py`
+- 创建：`backend/app/tools/builtin/__init__.py`
+- 创建：`backend/app/tools/builtin/query_sales_data.py`、`query_marketing_campaigns.py`、`query_schedule.py`、`create_marketing_campaign.py`、`adjust_schedule.py`、`publish_campaign.py`、`delete_order.py`
+- 创建：`backend/tests/test_facade.py`
+
+- [ ] **步骤 1：编写失败的测试**
+
+```python
+# backend/tests/test_facade.py
+import pytest
+from app.tools.facade import DataFacade
+from app.tools.builtin import register_builtin_tools
+
+def test_facade_registry():
+    facade = DataFacade()
+    register_builtin_tools(facade)
+    assert "query_sales_data" in facade.list_tools()
+    result = facade.execute("query_sales_data", {"metric": "revenue", "period": "7d"})
+    assert "total" in result  # mock 返回含 total 键
+
+def test_tool_to_langchain():
+    """facade.to_langchain_tool 必须能转为 LangChain StructuredTool 供 agent 使用。"""
+    facade = DataFacade()
+    register_builtin_tools(facade)
+    tool = facade.to_langchain_tool("query_sales_data")
+    assert tool.name == "query_sales_data"
+    assert "metric" in tool.args_schema.model_fields
+    assert "period" in tool.args_schema.model_fields
+```
+
+- [ ] **步骤 2：运行测试确认失败**
+
+运行：`cd backend && pytest tests/test_facade.py -v`
+预期：FAIL，ImportError
+
+- [ ] **步骤 3：实现基础门面 + Mock 工具**
+
+```python
+# backend/app/tools/facade.py
+from typing import Awaitable, Callable
+from pydantic import BaseModel
+from langchain_core.tools import StructuredTool
+
+ToolFunc = Callable[..., Awaitable | object]
+
+class Tool:
+    def __init__(self, name: str, fn: ToolFunc, risk: str = "low", description: str = "",
+                 args_schema: type[BaseModel] | None = None):
+        self.name, self.fn, self.risk, self.description = name, fn, risk, description
+        self.args_schema = args_schema or BaseModel
+
+class DataFacade:
+    def __init__(self):
+        self._tools: dict[str, Tool] = {}
+
+    def register(self, tool: Tool) -> None:
+        self._tools[tool.name] = tool
+
+    def list_tools(self) -> list[str]:
+        return list(self._tools.keys())
+
+    def get(self, name: str) -> Tool:
+        return self._tools[name]
+
+    def execute(self, name: str, kwargs: dict):
+        return self._tools[name].fn(**kwargs)
+
+    def to_langchain_tool(self, name: str) -> StructuredTool:
+        """基础版：直接转为 LangChain StructuredTool，不做风险分级包装。
+        风险分级（interrupt/审批中心）在任务 31 增强时实现。"""
+        tool = self._tools[name]
+        return StructuredTool.from_function(
+            coroutine=tool.fn, name=tool.name, description=tool.description,
+            args_schema=tool.args_schema,
+        )
+
+facade = DataFacade()
+```
+
+```python
+# backend/app/tools/builtin/query_sales_data.py
+"""Mock 工具：查询销售指标。不连真实数据库，返回固定 mock 数据。"""
+from pydantic import BaseModel, Field
+
+class QuerySalesDataArgs(BaseModel):
+    metric: str = Field(description="指标类型：revenue（营收）/ orders（订单量）/ customers（客户数）")
+    period: str = Field(description="时间范围：7d / 30d / 90d")
+
+DESCRIPTION = "查询企业销售指标（营收/订单/客户）。返回指定时间范围的汇总数据与环比变化。供经营分析 agent 使用。"
+
+def query_sales_data(metric: str, period: str) -> dict:
+    base = {"revenue": 1280000, "orders": 3420, "customers": 856}
+    factor = {"7d": 0.25, "30d": 1.0, "90d": 2.8}[period]
+    total = int(base[metric] * factor)
+    return {"metric": metric, "period": period, "total": total,
+            "prev_period": int(total * 0.92), "change_pct": 8.7}
+
+# backend/app/tools/builtin/query_marketing_campaigns.py
+from pydantic import BaseModel, Field
+
+class QueryMarketingCampaignsArgs(BaseModel):
+    status: str = Field(description="活动状态：active（进行中）/ scheduled（待发布）/ ended（已结束）")
+
+DESCRIPTION = "查询营销活动列表。返回活动的名称、渠道、预算、状态等概要信息。供营销助手 agent 使用。"
+
+def query_marketing_campaigns(status: str) -> list[dict]:
+    all_campaigns = [
+        {"id": "C001", "name": "618大促", "channel": "全渠道", "budget": 50000, "status": "ended"},
+        {"id": "C002", "name": "会员日营销", "channel": "短信+邮件", "budget": 12000, "status": "active"},
+        {"id": "C003", "name": "新品预热", "channel": "社交媒体", "budget": 28000, "status": "scheduled"},
+        {"id": "C004", "name": "老客回流", "channel": "推送", "budget": 8000, "status": "active"},
+    ]
+    return [c for c in all_campaigns if c["status"] == status]
+
+# backend/app/tools/builtin/query_schedule.py
+from pydantic import BaseModel, Field
+
+class QueryScheduleArgs(BaseModel):
+    department: str = Field(description="部门名称，如 '仓储部' / '配送部' / '客服部'")
+    date: str = Field(description="查询日期，格式 YYYY-MM-DD")
+
+DESCRIPTION = "查询指定部门某天的排班情况。返回班次、人员、时间段等信息。供调度优化 agent 使用。"
+
+def query_schedule(department: str, date: str) -> list[dict]:
+    return [
+        {"shift_id": "S001", "employee": "张三", "time": "08:00-16:00", "role": "早班", "department": department},
+        {"shift_id": "S002", "employee": "李四", "time": "16:00-24:00", "role": "晚班", "department": department},
+        {"shift_id": "S003", "employee": "王五", "time": "08:00-16:00", "role": "早班", "department": department},
+    ]
+
+# backend/app/tools/builtin/create_marketing_campaign.py
+from pydantic import BaseModel, Field
+
+class CreateMarketingCampaignArgs(BaseModel):
+    name: str = Field(description="活动名称")
+    budget: float = Field(description="预算金额（元）")
+    channel: str = Field(description="投放渠道")
+    start_date: str = Field(description="开始日期 YYYY-MM-DD")
+    end_date: str = Field(description="结束日期 YYYY-MM-DD")
+
+DESCRIPTION = "创建新的营销活动。Mock 返回创建结果，不写真实数据库。"
+
+def create_marketing_campaign(name: str, budget: float, channel: str, start_date: str, end_date: str) -> dict:
+    return {"campaign_id": f"C{int(budget):05d}", "name": name, "budget": budget,
+            "channel": channel, "start_date": start_date, "end_date": end_date, "status": "created"}
+
+# backend/app/tools/builtin/adjust_schedule.py
+from pydantic import BaseModel, Field
+
+class AdjustScheduleArgs(BaseModel):
+    shift_id: str = Field(description="要调整的班次 ID")
+    employee_id: str = Field(description="员工 ID")
+    new_date: str = Field(description="调整后的日期 YYYY-MM-DD")
+    new_time: str = Field(description="调整后的时间段，如 '08:00-16:00'")
+
+DESCRIPTION = "调整员工排班班次。Mock 返回调整结果，不写真实数据库。"
+
+def adjust_schedule(shift_id: str, employee_id: str, new_date: str, new_time: str) -> dict:
+    return {"shift_id": shift_id, "employee_id": employee_id,
+            "new_date": new_date, "new_time": new_time, "status": "adjusted"}
+
+# backend/app/tools/builtin/publish_campaign.py
+from pydantic import BaseModel, Field
+
+class PublishCampaignArgs(BaseModel):
+    campaign_id: str = Field(description="要发布的活动 ID")
+    channels: list[str] = Field(description="发布渠道列表")
+
+DESCRIPTION = "正式发布营销活动到指定渠道。Mock 返回发布结果。"
+
+def publish_campaign(campaign_id: str, channels: list[str]) -> dict:
+    return {"campaign_id": campaign_id, "channels": channels,
+            "status": "published", "published_at": "2026-08-01T10:00:00Z"}
+
+# backend/app/tools/builtin/delete_order.py
+from pydantic import BaseModel, Field
+
+class DeleteOrderArgs(BaseModel):
+    order_id: str = Field(description="要删除的订单 ID")
+    reason: str = Field(description="删除原因")
+
+DESCRIPTION = "删除指定订单。Mock 返回删除结果。"
+
+def delete_order(order_id: str, reason: str) -> dict:
+    return {"order_id": order_id, "reason": reason, "status": "deleted"}
+```
+
+```python
+# backend/app/tools/builtin/__init__.py
+from app.tools.facade import DataFacade, Tool
+from app.tools.builtin.query_sales_data import QuerySalesDataArgs, query_sales_data, DESCRIPTION as QUERY_SALES_DESC
+from app.tools.builtin.query_marketing_campaigns import QueryMarketingCampaignsArgs, query_marketing_campaigns, DESCRIPTION as QUERY_CAMP_DESC
+from app.tools.builtin.query_schedule import QueryScheduleArgs, query_schedule, DESCRIPTION as QUERY_SCHED_DESC
+from app.tools.builtin.create_marketing_campaign import CreateMarketingCampaignArgs, create_marketing_campaign, DESCRIPTION as CREATE_CAMP_DESC
+from app.tools.builtin.adjust_schedule import AdjustScheduleArgs, adjust_schedule, DESCRIPTION as ADJUST_SCHED_DESC
+from app.tools.builtin.publish_campaign import PublishCampaignArgs, publish_campaign, DESCRIPTION as PUBLISH_CAMP_DESC
+from app.tools.builtin.delete_order import DeleteOrderArgs, delete_order, DESCRIPTION as DELETE_ORDER_DESC
+
+def register_builtin_tools(f: DataFacade) -> None:
+    # risk 字段先声明，任务 31 增强时用于风险分级包装
+    f.register(Tool("query_sales_data", query_sales_data, "low", QUERY_SALES_DESC, QuerySalesDataArgs))
+    f.register(Tool("query_marketing_campaigns", query_marketing_campaigns, "low", QUERY_CAMP_DESC, QueryMarketingCampaignsArgs))
+    f.register(Tool("query_schedule", query_schedule, "low", QUERY_SCHED_DESC, QueryScheduleArgs))
+    f.register(Tool("create_marketing_campaign", create_marketing_campaign, "high", CREATE_CAMP_DESC, CreateMarketingCampaignArgs))
+    f.register(Tool("adjust_schedule", adjust_schedule, "high", ADJUST_SCHED_DESC, AdjustScheduleArgs))
+    f.register(Tool("publish_campaign", publish_campaign, "critical", PUBLISH_CAMP_DESC, PublishCampaignArgs))
+    f.register(Tool("delete_order", delete_order, "critical", DELETE_ORDER_DESC, DeleteOrderArgs))
+```
+
+- [ ] **步骤 4：运行测试验证通过**
+
+运行：`cd backend && pytest tests/test_facade.py -v`
+预期：PASS
+
+- [ ] **步骤 5：Commit**
+
+```bash
+git add backend/app backend/tests
+git commit -m "feat: DataFacade 基础门面 + Mock 内置工具"
 ```
 
 ---
@@ -3177,10 +3552,11 @@ import pytest
 from langchain_core.messages import AIMessage
 from app.agents.marketing.agent import build_marketing_agent, TOOL_NAMES, MAX_TOOL_ROUNDS
 
-def test_marketing_agent_subgraph():
+@pytest.mark.asyncio
+async def test_marketing_agent_subgraph():
     """营销助手模块声明自己的工具并构建编译子图（供父图嵌入）。"""
-    assert TOOL_NAMES == ["calc", "http_get"]
-    assert build_marketing_agent() is not None
+    assert TOOL_NAMES == ["query_marketing_campaigns", "create_marketing_campaign", "publish_campaign"]
+    assert await build_marketing_agent() is not None
 
 @pytest.mark.asyncio
 async def test_marketing_subgraph_stops_after_max_rounds(monkeypatch):
@@ -3190,11 +3566,11 @@ async def test_marketing_subgraph_stops_after_max_rounds(monkeypatch):
             return self
         async def ainvoke(self, messages):
             return AIMessage(content="", tool_calls=[{
-                "name": "calc", "args": {"expr": "1"}, "id": f"c{len(messages)}", "type": "tool_call",
+                "name": "query_marketing_campaigns", "args": {"status": "active"}, "id": f"c{len(messages)}", "type": "tool_call",
             }])
 
     monkeypatch.setattr("app.agents.marketing.agent.ModelFactory.get_llm", lambda k: LoopLLM())
-    g = build_marketing_agent()
+    g = await build_marketing_agent()
     result = await g.ainvoke({"user_message": "循环", "memory_context": "", "messages": []})
     assert result["tool_rounds"] == MAX_TOOL_ROUNDS  # 达到上限强制结束
 ```
@@ -3206,7 +3582,7 @@ async def test_marketing_subgraph_stops_after_max_rounds(monkeypatch):
 
 - [ ] **步骤 3：实现营销助手子图（声明工具 + 构建 ReAct 子图）**
 
-> 子图在营销助手模块内部直接构建（agent 节点 + ToolNode + 路由），后续可差异化演进；工具经 `facade.to_langchain_tool` 获得。
+> 子图在营销助手模块内部直接构建（agent 节点 + ToolNode + 路由），后续可差异化演进；工具经 `facade.to_langchain_tool` 获得（任务 26.5 已实现基础门面）。
 
 ```python
 # backend/app/agents/marketing/agent.py
@@ -3222,12 +3598,13 @@ SYSTEM_PROMPT = (
     "为用户策划营销方案。营销策略需包含目标、渠道、预算、预期效果。回答用中文。"
 )
 
-# 营销助手声明自己需要的工具（工具实现在 DataFacade 统一注册）
-TOOL_NAMES = ["calc", "http_get"]
+# 营销助手声明自己需要的内置工具（工具在任务 26.5 注册到 facade）
+# MCP 服务绑定待任务 38.5 动态化后由 load_tools 统一加载
+TOOL_NAMES = ["query_marketing_campaigns", "create_marketing_campaign", "publish_campaign"]
 
 MAX_TOOL_ROUNDS = 6  # 工具调用最大轮次，防 LLM 死循环（每子 agent 可配置不同值）
 
-def build_marketing_agent():
+async def build_marketing_agent():
     """营销助手子图：agent ↔ ToolNode 的 ReAct 循环，编译后作为节点嵌入父图。
     子图在模块内部独立构建，后续可差异化演进（换节点、加记忆节点、改路由等）。"""
     tools = [facade.to_langchain_tool(n) for n in TOOL_NAMES]
@@ -3286,13 +3663,15 @@ from langchain_core.messages import AIMessage
 from app.agents.sales_analysis.agent import build_sales_agent, TOOL_NAMES as SALES_TOOLS, MAX_TOOL_ROUNDS
 from app.agents.scheduling.agent import build_scheduling_agent, TOOL_NAMES as SCHEDULING_TOOLS
 
-def test_sales_agent_subgraph():
-    assert SALES_TOOLS == ["sql_query", "calc"]
-    assert build_sales_agent() is not None
+@pytest.mark.asyncio
+async def test_sales_agent_subgraph():
+    assert SALES_TOOLS == ["query_sales_data", "delete_order"]
+    assert await build_sales_agent() is not None
 
-def test_scheduling_agent_subgraph():
-    assert SCHEDULING_TOOLS == ["sql_query", "calc"]
-    assert build_scheduling_agent() is not None
+@pytest.mark.asyncio
+async def test_scheduling_agent_subgraph():
+    assert SCHEDULING_TOOLS == ["query_schedule", "adjust_schedule"]
+    assert await build_scheduling_agent() is not None
 
 @pytest.mark.asyncio
 async def test_sales_subgraph_stops_after_max_rounds(monkeypatch):
@@ -3302,11 +3681,12 @@ async def test_sales_subgraph_stops_after_max_rounds(monkeypatch):
             return self
         async def ainvoke(self, messages):
             return AIMessage(content="", tool_calls=[{
-                "name": "calc", "args": {"expr": "1"}, "id": f"c{len(messages)}", "type": "tool_call",
+                "name": "query_sales_data", "args": {"metric": "revenue", "period": "7d"}, "id": f"c{len(messages)}", "type": "tool_call",
             }])
 
     monkeypatch.setattr("app.agents.sales_analysis.agent.ModelFactory.get_llm", lambda k: LoopLLM())
-    result = await build_sales_agent().ainvoke({"user_message": "循环", "memory_context": "", "messages": []})
+    g = await build_sales_agent()
+    result = await g.ainvoke({"user_message": "循环", "memory_context": "", "messages": []})
     assert result["tool_rounds"] == MAX_TOOL_ROUNDS
 ```
 
@@ -3327,18 +3707,20 @@ from app.tools.facade import facade
 from app.agents.state import AgentState
 
 SYSTEM_PROMPT = (
-    "你是经营分析专家。结合记忆上下文与企业数据（可调用 SQL 工具查询），"
+    "你是经营分析专家。结合记忆上下文与企业数据（可调用 query_sales_data 查询销售指标），"
     "给出量化分析结论，指出趋势与风险。回答用中文。"
 )
 
-# 经营分析声明自己需要的工具
-TOOL_NAMES = ["sql_query", "calc"]
+# 经营分析声明自己需要的内置工具
+# MCP 服务绑定待任务 38.5 动态化后由 load_tools 统一加载
+TOOL_NAMES = ["query_sales_data", "delete_order"]
 
 MAX_TOOL_ROUNDS = 6  # 工具调用最大轮次，防 LLM 死循环
 
-def build_sales_agent():
+async def build_sales_agent():
     """经营分析子图：agent ↔ ToolNode 的 ReAct 循环，编译后作为节点嵌入父图。
     子图在模块内部独立构建，后续可差异化演进。"""
+    # 本阶段仅加载内置工具；MCP 待任务 37/38 接入后改为 load_tools(db, ...)
     tools = [facade.to_langchain_tool(n) for n in TOOL_NAMES]
 
     async def agent_node(state: AgentState) -> dict:
@@ -3379,14 +3761,16 @@ SYSTEM_PROMPT = (
     "包含时间线、资源分配、风险点。回答用中文。"
 )
 
-# 调度优化声明自己需要的工具
-TOOL_NAMES = ["sql_query", "calc"]
+# 调度优化声明自己需要的内置工具
+# MCP 服务绑定待任务 38.5 动态化后由 load_tools 统一加载
+TOOL_NAMES = ["query_schedule", "adjust_schedule"]
 
 MAX_TOOL_ROUNDS = 6  # 工具调用最大轮次，防 LLM 死循环
 
-def build_scheduling_agent():
+async def build_scheduling_agent():
     """调度优化子图：agent ↔ ToolNode 的 ReAct 循环，编译后作为节点嵌入父图。
     子图在模块内部独立构建，后续可差异化演进。"""
+    # 本阶段仅加载内置工具；MCP 待任务 37/38 接入后改为 load_tools(db, ...)
     tools = [facade.to_langchain_tool(n) for n in TOOL_NAMES]
 
     async def agent_node(state: AgentState) -> dict:
@@ -3427,7 +3811,7 @@ git commit -m "feat: 经营分析与调度优化 agent 子图"
 
 ---
 
-### 任务 29：AgentRegistry 动态注册 + 主图装配
+### 任务 29：AgentRegistry 动态注册 + 主图装配（Supervisor 多轮循环）
 
 **文件：**
 - 创建：`backend/app/agents/registry.py`
@@ -3446,6 +3830,35 @@ def test_register_and_list():
     reg.register("marketing", lambda s: {"agent_response": "m"})
     reg.register("sales_analysis", lambda s: {"agent_response": "s"})
     assert set(reg.list()) == {"marketing", "sales_analysis"}
+
+@pytest.mark.asyncio
+async def test_multi_round_loop(monkeypatch):
+    """验证 supervisor 多轮循环：agent 完成后回到 supervisor，直到 done。"""
+    from app.agents.graph import build_graph
+    from app.agents.registry import AgentRegistry
+
+    # 模拟 route_decision：先选 marketing，再选 done
+    decisions = iter([
+        {"agent": "marketing", "reason": "营销分析", "confidence": 0.9},
+        {"agent": "done", "reason": "任务完成", "confidence": 0.95},
+    ])
+
+    async def fake_route(message, agents):
+        return next(decisions)
+
+    monkeypatch.setattr("app.agents.graph.route_decision", fake_route)
+
+    reg = AgentRegistry()
+    reg.register("marketing", lambda s: {"agent_response": "营销结果"})
+    reg.register("sales_analysis", lambda s: {"agent_response": "分析结果"})
+
+    g = build_graph(reg)
+    result = await g.ainvoke({
+        "user_message": "帮我做营销分析",
+        "pending_agent": "", "route_history": [], "messages": [],
+    })
+    assert result["agent_response"] == "营销结果"
+    assert len(result["route_history"]) == 2  # marketing + done
 ```
 
 - [ ] **步骤 2：运行测试确认失败**
@@ -3453,18 +3866,21 @@ def test_register_and_list():
 运行：`cd backend && pytest tests/test_registry.py -v`
 预期：FAIL，ImportError
 
-- [ ] **步骤 3：实现注册中心并装配主图（Supervisor 循环）**
+- [ ] **步骤 3：实现注册中心并装配主图（Supervisor 多轮循环）**
 
 ```python
 # backend/app/agents/registry.py
+from collections.abc import Callable
+from typing import Any
+
 class AgentRegistry:
     def __init__(self):
-        self._nodes: dict[str, callable] = {}
+        self._nodes: dict[str, Callable[..., Any]] = {}
 
-    def register(self, code: str, node: callable) -> None:
+    def register(self, code: str, node: Callable[..., Any]) -> None:
         self._nodes[code] = node
 
-    def get(self, code: str) -> callable:
+    def get(self, code: str) -> Callable[..., Any]:
         return self._nodes[code]
 
     def list(self) -> list[str]:
@@ -3472,7 +3888,8 @@ class AgentRegistry:
 ```
 
 ```python
-# backend/app/agents/graph.py 重写：Supervisor 循环主图，子 agent 子图作为节点嵌入
+# backend/app/agents/graph.py 重写：Supervisor 多轮循环主图，子 agent 子图作为节点嵌入
+import asyncio
 from langgraph.graph import StateGraph, END
 from app.agents.state import AgentState
 from app.agents.registry import AgentRegistry
@@ -3481,28 +3898,48 @@ from app.agents.marketing.agent import build_marketing_agent
 from app.agents.sales_analysis.agent import build_sales_agent
 from app.agents.scheduling.agent import build_scheduling_agent
 
-registry = AgentRegistry()
-registry.register("marketing", build_marketing_agent())       # 编译后的子图直接作节点
-registry.register("sales_analysis", build_sales_agent())
-registry.register("scheduling", build_scheduling_agent())
+MAX_ROUTES = 4  # 循环上限，防死循环
 
-MAX_ROUTES = 4
+async def _build_registry() -> AgentRegistry:
+    """异步构建注册中心：子 agent 构建时需动态加载 MCP 工具（远端 HTTP 调用）。"""
+    registry = AgentRegistry()
+    registry.register("marketing", await build_marketing_agent())       # 编译后的子图直接作节点
+    registry.register("sales_analysis", await build_sales_agent())
+    registry.register("scheduling", await build_scheduling_agent())
+    return registry
 
-def build_graph():
+def build_graph(registry: AgentRegistry):
+    """根据已构建的注册中心装配主图。
+
+    流程：supervisor(意图识别) → agent(执行) → supervisor(再判断) → ... → done
+    agent 完成后回到 supervisor，由 supervisor 决定是否继续路由其他 agent 或结束。
+    """
     g = StateGraph(AgentState)
 
     async def supervisor_node(state: AgentState) -> dict:
-        decision = await route_decision(state.get("user_message", ""), registry.list())
+        # 可选列表 = 所有注册的 agent + done（终止循环）
+        agents_with_done = registry.list() + ["done"]
+        # 拼接上下文：用户消息 + 已有对话历史（供 LLM 判断是否完成）
+        context = state.get("user_message", "")
+        msgs = state.get("messages", [])
+        if msgs:
+            last_msg = msgs[-1].content if hasattr(msgs[-1], "content") else str(msgs[-1])
+            context += f"\n\n上一轮 agent 输出：{last_msg}"
+        decision = await route_decision(context, agents_with_done)
         return {"pending_agent": decision["agent"], "route_history": [decision["agent"]]}
 
     def router(state: AgentState) -> str:
         agent = state.get("pending_agent", "done")
+        # 循环超限 → 强制结束
         if len(state.get("route_history", [])) >= MAX_ROUTES:
             return "done"
+        # supervisor 判断 done → 结束
+        if agent == "done":
+            return "done"
+        # 路由到目标 agent
         return agent if agent in registry.list() else "done"
 
     async def done_node(state: AgentState) -> dict:
-        # 子图将最终回答写入 state.messages，取最后一条作为 agent_response
         msgs = state.get("messages", [])
         text = msgs[-1].content if msgs else state.get("agent_response", "")
         return {"agent_response": text or "已完成"}
@@ -3512,16 +3949,21 @@ def build_graph():
         g.add_node(code, registry.get(code))  # 子图嵌入父图
     g.add_node("done", done_node)
     g.set_entry_point("supervisor")
+    # supervisor → agent 或 done
     g.add_conditional_edges("supervisor", router, {**{c: c for c in registry.list()}, "done": "done"})
+    # agent → supervisor（多轮循环：agent 完成后回到 supervisor 再判断）
     for code in registry.list():
-        g.add_edge(code, "done")
+        g.add_edge(code, "supervisor")
     g.add_edge("done", END)
     return g.compile()
 
-graph = build_graph()
+# 模块级初始化：异步构建注册中心 + 编译主图
+registry = asyncio.run(_build_registry())
+graph = build_graph(registry)
 ```
 
-> 注：`pending_agent` 需要加入 `AgentState`。循环限定 MAX_ROUTES=4 防死循环；简化实现为单轮分发后直接 done，多轮协作在留痕与 HITL 接入后再细化。
+> 注：`pending_agent` 需要加入 `AgentState`。循环限定 MAX_ROUTES=4 防死循环；agent 完成后回到 supervisor，由 supervisor 判断是否继续协作或结束（返回 done）。
+> **async 适配：** 因子 agent 构建时需动态加载 MCP 工具（`get_mcp_tools` 为远端 HTTP 调用），`build_xxx_agent()` 改为 async，`_build_registry()` 用 `asyncio.run()` 在模块加载时同步等待异步构建完成。
 
 - [ ] **步骤 4：运行测试验证通过（含既有 chat 测试）**
 
@@ -3587,25 +4029,37 @@ class FakeLLM:
 from app.memory.assembly import assemble_memory
 from app.services.experience_svc import distill_experience, save_personal_experience
 from app.services.preference_svc import extract_and_save
+from app.services.summary import maybe_roll_summary
+from app.repositories.user_repo import UserRepository
+
+class ChatService:
+    def __init__(self, db):
+        self.db = db
+        self.conversation_repo = ConversationRepository(db)
+        self.message_repo = MessageRepository(db)
+        self.user_repo = UserRepository(db)
 
     async def stream_chat(self, user_id: str, conv_id: str, message: str):
-        await self._ensure_owned(user_id, conv_id)
-        await self.messages.add(Message(conversation_id=conv_id, role="user", content=message))
+        await self._ensure_owned(conv_id, user_id)
+        await self.message_repo.add(Message(conversation_id=conv_id, role="user", content=message))
+        await self.message_repo.commit()
         yield json.dumps({"event": "start"}, ensure_ascii=False)
-        user = await self.conversations.get(conv_id)
+        user = await self.user_repo.get(user_id)
         mem = await assemble_memory(self.db, user_id, conv_id, user.department_id, message)  # 四层记忆装配
         result = await graph.ainvoke({
             "conversation_id": conv_id, "user_id": user_id,
             "user_message": message, "memory_context": mem, "messages": [],
         })
         text = result.get("agent_response", "")
-        await self.messages.add(Message(conversation_id=conv_id, role="assistant", content=text))
-        # 对话结束：偏好提取 + 经验提炼（fire-and-forget）
+        await self.message_repo.add(Message(conversation_id=conv_id, role="assistant", content=text))
+        await self.message_repo.commit()
+        # 对话结束：偏好提取 + 经验提炼 + 滚动摘要（fire-and-forget）
         dialog = f"用户：{message}\n助手：{text}"
         await extract_and_save(self.db, user_id, dialog)
         exp = await distill_experience(dialog, user_id, result.get("trace_id", ""))
         if exp:
             await save_personal_experience(self.db, exp)
+        await maybe_roll_summary(self.db, conv_id)  # 消息超阈值滚动摘要
         yield json.dumps({"event": "token", "content": text}, ensure_ascii=False)
         yield json.dumps({"event": "done"}, ensure_ascii=False)
 ```
@@ -3624,170 +4078,151 @@ git commit -m "feat: 四层记忆装配接入聊天主链路"
 
 ---
 
-### 任务 31：DataFacade 统一门面 + 内置工具
+### 任务 31：DataFacade 增强 —— 风险分级包装 + load_tools
 
-**文件：**
-- 创建：`backend/app/tools/facade.py`
-- 创建：`backend/app/tools/builtin/sql_tool.py`、`backend/app/tools/builtin/http_tool.py`、`backend/app/tools/builtin/calc_tool.py`
-- 创建：`backend/tests/test_facade.py`
+> **目标：** 在任务 26.5 基础门面之上，增加风险分级包装（`to_langchain_tool` 按 risk 分流为 direct / interrupt / 审批中心）和 `load_tools` 统一加载函数。**Mock 工具和 `register_builtin_tools` 已在任务 26.5 实现，本任务不再重复。**
 
-- [ ] **步骤 1：编写失败的测试**
+**修改文件：**
+- 修改：`backend/app/tools/facade.py`（增强 `to_langchain_tool`，加风险分级包装）
+- 创建：`backend/app/tools/loader.py`（`load_tools` 统一加载内置 + MCP 工具）
+- 修改：`backend/tests/test_facade.py`（追加风险分级测试）
+
+- [ ] **步骤 1：编写失败的测试（追加风险分级测试）**
 
 ```python
-# backend/tests/test_facade.py
-import pytest
-from app.tools.facade import DataFacade, register_builtin_tools
+# backend/tests/test_facade.py 追加
+from langgraph.types import interrupt
 
-def test_facade_registry():
+def test_to_langchain_tool_low_risk():
+    """low 风险工具：直接执行，无 interrupt。"""
     facade = DataFacade()
     register_builtin_tools(facade)
-    assert "calc" in facade.list_tools()
-    assert facade.execute("calc", {"expr": "1+2"}) == 3
+    tool = facade.to_langchain_tool("query_sales_data")
+    assert tool.name == "query_sales_data"
+    assert tool.func is not None  # 直接执行函数
 
-def test_risk_levels():
+def test_to_langchain_tool_high_risk():
+    """high 风险工具：包装为 interrupt 即时确认。"""
     facade = DataFacade()
     register_builtin_tools(facade)
-    assert facade.get_risk("calc") == "low"
+    tool = facade.to_langchain_tool("create_marketing_campaign")
+    # 包装后函数不是原始 fn，而是 guarded_high
+    assert tool.name == "create_marketing_campaign"
 
-def test_tool_rich_schema():
-    """工具描述与参数 schema 必须清晰，供 LLM 理解工具用途。"""
+def test_to_langchain_tool_critical_risk():
+    """critical 风险工具：包装为审批中心流程。"""
     facade = DataFacade()
     register_builtin_tools(facade)
-    tool = facade.get("sql_query")
-    assert "只读" in tool.description
-    assert "sql" in tool.args_schema.model_fields
-    calc = facade.get("calc")
-    assert "expr" in calc.args_schema.model_fields
+    tool = facade.to_langchain_tool("publish_campaign", trace_id="trace-1", requester_id="user-1")
+    assert tool.name == "publish_campaign"
 ```
 
 - [ ] **步骤 2：运行测试确认失败**
 
 运行：`cd backend && pytest tests/test_facade.py -v`
-预期：FAIL，ImportError
+预期：FAIL，`to_langchain_tool` 未实现风险分级
 
-- [ ] **步骤 3：实现门面与内置工具（统一 Tool 接口 + 风险等级）**
+- [ ] **步骤 3：增强 facade.py —— 风险分级包装**
 
 ```python
-# backend/app/tools/facade.py
-from typing import Awaitable, Callable
-from pydantic import BaseModel, Field
-from langchain_core.tools import StructuredTool
+# backend/app/tools/facade.py —— 在任务 26.5 基础上增强 to_langchain_tool
 from langgraph.types import interrupt
 
-ToolFunc = Callable[..., Awaitable | object]
-
-class Tool:
-    def __init__(self, name: str, fn: ToolFunc, risk: str = "low", description: str = "",
-                 args_schema: type[BaseModel] | None = None):
-        self.name, self.fn, self.risk, self.description = name, fn, risk, description
-        self.args_schema = args_schema or BaseModel
-
 class DataFacade:
-    def __init__(self):
-        self._tools: dict[str, Tool] = {}
-
-    def register(self, tool: Tool) -> None:
-        self._tools[tool.name] = tool
-
-    def list_tools(self) -> list[str]:
-        return list(self._tools.keys())
+    # ... register / list_tools / get / execute 保持不变 ...
 
     def get_risk(self, name: str) -> str:
         return self._tools[name].risk
 
-    def get(self, name: str) -> Tool:
-        return self._tools[name]
-
-    def execute(self, name: str, kwargs: dict):
-        return self._tools[name].fn(**kwargs)
-
-    def to_langchain_tool(self, name: str) -> StructuredTool:
-        """DataFacade 工具 → LangChain StructuredTool；高风险工具内嵌 interrupt() 人工确认。
-        各子 agent 构建自己的子图时调用此方法获得可 bind 的工具。"""
+    def to_langchain_tool(self, name: str, trace_id: str = "", requester_id: str = "") -> StructuredTool:
+        """DataFacade 工具 → LangChain StructuredTool；按风险等级分流：
+        - low/medium：直接执行（包装为原生函数）
+        - high：interrupt 即时确认（不进审批中心）
+        - critical：创建审批单 + interrupt 冻结图，等审批中心处理"""
         tool = self._tools[name]
-        if tool.risk == "high":
-            async def guarded(**kwargs):
+
+        if tool.risk in ("low", "medium"):
+            fn = tool.fn
+        elif tool.risk == "high":
+            # 即时确认：interrupt 冻结，当班人确认后执行
+            async def guarded_high(**kwargs):
                 approved = interrupt({
                     "tool": name, "args": kwargs,
                     "reason": f"高风险操作：{tool.description}",
                 })
                 if approved is not True:
-                    return {"error": "操作被人工驳回"}
+                    return {"error": "操作被驳回"}
                 result = tool.fn(**kwargs)
                 return await result if hasattr(result, "__await__") else result
-            fn = guarded
-        else:
-            fn = tool.fn
+            fn = guarded_high
+        elif tool.risk == "critical":
+            # 审批中心：创建审批单，interrupt 冻结图等管理者审批
+            async def guarded_critical(**kwargs):
+                from app.services.approval_service import ApprovalService
+                from app.core.deps import get_db_context
+                async with get_db_context() as db:
+                    svc = ApprovalService(db)
+                    approval_id = await svc.create_approval(
+                        category="tool_call", risk="critical", mode="sync",
+                        ref_type="trace", ref_id=trace_id,
+                        title=f"{name} - {tool.description}",
+                        context={"tool": name, "args": kwargs, "reason": tool.description},
+                        requester_id=requester_id, approver_role="admin",
+                    )
+                # interrupt 冻结图，等待审批中心 decide 后 resume
+                result = interrupt({
+                    "approval_id": approval_id, "stage": "review",
+                })
+                if result.get("approved"):
+                    r = tool.fn(**kwargs)
+                    return await r if hasattr(r, "__await__") else r
+                return {"error": "审批未通过"}
+            fn = guarded_critical
+
         return StructuredTool.from_function(
             coroutine=fn, name=tool.name, description=tool.description,
             args_schema=tool.args_schema,
         )
-
-facade = DataFacade()
-
-# ---- 每个工具的参数 schema 与详尽描述（LLM 通过 bind_tools 可见，决定能否正确调用）----
-class CalcArgs(BaseModel):
-    expr: str = Field(description="数学表达式，如 '1+2*3'，支持四则运算与括号")
-
-class HttpGetArgs(BaseModel):
-    url: str = Field(description="要请求的完整 URL，如 https://example.com/page")
-
-class SqlQueryArgs(BaseModel):
-    sql: str = Field(description="只读 SELECT 查询语句，禁止 DDL/DML（如 DELETE/UPDATE/INSERT）")
-
-class FileDeleteArgs(BaseModel):
-    path: str = Field(description="要删除的本地文件绝对路径")
-
-TOOL_DESCRIPTIONS = {
-    "calc": "执行数学计算。当用户需要数值计算、预算测算、ROI/转化率计算时使用。传入数学表达式，返回计算结果。",
-    "http_get": "发起 HTTP GET 请求获取网页或公开接口内容。当需要查询外部信息、竞品页面、公开数据源时使用。返回响应文本（截断 2000 字符）。",
-    "sql_query": "查询企业业务数据库（只读 SELECT）。当需要分析经营数据、销售数据、历史订单等企业数据时使用。返回查询结果行列表。仅允许只读查询。",
-    "file_delete": "删除本地文件。高风险操作，执行前会触发人工确认。仅在用户明确要求删除文件时使用。",
-}
-
-def _calc(expr: str) -> float:
-    return eval(expr, {"__builtins__": {}})  # noqa: S307 仅限四则运算沙箱
-
-def _http_get(url: str) -> str:
-    import httpx
-    return httpx.get(url, timeout=10).text[:2000]
-
-async def _sql_query(sql: str) -> list[dict]:
-    from sqlalchemy import text as sqltext
-    from app.core.database import engine
-    async with engine.connect() as conn:
-        rows = (await conn.execute(sqltext(sql))).all()
-        return [dict(r._mapping) for r in rows]
-
-def _file_delete(path: str) -> str:
-    import os
-    os.remove(path)
-    return f"deleted {path}"
-
-def register_builtin_tools(f: DataFacade) -> None:
-    f.register(Tool("calc", _calc, "low", TOOL_DESCRIPTIONS["calc"], CalcArgs))
-    f.register(Tool("http_get", _http_get, "low", TOOL_DESCRIPTIONS["http_get"], HttpGetArgs))
-    f.register(Tool("sql_query", _sql_query, "medium", TOOL_DESCRIPTIONS["sql_query"], SqlQueryArgs))
-    f.register(Tool("file_delete", _file_delete, "high", TOOL_DESCRIPTIONS["file_delete"], FileDeleteArgs))
-
-register_builtin_tools(facade)
 ```
 
-- [ ] **步骤 4：运行测试验证通过**
+- [ ] **步骤 4：实现 loader.py —— load_tools 统一加载**
+
+```python
+# backend/app/tools/loader.py
+from app.tools.facade import facade
+from app.tools.mcp_adapter import mcp_registry, get_mcp_tools
+
+async def load_tools(builtin_names: list[str], mcp_server_names: list[str]) -> list:
+    """加载内置工具 + MCP 工具，返回 LangChain Tool 列表。
+    各子 agent 构建子图时调用，避免重复的工具加载逻辑。
+    风险分级由 facade.to_langchain_tool 内部处理。"""
+    # 1. 内置工具（带风险分级包装）
+    tools = [facade.to_langchain_tool(n) for n in builtin_names]
+    # 2. MCP 工具（动态发现，服务未注册时跳过）
+    for server_name in mcp_server_names:
+        if server_name in mcp_registry.list():
+            mcp_tools = await get_mcp_tools(server_name)
+            tools.extend(mcp_tools)
+    return tools
+```
+
+> **迁移说明：** 任务 27/28 中各 agent 目前使用 `[facade.to_langchain_tool(n) for n in TOOL_NAMES]` 直接加载内置工具。`load_tools` + MCP 适配器实现后，需将各 agent 的工具加载行改为 `tools = await load_tools(TOOL_NAMES, MCP_SERVER_NAMES)`，并声明 `MCP_SERVER_NAMES`。此迁移在任务 37（MCP 适配器）完成后统一执行。
+
+- [ ] **步骤 5：运行测试验证通过**
 
 运行：`cd backend && pytest tests/test_facade.py -v`
 预期：PASS
 
-- [ ] **步骤 5：Commit**
+- [ ] **步骤 6：Commit**
 
 ```bash
 git add backend/app backend/tests
-git commit -m "feat: DataFacade 统一门面与内置工具"
+git commit -m "feat: DataFacade 风险分级包装 + load_tools"
 ```
 
 ---
 
-### 任务 32：风险评估器 + HITL interrupt
+### 任务 32：风险评估器（风险等级判定）
 
 **文件：**
 - 创建：`backend/app/tools/risk.py`
@@ -3797,17 +4232,24 @@ git commit -m "feat: DataFacade 统一门面与内置工具"
 
 ```python
 # backend/tests/test_risk.py
-from app.tools.risk import needs_hitl, request_hitl
+from app.tools.risk import needs_confirmation, needs_approval
 
-def test_high_risk_requires_hitl():
-    assert needs_hitl("high") is True
+def test_high_risk_needs_confirmation():
+    """high：需即时确认（interrupt），不进审批中心。"""
+    assert needs_confirmation("high") is True
+    assert needs_approval("high") is False
 
-def test_low_risk_skips():
-    assert needs_hitl("low") is False
+def test_critical_risk_needs_approval():
+    """critical：需进审批中心正式审批。"""
+    assert needs_confirmation("critical") is False
+    assert needs_approval("critical") is True
 
-def test_request_hitl_records():
-    task = request_hitl(trace_id="t1", node_id="n1", reason="删除文件", context={"path": "/tmp/x"})
-    assert task["status"] == "pending"
+def test_low_medium_skips():
+    """low/medium：直接执行。"""
+    assert needs_confirmation("low") is False
+    assert needs_approval("low") is False
+    assert needs_confirmation("medium") is False
+    assert needs_approval("medium") is False
 ```
 
 - [ ] **步骤 2：运行测试确认失败**
@@ -3815,21 +4257,23 @@ def test_request_hitl_records():
 运行：`cd backend && pytest tests/test_risk.py -v`
 预期：FAIL，ImportError
 
-- [ ] **步骤 3：实现风险评估器（interrupt 占位 + 任务记录）**
+- [ ] **步骤 3：实现风险评估器**
 
 ```python
 # backend/app/tools/risk.py
-from langgraph.types import interrupt
-
-def needs_hitl(risk: str) -> bool:
+def needs_confirmation(risk: str) -> bool:
+    """high 风险：interrupt 即时确认（不进审批中心）。"""
     return risk == "high"
 
-def request_hitl(trace_id: str, node_id: str, reason: str, context: dict) -> dict:
-    # 实际实现写入 hitl_tasks 表（见任务 33 的 API 层）；此处返回内存占位
-    return {"trace_id": trace_id, "node_id": node_id, "reason": reason, "context": context, "status": "pending"}
+def needs_approval(risk: str) -> bool:
+    """critical 风险：创建审批单，进审批中心等管理者审批。"""
+    return risk == "critical"
 
-# 注：高风险确认在 facade.to_langchain_tool（任务 31）内嵌 interrupt() 包装中完成，
-# 本模块保留 needs_hitl（工具风险等级判定）与 request_hitl（HITL 任务占位）供工具注册与任务 33 复用。
+# 注：风险分流在 facade.to_langchain_tool（任务 31）中实现：
+#   low/medium → 直接执行
+#   high       → interrupt 即时确认
+#   critical   → 创建 Approval 审批单 + interrupt 冻结图
+# 本模块提供风险等级判定供工具注册与 facade 复用。
 ```
 
 - [ ] **步骤 4：运行测试验证通过**
@@ -3841,14 +4285,14 @@ def request_hitl(trace_id: str, node_id: str, reason: str, context: dict) -> dic
 
 ```bash
 git add backend/app backend/tests
-git commit -m "feat: 风险评估器与 HITL interrupt 机制"
+git commit -m "feat: 风险评估器（high 即时确认 / critical 审批中心）"
 ```
 
 ---
 
 ### 任务 32.5：DataFacade 工具桥接验证（to_langchain_tool）
 
-> 每个子 agent 在自己的模块内直接构建子图（节点、ToolNode、路由各自实现，保留差异化演进空间），公共部分仅 `facade.to_langchain_tool`（DataFacade 工具 → LangChain StructuredTool + 高风险 interrupt 包装，任务 31 已实现）。本任务验证该桥接可用。
+> 每个子 agent 在自己的模块内直接构建子图（节点、ToolNode、路由各自实现，保留差异化演进空间），公共部分仅 `facade.to_langchain_tool`（DataFacade 工具 → LangChain StructuredTool + 按风险等级分流包装，任务 31 已实现）。本任务验证该桥接可用。
 
 **文件：**
 - 创建：`backend/tests/test_bridge.py`
@@ -3861,14 +4305,14 @@ import inspect
 from app.tools.facade import facade
 
 def test_bridge_tool_schema():
-    tool = facade.to_langchain_tool("sql_query")
-    assert tool.name == "sql_query"
-    assert "只读" in tool.description
-    assert "sql" in tool.args_schema.model_fields
+    tool = facade.to_langchain_tool("query_sales_data")
+    assert tool.name == "query_sales_data"
+    assert "metric" in tool.args_schema.model_fields
+    assert "period" in tool.args_schema.model_fields
 
-def test_bridge_high_risk_wrapped():
-    """高风险工具必须被 interrupt() 人工确认包装。"""
-    tool = facade.to_langchain_tool("file_delete")
+def test_bridge_critical_risk_wrapped():
+    """critical 风险工具必须被 interrupt() 审批中心包装。"""
+    tool = facade.to_langchain_tool("delete_order")
     assert "interrupt" in inspect.getsource(tool.func)
 ```
 
@@ -3891,118 +4335,9 @@ git commit -m "test: DataFacade 工具桥接与高风险 interrupt 包装验证"
 
 ---
 
-### 任务 33：HITL 审批 API（待办 + approve/reject）
+### 任务 33：已删除（合并入任务 24 统一审批中心）
 
-**文件：**
-- 创建：`backend/app/api/hitl.py`
-- 创建：`backend/tests/test_hitl_api.py`
-- 修改：`backend/app/main.py`
-
-- [ ] **步骤 1：编写失败的测试**
-
-```python
-# backend/tests/test_hitl_api.py
-import pytest
-from httpx import AsyncClient, ASGITransport
-from app.main import app
-from app.models.trace import HitlTask, ExecutionTrace
-
-@pytest.mark.asyncio
-async def test_hitl_approve_flow(db_session):
-    trace = ExecutionTrace(user_id="u1", status="interrupted")
-    db_session.add(trace)
-    await db_session.flush()
-    db_session.add(HitlTask(trace_id=trace.id, node_id="n1", reason="删除文件", status="pending"))
-    await db_session.commit()
-
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as c:
-        await c.post("/api/auth/register", json={"username": "judy", "password": "x123456", "display_name": "Judy"})
-        r = await c.post("/api/auth/login", json={"username": "judy", "password": "x123456"})
-        h = {"Authorization": f"Bearer {r.json()['access_token']}"}
-        r = await c.get("/api/hitl/tasks", headers=h)
-        assert len(r.json()) >= 1
-        task_id = r.json()[0]["id"]
-        r = await c.post(f"/api/hitl/tasks/{task_id}/approve", json={"approved": True}, headers=h)
-        assert r.status_code == 200
-        task = await db_session.get(HitlTask, task_id)
-        assert task.status == "approved"
-```
-
-- [ ] **步骤 2：运行测试确认失败**
-
-运行：`cd backend && pytest tests/test_hitl_api.py -v`
-预期：FAIL，404
-
-- [ ] **步骤 3：实现 HITL 路由**
-
-```python
-# backend/app/services/hitl_service.py
-from datetime import datetime, timezone
-from fastapi import HTTPException
-from app.repositories.trace_repo import HitlRepository, TraceRepository
-
-class HitlService:
-    """HITL 审批业务：列出待办 + 确认/驳回（复用任务 35 的 HitlRepository/TraceRepository）。"""
-    def __init__(self, db):
-        self.tasks = HitlRepository(db)
-        self.traces = TraceRepository(db)
-
-    async def list_pending(self):
-        rows = await self.tasks.list(status="pending")
-        return [{"id": t.id, "trace_id": t.trace_id, "reason": t.reason, "context": t.context} for t in rows]
-
-    async def decide(self, task_id: str, approver_id: str, approved: bool):
-        task = await self.tasks.get(task_id)
-        if not task or task.status != "pending":
-            raise HTTPException(404, "任务不存在")
-        task.status = "approved" if approved else "rejected"
-        task.approver_id = approver_id
-        task.decided_at = datetime.now(timezone.utc)
-        trace = await self.traces.get(task.trace_id)
-        if trace:
-            trace.status = "completed"
-        await self.tasks.commit()  # 事务提交走 repository
-        return {"ok": True}
-```
-
-```python
-# backend/app/api/hitl.py —— 薄路由
-from fastapi import APIRouter, Depends
-from sqlalchemy.ext.asyncio import AsyncSession
-from pydantic import BaseModel
-from app.core.deps import get_db, get_current_user
-from app.models.org import User
-from app.services.hitl_service import HitlService
-
-router = APIRouter(prefix="/api/hitl", tags=["hitl"])
-
-class DecideHitl(BaseModel):
-    approved: bool
-
-def get_hitl_service(db: AsyncSession = Depends(get_db)) -> HitlService:
-    return HitlService(db)
-
-@router.get("/tasks")
-async def list_tasks(svc: HitlService = Depends(get_hitl_service), _: User = Depends(get_current_user)):
-    return await svc.list_pending()
-
-@router.post("/tasks/{task_id}/approve")
-async def approve_task(task_id: str, body: DecideHitl, svc: HitlService = Depends(get_hitl_service), user: User = Depends(get_current_user)):
-    return await svc.decide(task_id, user.id, body.approved)
-```
-
-- [ ] **步骤 4：main.py 注册并运行测试**
-
-运行：`cd backend && pytest tests/test_hitl_api.py -v`
-预期：PASS
-
-- [ ] **步骤 5：Commit**
-
-```bash
-git add backend/app backend/tests
-git commit -m "feat: HITL 审批 API"
-```
+> 原 HITL 审批 API（`/api/hitl/*`、`HitlService`、`HitlTask`）已合并入任务 24 统一审批中心。`HitlTask` 表删除，统一使用 `Approval` 表；`HitlService` 删除，统一使用 `ApprovalService`；`/api/hitl/*` 路由删除，统一使用 `/api/approvals/*`。
 
 ---
 
@@ -4043,7 +4378,7 @@ class FakeLLM:
     async def ainvoke(self, messages):
         if len(messages) == 2:
             return AIMessage(content="", tool_calls=[{
-                "name": "calc", "args": {"expr": "100*0.9"}, "id": "c1", "type": "tool_call",
+                "name": "query_marketing_campaigns", "args": {"status": "active"}, "id": "c1", "type": "tool_call",
             }])
         return AIMessage(content="营销方案已生成")
 ```
@@ -4251,10 +4586,10 @@ async def test_trace_created_per_chat(monkeypatch):
 ```python
 # backend/app/repositories/trace_repo.py
 from sqlalchemy import select
-from app.models.trace import ExecutionTrace, TraceEvent, HitlTask
+from app.models.trace import ExecutionTrace, TraceEvent, Approval
 from app.repositories.base import BaseRepository
 
-class TraceRepository(BaseRepository):
+class TraceRepository(BaseRepository[ExecutionTrace]):
     model = ExecutionTrace
 
     async def list_by_user(self, user_id: str, limit: int = 50) -> list[ExecutionTrace]:
@@ -4271,8 +4606,15 @@ class EventRepository(BaseRepository):
             select(TraceEvent).where(TraceEvent.trace_id == trace_id).order_by(TraceEvent.id)
         )).all()
 
-class HitlRepository(BaseRepository):
-    model = HitlTask
+class ApprovalRepository(BaseRepository[Approval]):
+    """统一审批中心 Repository，替代原 HitlRepository + 经验 ApprovalRepository。"""
+    model = Approval
+
+    async def list_pending(self, category: str | None = None) -> list[Approval]:
+        q = select(Approval).where(Approval.status == "pending")
+        if category:
+            q = q.where(Approval.category == category)
+        return (await self.db.scalars(q.order_by(Approval.submitted_at.desc()))).all()
 ```
 
 ```python
@@ -4284,28 +4626,28 @@ from app.traces.collector import collector
 
     def __init__(self, db):
         self.db = db
-        self.conversations = ConversationRepository(db)
-        self.messages = MessageRepository(db)
-        self.traces = TraceRepository(db)
+        self.conversation_repo = ConversationRepository(db)
+        self.message_repo = MessageRepository(db)
+        self.trace_repo = TraceRepository(db)
 
     async def stream_chat(self, user_id: str, conv_id: str, message: str):
         await self._ensure_owned(user_id, conv_id)
-        conv = await self.conversations.get(conv_id)
+        conv = await self.conversation_repo.get(conv_id)
         trace = ExecutionTrace(id=str(uuid4()), user_id=user_id, conversation_id=conv_id, status="running", supervisor_routes=[])
-        await self.traces.add(trace)
+        await self.trace_repo.add(trace)
         yield json.dumps({"event": "start", "trace_id": trace.id}, ensure_ascii=False)
-        await self.messages.add(Message(conversation_id=conv_id, role="user", content=message))
+        await self.message_repo.add(Message(conversation_id=conv_id, role="user", content=message))
         mem = await assemble_memory(self.db, user_id, conv_id, conv.department_id, message)
         result = await graph.ainvoke({
             "conversation_id": conv_id, "user_id": user_id,
             "user_message": message, "memory_context": mem, "trace_id": trace.id, "messages": [],
         })
         text = result.get("agent_response", "")
-        await self.messages.add(Message(conversation_id=conv_id, role="assistant", content=text))
+        await self.message_repo.add(Message(conversation_id=conv_id, role="assistant", content=text))
         trace.status = "completed"
         trace.supervisor_routes = result.get("route_history", [])
         conv.current_trace_id = trace.id
-        await self.traces.commit()  # 事务提交走 repository
+        await self.trace_repo.commit()  # 事务提交走 repository
         collector.emit(trace.id, "route", {"routes": trace.supervisor_routes})
         # 偏好提取 / 经验提炼同任务 30
         yield json.dumps({"event": "token", "content": text}, ensure_ascii=False)
@@ -4319,14 +4661,14 @@ from app.repositories.trace_repo import TraceRepository, EventRepository
 
 class TraceService:
     def __init__(self, db):
-        self.traces = TraceRepository(db)
-        self.events = EventRepository(db)
+        self.trace_repo = TraceRepository(db)
+        self.event_repo = EventRepository(db)
 
     async def list_by_user(self, user_id: str, limit: int = 50):
-        return await self.traces.list_by_user(user_id, limit)
+        return await self.trace_repo.list_by_user(user_id, limit)
 
     async def events(self, trace_id: str) -> list[TraceEvent]:
-        return await self.events.list_by_trace(trace_id)
+        return await self.event_repo.list_by_trace(trace_id)
 ```
 
 ```python
@@ -4392,11 +4734,11 @@ async def test_graph_compiled_with_checkpointer():
 - [ ] **步骤 3：接入 PostgresSaver**
 
 ```python
-# backend/app/agents/graph.py 关键改造
+# backend/app/agents/graph.py 关键改造（在任务 29 基础上追加 checkpointer）
 from langgraph.checkpoint.postgres import PostgresSaver
 from app.core.config import settings
 
-def build_graph():
+def build_graph(registry: AgentRegistry):
     ...  # 同任务 29
     # 用 checkpointer 编译，thread_id = conversation_id
     from sqlalchemy.engine import make_url
@@ -4408,7 +4750,9 @@ def build_graph():
     checkpointer = AsyncPostgresSaver(pool)
     return g.compile(checkpointer=checkpointer)
 
-graph = build_graph()
+# 模块级初始化（同任务 29，build_graph 签名已改为接收 registry）
+registry = asyncio.run(_build_registry())
+graph = build_graph(registry)
 ```
 
 > 依赖：`psycopg[binary]`、`psycopg-pool`（加入 pyproject）。`graph.ainvoke(input, config={"configurable": {"thread_id": conversation_id}})` 即为每会话独立状态；chat.py 中 ainvoke 需传 config。
@@ -4501,6 +4845,8 @@ async def get_mcp_tools(server_name: str) -> list:
     return await client.get_tools(server_name)
 ```
 
+> **MCP 工具集成到子 agent（任务 27/28 初始硬编码 → 任务 38.5 动态化）：** 任务 27/28 各子 agent 模块初始声明 `MCP_SERVER_NAMES` 硬编码绑定；任务 38.5 将绑定关系迁入数据库（`AgentMcpBinding` 表），`build_xxx_agent(db)` 通过 `load_mcp_tools_by_agent(db, agent_code)` 读取已启用的 MCP 服务名，再调用 `get_mcp_tools()` 动态发现工具并加入 `tools` 列表，与内置工具统一供 `bind_tools` 和 `ToolNode` 使用。新增/移除 MCP 绑定只需 API 操作 + 重启，无需改 agent 代码。
+
 - [ ] **步骤 4：运行测试验证通过**
 
 运行：`cd backend && pytest tests/test_mcp_adapter.py -v`
@@ -4515,7 +4861,7 @@ git commit -m "feat: MCP 服务注册与动态工具接入"
 
 ---
 
-### 任务 38：配置管理 API（三层：agents / mcp-servers / models）
+### 任务 38：配置管理 API（三层：mcp-servers）
 
 **文件：**
 - 创建：`backend/app/repositories/config_repo.py`
@@ -4533,18 +4879,16 @@ from httpx import AsyncClient, ASGITransport
 from app.main import app
 
 @pytest.mark.asyncio
-async def test_agent_config_crud():
+async def test_mcp_config_crud():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         await c.post("/api/auth/register", json={"username": "leah", "password": "x123456", "display_name": "Leah"})
         r = await c.post("/api/auth/login", json={"username": "leah", "password": "x123456"})
         h = {"Authorization": f"Bearer {r.json()['access_token']}"}
-        r = await c.post("/api/agents", json={"code": "new_agent", "name": "新Agent", "model_key": "default"}, headers=h)
-        assert r.status_code == 200
-        r = await c.get("/api/agents", headers=h)
-        assert any(a["code"] == "new_agent" for a in r.json())
         r = await c.post("/api/mcp-servers", json={"name": "erp", "url": "http://x/mcp"}, headers=h)
         assert r.status_code == 200
+        r = await c.get("/api/mcp-servers", headers=h)
+        assert any(m["name"] == "erp" for m in r.json())
 ```
 
 - [ ] **步骤 2：运行测试确认失败**
@@ -4556,44 +4900,33 @@ async def test_agent_config_crud():
 
 ```python
 # backend/app/repositories/config_repo.py
-from app.models.configs import AgentConfig, McpServer
+from app.models.configs import McpServer
 from app.repositories.base import BaseRepository
 
-class AgentConfigRepository(BaseRepository):
-    model = AgentConfig
-
-class McpServerRepository(BaseRepository):
+class McpServerRepository(BaseRepository[McpServer]):
     model = McpServer
 ```
 
 ```python
 # backend/app/services/config_service.py
-from app.models.configs import AgentConfig, McpServer
-from app.repositories.config_repo import AgentConfigRepository, McpServerRepository
+from app.models.configs import McpServer
+from app.repositories.config_repo import McpServerRepository
 from app.tools.mcp_adapter import mcp_registry
 
 class ConfigService:
-    """配置业务：agent / mcp-server 增查；新增 MCP 时同步注册到运行时注册表。"""
+    """配置业务：mcp-server 增查；新增 MCP 时同步注册到运行时注册表。"""
     def __init__(self, db):
-        self.agents = AgentConfigRepository(db)
-        self.mcps = McpServerRepository(db)
-
-    async def create_agent(self, code: str, name: str, model_key: str, config: dict) -> AgentConfig:
-        row = AgentConfig(code=code, name=name, model_key=model_key, config=config)
-        await self.agents.add(row)
-        return row
-
-    async def list_agents(self) -> list[AgentConfig]:
-        return await self.agents.list()
+        self.mcp_repo = McpServerRepository(db)
 
     async def create_mcp(self, name: str, url: str, auth_type: str, config: dict) -> McpServer:
         row = McpServer(name=name, url=url, auth_type=auth_type, config=config)
-        await self.mcps.add(row)
+        await self.mcp_repo.add(row)
+        await self.mcp_repo.commit()
         mcp_registry.register({"name": row.name, "url": row.url, "auth_type": row.auth_type, "config": row.config, "enabled": True})
         return row
 
     async def list_mcps(self) -> list[McpServer]:
-        return await self.mcps.list()
+        return await self.mcp_repo.list()
 ```
 
 ```python
@@ -4607,12 +4940,6 @@ from app.services.config_service import ConfigService
 
 router = APIRouter(tags=["configs"])
 
-class AgentIn(BaseModel):
-    code: str
-    name: str
-    model_key: str = "default"
-    config: dict = {}
-
 class McpIn(BaseModel):
     name: str
     url: str
@@ -4621,14 +4948,6 @@ class McpIn(BaseModel):
 
 def get_config_service(db: AsyncSession = Depends(get_db)) -> ConfigService:
     return ConfigService(db)
-
-@router.post("/api/agents")
-async def create_agent(body: AgentIn, svc: ConfigService = Depends(get_config_service), _: User = Depends(get_current_user)):
-    return await svc.create_agent(body.code, body.name, body.model_key, body.config)
-
-@router.get("/api/agents")
-async def list_agents(svc: ConfigService = Depends(get_config_service), _: User = Depends(get_current_user)):
-    return await svc.list_agents()
 
 @router.post("/api/mcp-servers")
 async def create_mcp(body: McpIn, svc: ConfigService = Depends(get_config_service), _: User = Depends(get_current_user)):
@@ -4649,6 +4968,534 @@ async def list_mcp(svc: ConfigService = Depends(get_config_service), _: User = D
 ```bash
 git add backend/app backend/tests
 git commit -m "feat: agents/mcp-servers 配置管理 API"
+```
+
+---
+
+### 任务 38.5：Agent MCP 绑定动态化（AgentMcpBinding）
+
+> **目标：** 将 agent 与 MCP 服务的绑定关系从硬编码（`MCP_SERVER_NAMES`）改为数据库配置。新增 MCP 服务给 agent 使用只需 API 操作 + 重启，无需改 agent 代码。内置工具仍由 agent 硬编码 `TOOL_NAMES` 声明（新增内置工具本身就需要写代码）。
+
+**文件：**
+- 修改：`backend/app/tools/loader.py`（追加 `load_mcp_tools_by_agent`）
+- 修改：`backend/app/repositories/config_repo.py`（追加 `AgentMcpBindingRepository`）
+- 修改：`backend/app/services/config_service.py`（追加 agent MCP 绑定 CRUD）
+- 修改：`backend/app/api/configs.py`（追加 agent MCP 绑定路由）
+- 修改：`backend/app/services/seed.py`（追加 `seed_agent_mcp_bindings`）
+- 修改：`backend/app/agents/marketing/agent.py`、`sales_analysis/agent.py`、`scheduling/agent.py`
+- 修改：`backend/app/agents/graph.py`
+- 创建：`backend/tests/test_agent_mcp_binding.py`
+
+- [ ] **步骤 1：编写失败的测试**
+
+```python
+# backend/tests/test_agent_mcp_binding.py
+import pytest
+from httpx import AsyncClient, ASGITransport
+from app.main import app
+from app.tools.loader import load_mcp_tools_by_agent
+
+@pytest.mark.asyncio
+async def test_load_mcp_tools_by_agent(db_session):
+    """从数据库读取 agent 的 MCP 绑定并加载 MCP 服务名列表。"""
+    from app.services.seed import seed_agent_mcp_bindings
+    await seed_agent_mcp_bindings(db_session)
+    mcp_server_names = await load_mcp_tools_by_agent(db_session, "marketing")
+    assert "erp" in mcp_server_names
+
+@pytest.mark.asyncio
+async def test_agent_mcp_binding_api():
+    """通过 API 管理 agent MCP 绑定。"""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        await c.post("/api/auth/register", json={"username": "admin1", "password": "x123456", "display_name": "Admin"})
+        r = await c.post("/api/auth/login", json={"username": "admin1", "password": "x123456"})
+        h = {"Authorization": f"Bearer {r.json()['access_token']}"}
+        # 查看默认绑定
+        r = await c.get("/api/agents/marketing/mcp-bindings", headers=h)
+        assert r.status_code == 200
+        assert len(r.json()) > 0
+        # 新增绑定
+        r = await c.post("/api/agents/marketing/mcp-bindings", json={"mcp_server_name": "crm"}, headers=h)
+        assert r.status_code == 200
+        assert r.json()["mcp_server_name"] == "crm"
+        # 移除
+        binding_id = r.json()["id"]
+        r = await c.delete(f"/api/agents/marketing/mcp-bindings/{binding_id}", headers=h)
+        assert r.status_code == 200
+```
+
+- [ ] **步骤 2：运行测试确认失败**
+
+运行：`cd backend && pytest tests/test_agent_mcp_binding.py -v`
+预期：FAIL，ImportError / 404
+
+- [ ] **步骤 3：实现 loader 追加 + repo + service + API**
+
+```python
+# backend/app/tools/loader.py 追加
+from sqlalchemy.ext.asyncio import AsyncSession
+
+async def load_mcp_tools_by_agent(db: AsyncSession, agent_code: str) -> list[str]:
+    """从数据库读取 agent 的 MCP 绑定，返回已启用的 MCP 服务名列表。
+    agent 模块用此列表替代硬编码的 MCP_SERVER_NAMES。"""
+    from app.repositories.config_repo import AgentMcpBindingRepository
+    repo = AgentMcpBindingRepository(db)
+    bindings = await repo.list_by_agent(agent_code)
+    return [b.mcp_server_name for b in bindings if b.enabled]
+```
+
+```python
+# backend/app/repositories/config_repo.py 追加
+from app.models.configs import AgentMcpBinding
+
+class AgentMcpBindingRepository(BaseRepository[AgentMcpBinding]):
+    model = AgentMcpBinding
+
+    async def list_by_agent(self, agent_code: str) -> list[AgentMcpBinding]:
+        return list((await self.db.scalars(
+            select(AgentMcpBinding).where(AgentMcpBinding.agent_code == agent_code)
+        )).all())
+```
+
+```python
+# backend/app/services/config_service.py 追加
+from app.models.configs import AgentMcpBinding
+from app.repositories.config_repo import AgentMcpBindingRepository
+
+class ConfigService:
+    def __init__(self, db):
+        self.mcp_repo = McpServerRepository(db)
+        self.binding_repo = AgentMcpBindingRepository(db)
+
+    # ... 既有 create_mcp / list_mcps 不变 ...
+
+    async def list_agent_bindings(self, agent_code: str) -> list[AgentMcpBinding]:
+        return await self.binding_repo.list_by_agent(agent_code)
+
+    async def add_agent_binding(self, agent_code: str, mcp_server_name: str) -> AgentMcpBinding:
+        row = AgentMcpBinding(agent_code=agent_code, mcp_server_name=mcp_server_name)
+        await self.binding_repo.add(row)
+        await self.binding_repo.commit()
+        return row
+
+    async def remove_agent_binding(self, binding_id: str) -> None:
+        row = await self.binding_repo.get(binding_id)
+        if row:
+            await self.binding_repo.delete(row)
+            await self.binding_repo.commit()
+```
+
+```python
+# backend/app/api/configs.py 追加
+class AgentMcpBindingIn(BaseModel):
+    mcp_server_name: str
+
+@router.get("/api/agents/{agent_code}/mcp-bindings")
+async def list_agent_bindings(agent_code: str, svc: ConfigService = Depends(get_config_service), _: User = Depends(get_current_user)):
+    return await svc.list_agent_bindings(agent_code)
+
+@router.post("/api/agents/{agent_code}/mcp-bindings")
+async def add_agent_binding(agent_code: str, body: AgentMcpBindingIn, svc: ConfigService = Depends(get_config_service), _: User = Depends(get_current_user)):
+    return await svc.add_agent_binding(agent_code, body.mcp_server_name)
+
+@router.delete("/api/agents/{agent_code}/mcp-bindings/{binding_id}")
+async def remove_agent_binding(agent_code: str, binding_id: str, svc: ConfigService = Depends(get_config_service), _: User = Depends(get_current_user)):
+    await svc.remove_agent_binding(binding_id)
+    return {"ok": True}
+```
+
+- [ ] **步骤 4：实现 seed 追加默认 MCP 绑定**
+
+```python
+# backend/app/services/seed.py 追加
+from app.models.configs import AgentMcpBinding
+from app.repositories.config_repo import AgentMcpBindingRepository
+
+# 各 agent 默认绑定的 MCP 服务
+AGENT_MCP_BINDINGS = [
+    ("marketing", "erp"),
+    ("sales_analysis", "erp"),
+    ("scheduling", "erp"),
+]
+
+async def seed_agent_mcp_bindings(db: AsyncSession) -> None:
+    repo = AgentMcpBindingRepository(db)
+    for agent_code, mcp_server_name in AGENT_MCP_BINDINGS:
+        if not await repo.get_by(agent_code=agent_code, mcp_server_name=mcp_server_name):
+            await repo.add(AgentMcpBinding(agent_code=agent_code, mcp_server_name=mcp_server_name))
+    await repo.commit()
+```
+
+```python
+# backend/scripts/seed.py 追加
+from app.services.seed import seed_roles, seed_agent_mcp_bindings
+
+async def main():
+    async with SessionLocal() as db:
+        await seed_roles(db)
+        await seed_agent_mcp_bindings(db)
+    print("seeded")
+```
+
+- [ ] **步骤 5：重构子 agent，MCP 绑定从数据库读取**
+
+```python
+# backend/app/agents/marketing/agent.py 重构
+from langgraph.graph import StateGraph, END
+from langgraph.prebuilt import ToolNode
+from langchain_core.messages import HumanMessage, SystemMessage
+from app.llm.factory import ModelFactory
+from app.tools.loader import load_tools, load_mcp_tools_by_agent
+from app.agents.state import AgentState
+from sqlalchemy.ext.asyncio import AsyncSession
+
+SYSTEM_PROMPT = (
+    "你是营销助手。结合【记忆上下文】中的个人偏好、历史经验、知识库与企业数据，"
+    "为用户策划营销方案。营销策略需包含目标、渠道、预算、预期效果。回答用中文。"
+)
+
+# 内置工具仍硬编码（新增内置工具本身就需要写代码）
+TOOL_NAMES = ["query_marketing_campaigns", "create_marketing_campaign", "publish_campaign"]
+AGENT_CODE = "marketing"
+MAX_TOOL_ROUNDS = 6
+
+async def build_marketing_agent(db: AsyncSession):
+    """营销助手子图。内置工具硬编码声明，MCP 绑定从数据库动态读取。"""
+    # 1. 内置工具（硬编码）
+    # 2. MCP 绑定（从数据库读取，替代硬编码的 MCP_SERVER_NAMES）
+    mcp_server_names = await load_mcp_tools_by_agent(db, AGENT_CODE)
+    tools = await load_tools(TOOL_NAMES, mcp_server_names)
+
+    async def agent_node(state: AgentState) -> dict:
+        llm = ModelFactory.get_llm("marketing").bind_tools(tools)
+        msgs = [
+            SystemMessage(SYSTEM_PROMPT + "\n" + state.get("memory_context", "")),
+            HumanMessage(state.get("user_message", "")),
+        ] + state.get("messages", [])
+        resp = await llm.ainvoke(msgs)
+        return {"messages": [resp], "tool_rounds": 1}
+
+    def should_continue(state: AgentState) -> str:
+        last = state["messages"][-1]
+        if not getattr(last, "tool_calls", None):
+            return "end"
+        return "tools" if state.get("tool_rounds", 0) < MAX_TOOL_ROUNDS else "end"
+
+    g = StateGraph(AgentState)
+    g.add_node("agent", agent_node)
+    g.add_node("tools", ToolNode(tools))
+    g.set_entry_point("agent")
+    g.add_edge("tools", "agent")
+    g.add_conditional_edges("agent", should_continue, {"tools": "tools", "end": END})
+    return g.compile()
+```
+
+> `sales_analysis/agent.py` 和 `scheduling/agent.py` 同理重构：保留各自 `TOOL_NAMES` 硬编码，`build_xxx_agent(db: AsyncSession)` 接收 db 参数，调用 `load_mcp_tools_by_agent(db, AGENT_CODE)` 获取 MCP 服务名，再调用 `load_tools(TOOL_NAMES, mcp_server_names)`。
+
+- [ ] **步骤 6：重构 graph.py，传 db 给各 agent**
+
+```python
+# backend/app/agents/graph.py 重写
+import asyncio
+from langgraph.graph import StateGraph, END
+from app.agents.state import AgentState
+from app.agents.registry import AgentRegistry
+from app.agents.supervisor import route_decision
+from app.agents.marketing.agent import build_marketing_agent
+from app.agents.sales_analysis.agent import build_sales_agent
+from app.agents.scheduling.agent import build_scheduling_agent
+from app.core.database import SessionLocal
+
+MAX_ROUTES = 4
+
+async def _build_registry(db) -> AgentRegistry:
+    """异步构建注册中心：从数据库加载各 agent 的 MCP 绑定并构建子图。"""
+    registry = AgentRegistry()
+    registry.register("marketing", await build_marketing_agent(db))
+    registry.register("sales_analysis", await build_sales_agent(db))
+    registry.register("scheduling", await build_scheduling_agent(db))
+    return registry
+
+def build_graph(registry: AgentRegistry):
+    """根据已构建的注册中心装配主图。"""
+    g = StateGraph(AgentState)
+
+    async def supervisor_node(state: AgentState) -> dict:
+        decision = await route_decision(state.get("user_message", ""), registry.list())
+        return {"pending_agent": decision["agent"], "route_history": [decision["agent"]]}
+
+    def router(state: AgentState) -> str:
+        agent = state.get("pending_agent", "done")
+        if len(state.get("route_history", [])) >= MAX_ROUTES:
+            return "done"
+        return agent if agent in registry.list() else "done"
+
+    async def done_node(state: AgentState) -> dict:
+        msgs = state.get("messages", [])
+        text = msgs[-1].content if msgs else state.get("agent_response", "")
+        return {"agent_response": text or "已完成"}
+
+    g.add_node("supervisor", supervisor_node)
+    for code in registry.list():
+        g.add_node(code, registry.get(code))
+    g.add_node("done", done_node)
+    g.set_entry_point("supervisor")
+    g.add_conditional_edges("supervisor", router, {**{c: c for c in registry.list()}, "done": "done"})
+    for code in registry.list():
+        g.add_edge(code, "done")
+    g.add_edge("done", END)
+    return g.compile()
+
+# 模块级初始化：从数据库加载 MCP 绑定 + 构建子图 + 编译主图
+async def _init():
+    async with SessionLocal() as db:
+        reg = await _build_registry(db)
+    return build_graph(reg)
+
+graph = asyncio.run(_init())
+```
+
+> **注：** `graph.py` 模块加载时从数据库读取 MCP 绑定构建子图。新增/移除 MCP 绑定后需重启应用生效。后续可扩展为热重载机制。
+
+- [ ] **步骤 7：更新既有测试适配 db 参数**
+
+> 任务 27/28 的测试中 `build_marketing_agent()` / `build_sales_agent()` / `build_scheduling_agent()` 需改为 `await build_marketing_agent(db_session)` 等，传入 db_session。测试 fixture 需先调用 `seed_agent_mcp_bindings(db_session)` 初始化默认绑定。
+
+- [ ] **步骤 8：生成迁移并运行测试**
+
+运行：`cd backend && alembic revision --autogenerate -m "add agent_mcp_bindings" && alembic upgrade head && pytest tests/test_agent_mcp_binding.py tests/test_marketing_agent.py tests/test_agents_extra.py -v`
+预期：全部 PASS
+
+- [ ] **步骤 9：Commit**
+
+```bash
+git add backend/app backend/tests backend/alembic
+git commit -m "feat: agent MCP 绑定动态化，MCP 服务绑定存库管理"
+```
+
+---
+
+### 任务 38.6：MCP 工具风险等级配置（default_risk + tool_risks）
+
+> **目标：** 为 MCP 工具动态注入风险等级，使 MCP 工具与内置工具一样能触发 high（即时确认）/ critical（审批中心）分流。MCP 工具的 risk 不能在代码里硬编码（工具是运行时从远端服务发现的），因此采用「服务级默认 + 工具级覆盖」两级配置：
+>
+> - **服务级默认** `McpServer.default_risk`：注册 MCP 服务时设定，对该服务下所有工具生效（默认 `medium`）。
+> - **工具级覆盖** `McpServer.config["tool_risks"]`：管理员查看工具清单后，按需为特定工具指定更高/更低的 risk，覆盖服务级默认。
+>
+> **config 字段写入时机（关键）：** 注册 MCP 服务时 `config = {}`（空）；管理员通过 `GET /api/mcp-servers/{name}/tools` 实时连接 MCP 服务发现工具清单 → 通过 `PUT /api/mcp-servers/{name}/tool-risks` 提交风险配置 → 写入 `config["tool_risks"]` → 运行时 `load_mcp_tools_with_risk` 读取做风险判定。运行时只读不写。
+>
+> **风险判定优先级：** `config.tool_risks[tool_name]` > `default_risk` > `"medium"` 兜底。
+
+**文件：**
+- 修改：`backend/app/tools/risk.py`（追加 `get_mcp_risk`）
+- 修改：`backend/app/tools/loader.py`（改造 `load_tools` 接收 db；追加 `load_mcp_tools_with_risk`）
+- 修改：`backend/app/services/config_service.py`（追加 `update_tool_risks`）
+- 修改：`backend/app/api/configs.py`（追加 `list_mcp_tools` / `update_tool_risks` 路由）
+- 修改：`backend/app/agents/marketing/agent.py`、`sales_analysis/agent.py`、`scheduling/agent.py`（`load_tools` 调用同步加 db 参数）
+- 创建：`backend/tests/test_mcp_tool_risk.py`
+
+- [ ] **步骤 1：编写失败的测试**
+
+```python
+# backend/tests/test_mcp_tool_risk.py
+import pytest
+from app.tools.risk import get_mcp_risk
+
+def test_get_mcp_risk_tool_level_overrides_default():
+    """工具级覆盖优先于服务级默认。"""
+    config = {"tool_risks": {"delete_order": "critical"}}
+    assert get_mcp_risk("delete_order", "medium", config) == "critical"
+
+def test_get_mcp_risk_falls_back_to_server_default():
+    """无工具级覆盖时回退到服务级 default_risk。"""
+    assert get_mcp_risk("query_order", "high", {}) == "high"
+
+def test_get_mcp_risk_falls_back_to_medium():
+    """服务级默认为空时兜底 medium。"""
+    assert get_mcp_risk("query_order", "", {}) == "medium"
+    assert get_mcp_risk("query_order", None, None) == "medium"
+
+@pytest.mark.asyncio
+async def test_update_tool_risks_api(client_with_auth):
+    """通过 API 更新 MCP 服务的工具风险配置。"""
+    async with client_with_auth as c:
+        h = {"Authorization": f"Bearer {await _login(c)}"}
+        # 先注册一个 MCP 服务
+        await c.post("/api/mcp-servers", json={"name": "erp", "url": "http://localhost:8001/mcp"}, headers=h)
+        # 更新工具风险
+        r = await c.put("/api/mcp-servers/erp/tool-risks", json={
+            "tool_risks": {"delete_order": "critical", "adjust_schedule": "high"}
+        }, headers=h)
+        assert r.status_code == 200
+        assert r.json()["tool_risks"]["delete_order"] == "critical"
+```
+
+- [ ] **步骤 2：运行测试确认失败**
+
+运行：`cd backend && pytest tests/test_mcp_tool_risk.py -v`
+预期：FAIL，ImportError / 404
+
+- [ ] **步骤 3：实现 risk.py 追加 get_mcp_risk**
+
+```python
+# backend/app/tools/risk.py 追加
+
+def get_mcp_risk(tool_name: str, server_default_risk: str, server_config: dict) -> str:
+    """判定 MCP 工具的风险等级（运行时动态注入）。
+    优先级：工具级覆盖 config.tool_risks > 服务级 default_risk > "medium" 兜底。
+    内置工具的 risk 在注册时硬编码声明，不走本函数。"""
+    tool_risks = (server_config or {}).get("tool_risks", {})
+    return tool_risks.get(tool_name, server_default_risk or "medium")
+```
+
+- [ ] **步骤 4：改造 loader.py，load_tools 接收 db + 追加 load_mcp_tools_with_risk**
+
+```python
+# backend/app/tools/loader.py 重写
+from sqlalchemy.ext.asyncio import AsyncSession
+from app.tools.facade import facade, Tool
+from app.tools.mcp_adapter import mcp_registry, get_mcp_tools
+from app.tools.risk import get_mcp_risk
+
+async def load_mcp_tools_with_risk(db: AsyncSession, server_name: str) -> list[Tool]:
+    """连接 MCP 服务发现工具，注入风险等级，包装为 DataFacade.Tool。
+    - 风险来源：get_mcp_risk(tool_name, server.default_risk, server.config)
+    - 工具名加前缀 mcp_{server_name}_ 防与内置工具重名"""
+    from app.repositories.config_repo import McpServerRepository
+
+    # 1. 服务未注册则跳过
+    if server_name not in mcp_registry.list():
+        return []
+
+    # 2. 查数据库获取风险配置
+    mcp_repo = McpServerRepository(db)
+    server = await mcp_repo.get(server_name)
+    if not server or not server.enabled:
+        return []
+
+    # 3. 连接 MCP 服务，发现所有工具（返回 LangChain Tool 列表）
+    raw_tools = await get_mcp_tools(server_name)
+
+    # 4. 注入 risk，包装为 DataFacade.Tool
+    result = []
+    for t in raw_tools:
+        risk = get_mcp_risk(t.name, server.default_risk, server.config)
+        result.append(Tool(
+            name=f"mcp_{server_name}_{t.name}",
+            fn=t.func,
+            risk=risk,
+            description=t.description,
+            args_schema=t.args_schema,
+        ))
+    return result
+
+async def load_tools(db: AsyncSession, builtin_names: list[str], mcp_server_names: list[str]) -> list:
+    """统一加载内置工具 + MCP 工具，返回 LangChain Tool 列表。
+    - 内置工具：risk 在注册时硬编码声明（facade.get_risk）
+    - MCP 工具：risk 从数据库 default_risk + config.tool_risks 动态注入
+    各子 agent 构建子图时调用。"""
+    # 1. 内置工具（从 facade 单例获取，risk 已硬编码）
+    tools = [facade.to_langchain_tool(n) for n in builtin_names]
+    # 2. MCP 工具（动态发现 + 注入 risk）
+    for server_name in mcp_server_names:
+        mcp_tools = await load_mcp_tools_with_risk(db, server_name)
+        tools.extend([facade.to_langchain_tool(t.name) for t in mcp_tools])
+    return tools
+```
+
+> **注：** `load_tools` 签名从 `(builtin_names, mcp_server_names)` 改为 `(db, builtin_names, mcp_server_names)`，因为 MCP 工具的风险等级需从数据库读取。任务 27/28/38.5 中所有 `load_tools(...)` 调用需同步改为 `load_tools(db, ...)`。
+
+- [ ] **步骤 5：实现 config_service.py 追加 update_tool_risks**
+
+```python
+# backend/app/services/config_service.py 追加
+from fastapi import HTTPException
+
+class ConfigService:
+    # ... 既有 create_mcp / list_mcps / agent binding 方法不变 ...
+
+    async def update_tool_risks(self, name: str, tool_risks: dict[str, str]) -> dict:
+        """更新 MCP 服务的 config.tool_risks，覆盖特定工具的风险等级。
+        config 在注册时为空，由管理员调用本方法写入。"""
+        server = await self.mcp_repo.get(name)
+        if not server:
+            raise HTTPException(404, "MCP 服务不存在")
+        config = server.config or {}
+        config["tool_risks"] = tool_risks
+        server.config = config
+        await self.mcp_repo.commit()
+        return {"ok": True, "tool_risks": tool_risks}
+```
+
+- [ ] **步骤 6：实现 api/configs.py 追加两个路由**
+
+```python
+# backend/app/api/configs.py 追加
+from fastapi import HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
+
+class ToolRisksUpdate(BaseModel):
+    tool_risks: dict[str, str]  # {"delete_order": "critical", "adjust_schedule": "high"}
+
+@router.get("/api/mcp-servers/{name}/tools")
+async def list_mcp_tools(name: str, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
+    """连接 MCP 服务，返回已发现的所有工具列表（含当前 risk）。
+    供管理员查看后按需通过 tool-risks 接口配置风险等级。"""
+    from app.tools.mcp_adapter import mcp_registry, get_mcp_tools
+    from app.repositories.config_repo import McpServerRepository
+    from app.tools.risk import get_mcp_risk
+
+    if name not in mcp_registry.list():
+        raise HTTPException(404, "MCP 服务未注册")
+
+    # 连接 MCP 服务发现工具
+    raw_tools = await get_mcp_tools(name)
+
+    # 查风险配置
+    mcp_repo = McpServerRepository(db)
+    server = await mcp_repo.get(name)
+
+    return [
+        {
+            "name": t.name,
+            "description": t.description,
+            "risk": get_mcp_risk(t.name, server.default_risk, server.config),
+        }
+        for t in raw_tools
+    ]
+
+@router.put("/api/mcp-servers/{name}/tool-risks")
+async def update_tool_risks(name: str, body: ToolRisksUpdate, svc: ConfigService = Depends(get_config_service), _: User = Depends(get_current_user)):
+    """更新 MCP 服务的 config.tool_risks，覆盖特定工具的风险等级。
+    管理员先通过 GET .../tools 查看工具清单，再调用本接口配置风险。"""
+    return await svc.update_tool_risks(name, body.tool_risks)
+```
+
+- [ ] **步骤 7：同步更新子 agent 的 load_tools 调用**
+
+> 任务 27/28/38.5 中各子 agent 的 `load_tools(TOOL_NAMES, mcp_server_names)` 调用全部改为 `load_tools(db, TOOL_NAMES, mcp_server_names)`。以 marketing 为例：
+
+```python
+# backend/app/agents/marketing/agent.py 同步修改
+async def build_marketing_agent(db: AsyncSession):
+    mcp_server_names = await load_mcp_tools_by_agent(db, AGENT_CODE)
+    tools = await load_tools(db, TOOL_NAMES, mcp_server_names)  # 加 db 参数
+    # ... 其余不变 ...
+```
+
+> `sales_analysis/agent.py` 和 `scheduling/agent.py` 同理修改 `load_tools` 调用。
+
+- [ ] **步骤 8：生成迁移并运行测试**
+
+运行：`cd backend && alembic revision --autogenerate -m "add default_risk to mcp_servers" && alembic upgrade head && pytest tests/test_mcp_tool_risk.py tests/test_risk.py tests/test_agent_mcp_binding.py -v`
+预期：全部 PASS
+
+- [ ] **步骤 9：Commit**
+
+```bash
+git add backend/app backend/tests backend/alembic
+git commit -m "feat: MCP 工具风险等级动态配置（default_risk + config.tool_risks）"
 ```
 
 ---
@@ -4726,10 +5573,10 @@ git commit -m "feat: 前端骨架与登录页"
 
 ---
 
-### 任务 40：聊天界面（SSE 流式 + 会话列表 + HITL 审批浮层）
+### 任务 40：聊天界面（SSE 流式 + 会话列表 + 即时确认浮层）
 
 **文件：**
-- 创建：`frontend/src/views/Chat.vue`、`frontend/src/views/HitlPanel.vue`
+- 创建：`frontend/src/views/Chat.vue`、`frontend/src/views/ConfirmPanel.vue`
 - 创建：`frontend/src/api/chat.ts`
 
 - [ ] **步骤 1：编写 SSE 流式消费工具**
@@ -4817,39 +5664,41 @@ async function send() {
 </script>
 ```
 
-- [ ] **步骤 3：实现 HITL 审批浮层（轮询待办）**
+- [ ] **步骤 3：实现即时确认浮层（high 风险工具的 interrupt 确认）**
+
+> high 风险工具调用时 interrupt 冻结图，前端通过 SSE 事件收到需确认通知，弹窗让当班人即时确认。critical 风险工具不在此处理，而是进入审批中心（任务 42）。
 
 ```vue
-<!-- frontend/src/views/HitlPanel.vue -->
+<!-- frontend/src/views/ConfirmPanel.vue -->
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref } from 'vue'
 import client from '../api/client'
 
-const tasks = ref<any[]>([])
-let timer: number | undefined
+const visible = ref(false)
+const pending = ref<any>(null)
 
-onMounted(() => { timer = window.setInterval(load, 5000); load() })
-onUnmounted(() => window.clearInterval(timer))
+// 监听 SSE 事件中的 confirm_required 事件
+window.addEventListener('confirm_required', (e: any) => {
+  pending.value = e.detail
+  visible.value = true
+})
 
-async function load() {
-  const { data } = await client.get('/hitl/tasks')
-  tasks.value = data
-}
-
-async function decide(id: string, approved: boolean) {
-  await client.post(`/hitl/tasks/${id}/approve`, { approved })
-  load()
+async function decide(approved: boolean) {
+  // 通过 chat API 恢复图执行（传 resume 值）
+  await client.post('/chat/resume', { approved, thread_id: pending.value.thread_id })
+  visible.value = false
 }
 </script>
 
 <template>
-  <a-drawer v-model:open="true" title="待人工确认" placement="right">
-    <div v-for="t in tasks" :key="t.id" style="margin-bottom: 12px">
-      <p>{{ t.reason }}</p>
-      <a-button type="primary" @click="decide(t.id, true)">确认</a-button>
-      <a-button danger @click="decide(t.id, false)">驳回</a-button>
-    </div>
-  </a-drawer>
+  <a-modal v-model:open="visible" title="高风险操作确认" :closable="false">
+    <p>{{ pending?.reason }}</p>
+    <p>工具：{{ pending?.tool }} 参数：{{ JSON.stringify(pending?.args) }}</p>
+    <template #footer>
+      <a-button type="primary" @click="decide(true)">确认执行</a-button>
+      <a-button danger @click="decide(false)">驳回</a-button>
+    </template>
+  </a-modal>
 </template>
 ```
 
@@ -4862,7 +5711,7 @@ async function decide(id: string, approved: boolean) {
 
 ```bash
 git add frontend
-git commit -m "feat: 聊天界面（SSE 流式+会话+HITL 审批）"
+git commit -m "feat: 聊天界面（SSE 流式+会话+即时确认浮层）"
 ```
 
 ---
@@ -4938,24 +5787,25 @@ git commit -m "feat: 知识库管理与经验中心界面"
 
 ---
 
-### 任务 42：管理界面（阶段 3：组织架构 + 配置 + 监测）
+### 任务 42：管理界面（阶段 3：组织架构 + 配置 + 审批中心 + 监测）
 
 **文件：**
-- 创建：`frontend/src/views/Org.vue`、`frontend/src/views/Configs.vue`、`frontend/src/views/Traces.vue`
+- 创建：`frontend/src/views/Org.vue`、`frontend/src/views/Configs.vue`、`frontend/src/views/Approvals.vue`、`frontend/src/views/Traces.vue`
 
 - [ ] **步骤 1：组织架构页**：复用 `GET/POST /api/departments`、`/api/users`，部门列表 + 用户列表 + 新建部门表单
-- [ ] **步骤 2：配置页**：agent 列表 + 新建 agent 表单 + MCP 服务列表 + 新建 MCP 表单（调用任务 38 的 API）
-- [ ] **步骤 3：监测页**：`GET /api/traces` 列表 + 点击行展示 `GET /api/traces/{id}/events` 时间线（按 type 着色：route=蓝 / llm=紫 / tool=橙 / hitl=红）
-- [ ] **步骤 4：验证页面可交互**
+- [ ] **步骤 2：配置页**：MCP 服务列表 + 新建 MCP 表单（调用任务 38 的 API）；Agent MCP 绑定管理（调用任务 38.5 的 API，选择 agent → 查看/新增/移除 MCP 绑定）
+- [ ] **步骤 3：审批中心页**：`GET /api/approvals?status=pending` 列表，按 category 分组展示（工具调用 / 经验晋升），每条显示标题、类型、风险等级、发起人、提交时间；通过/驳回按钮 + 审批意见输入框，调用 `POST /api/approvals/{id}/decide`
+- [ ] **步骤 4：监测页**：`GET /api/traces` 列表 + 点击行展示 `GET /api/traces/{id}/events` 时间线（按 type 着色：route=蓝 / llm=紫 / tool=橙 / approval=红）
+- [ ] **步骤 5：验证页面可交互**
 
 运行：`cd frontend && npm run dev`
-预期：三页均能调用对应 API 并展示数据
+预期：四页均能调用对应 API 并展示数据
 
-- [ ] **步骤 5：Commit**
+- [ ] **步骤 6：Commit**
 
 ```bash
 git add frontend
-git commit -m "feat: 组织架构/配置/监测管理界面"
+git commit -m "feat: 组织架构/配置/审批中心/监测管理界面"
 ```
 
 ---
@@ -5019,10 +5869,11 @@ git commit -m "feat: docker-compose 联调与冒烟验证"
 | §4 数据库（全部表 + pgvector + Alembic） | 2, 3, 4, 5, 6 |
 | §5 子Agent子图（内部构建 ToolNode ReAct）嵌入父图 | 27, 28, 29, 33.5 |
 | §5 Agent 注册 / DataFacade / MCP / 风险 | 31, 32, 32.5, 37 |
-| §6 API（认证/聊天/HITL/知识/经验/组织/监测/配置） | 7, 7.5, 8, 10, 14, 15, 18, 23, 24, 33, 35, 38 |
-| §6 三层架构（router→service→repository） | 7.5（范式）+ 8, 10, 14, 15, 18, 23, 24, 33, 35, 38 |
+| §5 Agent MCP 绑定动态化 | 38.5 |
+| §6 API（认证/聊天/审批中心/知识/经验/组织/监测/配置） | 7, 7.5, 8, 10, 14, 15, 18, 23, 24, 35, 38, 38.5 |
+| §6 三层架构（router→service→repository） | 7.5（范式）+ 8, 10, 14, 15, 18, 23, 24, 35, 38, 38.5 |
 | §7 技术决策（异步/checkpoint/多模型/部署） | 1, 11, 36, 43 |
-| HITL interrupt | 32, 33 |
+| 风险分级 + 统一审批中心 | 31, 32, 32.5, 24 |
 | 前端三阶段 | 39, 40, 41, 42 |
 
 **2. 占位符扫描**：无 TODO/待定；任务 36 中 `... # 同任务 29` 为明确的复用指引（主图装配代码已在任务 29 完整给出）。
@@ -5031,7 +5882,7 @@ git commit -m "feat: docker-compose 联调与冒烟验证"
 - `AgentState` 统一在任务 14 定义；含 `pending_agent`、`tool_rounds` 字段
 - 记忆模块命名统一：`build_context`（短期）、`build_pref_context`（偏好，任务 20 中实际名为 `build_context`，任务 25 测试 mock 名为 `build_pref_context`——**执行时以 `app.memory.preferences.build_context` 为准**，任务 25 的 monkeypatch 目标需相应调整）
 - `embed_texts / embed_query` 在任务 16 定义，被 18/21/22/23 复用，签名一致
-- **物理外键约定**：全项目模型一律不使用 `ForeignKey`（任务 3/4/5/6/20 已按"逻辑外键"改写）——关联列用普通列 + `relationship(foreign_keys=...)`；访问 relationship 属性必须 `selectinload` 预加载（异步限制，任务 3/4/6/10 已加）
+- **物理外键约定**：全项目模型一律不使用 `ForeignKey`（任务 3/4/5/6/20 已按"逻辑外键"改写）——关联列用普通列 `String(36) + index`；不使用 relationship，关联查询在 repo/service 层用 id 手动查
 - **三层架构约定**（任务 7.5 范式）：`router` 只做参数校验并调用 service（薄层）；`service` 组合业务规则与多个 repository；`repository` 继承 `BaseRepository` 只做原子 CRUD。禁止在 router 中直接执行 SQL / 组装业务。已按此改造：任务 8/10/14/15/18/23/24/33/35/38
 
 **4. 执行顺序提示**：任务 25 的测试 monkeypatch 路径与任务 20 命名存在一处不一致（`build_pref_context` vs `build_context`），实现时以任务 20 的实际函数名为准修正测试。

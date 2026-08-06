@@ -1,0 +1,953 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>配置中心</title>
+    <style id="theme-vars">
+/* @dark-only */
+/* TikTok color and type tokens */
+/* Source: structured-spec */
+
+:root {
+  
+  /* solo-design consumption aliases: explicit prefix for fill-html-head.mjs */
+  --tk-background: var(--background, #ffffff);
+  --tk-foreground: var(--foreground, #0f172a);
+  --tk-card: var(--card, var(--background));
+  --tk-card-foreground: var(--card-foreground, var(--foreground));
+  --tk-popover: var(--popover, var(--card));
+  --tk-popover-foreground: var(--popover-foreground, var(--card-foreground, var(--foreground)));
+  --tk-primary: var(--primary, #111827);
+  --tk-primary-foreground: var(--primary-foreground, #ffffff);
+  --tk-secondary: var(--secondary, var(--muted, var(--card)));
+  --tk-secondary-foreground: var(--secondary-foreground, var(--foreground));
+  --tk-muted: var(--muted, var(--card));
+  --tk-muted-foreground: var(--muted-foreground, var(--foreground));
+  --tk-accent: var(--accent, var(--secondary, var(--muted, var(--card))));
+  --tk-accent-foreground: var(--accent-foreground, var(--foreground));
+  --tk-destructive: var(--destructive, #ef4444);
+  --tk-destructive-foreground: var(--destructive-foreground, #ffffff);
+  --tk-border: var(--border, currentColor);
+  --tk-input: var(--input, var(--border));
+  --tk-ring: var(--ring, var(--primary));
+  --tk-chart-1: var(--chart-1, var(--primary));
+  --tk-chart-2: var(--chart-2, var(--secondary, var(--primary)));
+  --tk-chart-3: var(--chart-3, var(--accent, var(--primary)));
+  --tk-chart-4: var(--chart-4, var(--muted-foreground, var(--foreground)));
+  --tk-chart-5: var(--chart-5, var(--foreground));
+  --tk-sidebar: var(--sidebar, var(--background));
+  --tk-sidebar-foreground: var(--sidebar-foreground, var(--foreground));
+  --tk-sidebar-primary: var(--sidebar-primary, var(--primary));
+  --tk-sidebar-primary-foreground: var(--sidebar-primary-foreground, var(--primary-foreground));
+  --tk-sidebar-accent: var(--sidebar-accent, var(--accent, var(--muted, var(--card))));
+  --tk-sidebar-accent-foreground: var(--sidebar-accent-foreground, var(--accent-foreground, var(--foreground)));
+
+/* Source: structured-spec */
+  /* Brand colors */
+  /* --tk-red: #FE2C55;
+  --tk-cyan: #25F4EE;
+  --tk-black: #161823;
+  --tk-white: #FFFFFF; */
+
+  /* tk-red scale · 默认 --tk-red-500 = #FE2C55 */
+  --tk-red-100: #FFE9EE;
+  --tk-red-200: #FFC9D5;
+  --tk-red-300: #FFA0B5;
+  --tk-red-400: #FF6485;
+  --tk-red-500: #FE2C55;
+  --tk-red-600: #E61E45;
+  --tk-red-700: #C01338;
+  --tk-red-800: #990C2B;
+  --tk-red-900: #6B061D;
+  --tk-red-1000: #3D0210;
+
+  /* tk-cyan scale · 默认 --tk-cyan-400 = #25F4EE */
+  --tk-cyan-100: #E3FEFD;
+  --tk-cyan-200: #BAFCFA;
+  --tk-cyan-300: #7CF8F4;
+  --tk-cyan-400: #25F4EE;
+  --tk-cyan-500: #14D6D0;
+  --tk-cyan-600: #0FB3AE;
+  --tk-cyan-700: #0C8F8B;
+  --tk-cyan-800: #086B68;
+  --tk-cyan-900: #054745;
+  --tk-cyan-1000: #022322;
+
+  /* tk-black scale · 默认 --tk-black-1000 = #161823 */
+  --tk-black-100: #EBEBED;
+  --tk-black-200: #D2D3D7;
+  --tk-black-300: #ABACB4;
+  --tk-black-400: #84868F;
+  --tk-black-500: #5D5F6B;
+  --tk-black-600: #44454F;
+  --tk-black-700: #313340;
+  --tk-black-800: #232533;
+  --tk-black-900: #1B1D29;
+  --tk-black-1000: #161823;
+
+  /* tk-white scale · 默认 --tk-white-100 = #FFFFFF */
+  --tk-white-100: #FFFFFF;
+  --tk-white-200: #FAFAFB;
+  --tk-white-300: #F2F2F4;
+  --tk-white-400: #E8E8EC;
+  --tk-white-500: #DCDCE2;
+  --tk-white-600: #C9C9D1;
+  --tk-white-700: #ABABB5;
+  --tk-white-800: #87878F;
+  --tk-white-900: #5E5E66;
+  --tk-white-1000: #36363B;
+
+  /* Brand · 品牌强调色（红主青辅，小面积高识别） */
+  --primary: #FE2C55;
+  --secondary: #25F4EE;
+
+  /* Surface · 表面层级 */
+  --background: #0B0B10;
+  --card: #161823;
+  --card-elevated: #1C1E2A;
+  --video-bg: #16161C;
+
+  /* Content · 前景内容（on-media/on-accent 为深底或强调底上的固定前景） */
+  --foreground: #F5F5F7;
+  --muted-foreground: #AEB2C0;
+  --on-media: #FFFFFF;
+  --on-accent: #161823;
+
+  /* Border · 分隔线 */
+  --border: #3A3D52;
+
+  /* Radius · 克制、偏利落的圆角语言 */
+  /* shell 仅用于 UI Kit 展示外壳；大多数真实产品容器以 sm / md / lg 为主 */
+  --radius-xs: 2px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-shell: 32px;
+  --radius-pill: 999px;
+
+  /* Success · 成功状态 */
+  --success: #10B981;
+  --success-bg: #0E2A22;
+  --success-fg: #34D399;
+
+  /* Error · 错误状态 */
+  --destructive: #E5484D;
+  --error-bg: #2E1416;
+  --error-fg: #FF6485;
+
+  /* Type families */
+  --font-display: Inter, "TikTok Display", ui-sans-serif, sans-serif;
+  --font-sans: Inter, "TikTok Sans", ui-sans-serif, sans-serif;
+  --font-serif: Georgia, Times, serif;
+  --font-mono: "JetBrains Mono", monospace;
+
+  /* Type metrics */
+  --display-size: clamp(48px, 7vw, 96px);
+  --display-weight: 600-700;
+  --display-line-height: 0.95;
+  --display-letter-spacing: -0.02em;
+  --h2-size: 28-32;
+  --h2-weight: 600;
+  --h2-line-height: 1.15;
+  --h3-size: 18-20;
+  --h3-weight: 600;
+  --h3-line-height: 1.3;
+  --body-size: 14-15;
+  --body-weight: 400;
+  --body-line-height: 1.6;
+  --kicker-size: 11;
+  --kicker-weight: 400;
+  --kicker-letter-spacing: 0.14em;
+  --kicker-text-transform: uppercase;
+}
+
+/* Semantic radius aliases for solo-design head contract */
+:root {
+  --tk-radius-sm: var(--radius-sm, 6px);
+  --tk-radius-md: var(--radius-md, 8px);
+  --tk-radius-lg: var(--radius-lg, 12px);
+  --tk-radius-xl: var(--radius-xl, 16px);
+}
+
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.1/dist/index.global.js"></script>
+    <script src="https://unpkg.com/lucide@1.8.0/dist/umd/lucide.min.js"></script>
+    <style type="text/tailwindcss">
+  @theme inline {
+    --color-background: var(--tk-background);
+    --color-foreground: var(--tk-foreground);
+    --color-card: var(--tk-card);
+    --color-card-foreground: var(--tk-card-foreground);
+    --color-popover: var(--tk-popover);
+    --color-popover-foreground: var(--tk-popover-foreground);
+    --color-primary: var(--tk-primary);
+    --color-primary-foreground: var(--tk-primary-foreground);
+    --color-secondary: var(--tk-secondary);
+    --color-secondary-foreground: var(--tk-secondary-foreground);
+    --color-muted: var(--tk-muted);
+    --color-muted-foreground: var(--tk-muted-foreground);
+    --color-accent: var(--tk-accent);
+    --color-accent-foreground: var(--tk-accent-foreground);
+    --color-destructive: var(--tk-destructive);
+    --color-destructive-foreground: var(--tk-destructive-foreground);
+    --color-border: var(--tk-border);
+    --color-input: var(--tk-input);
+    --color-ring: var(--tk-ring);
+    --color-chart-1: var(--tk-chart-1);
+    --color-chart-2: var(--tk-chart-2);
+    --color-chart-3: var(--tk-chart-3);
+    --color-chart-4: var(--tk-chart-4);
+    --color-chart-5: var(--tk-chart-5);
+    --color-sidebar: var(--tk-sidebar);
+    --color-sidebar-foreground: var(--tk-sidebar-foreground);
+    --color-sidebar-primary: var(--tk-sidebar-primary);
+    --color-sidebar-primary-foreground: var(--tk-sidebar-primary-foreground);
+    --color-sidebar-accent: var(--tk-sidebar-accent);
+    --color-sidebar-accent-foreground: var(--tk-sidebar-accent-foreground);
+    --radius-sm: var(--tk-radius-sm);
+    --radius-md: var(--tk-radius-md);
+    --radius-lg: var(--tk-radius-lg);
+    --radius-xl: var(--tk-radius-xl);
+  }
+  @layer base {
+    body { background: var(--tk-background); color: var(--tk-foreground); }
+    td, th { @apply break-words; word-break: break-all; word-break: auto-phrase; }
+    th { @apply whitespace-nowrap; }
+  }
+    </style>
+    <style id="semantic-token-fallback">
+      .bg-background { background-color: var(--tk-background); }
+      .text-background { color: var(--tk-background); }
+      .border-background { border-color: var(--tk-background); }
+      .ring-background { --tw-ring-color: var(--tk-background); }
+      .bg-foreground { background-color: var(--tk-foreground); }
+      .text-foreground { color: var(--tk-foreground); }
+      .border-foreground { border-color: var(--tk-foreground); }
+      .ring-foreground { --tw-ring-color: var(--tk-foreground); }
+      .bg-card { background-color: var(--tk-card); }
+      .text-card { color: var(--tk-card); }
+      .border-card { border-color: var(--tk-card); }
+      .ring-card { --tw-ring-color: var(--tk-card); }
+      .bg-card-foreground { background-color: var(--tk-card-foreground); }
+      .text-card-foreground { color: var(--tk-card-foreground); }
+      .border-card-foreground { border-color: var(--tk-card-foreground); }
+      .ring-card-foreground { --tw-ring-color: var(--tk-card-foreground); }
+      .bg-popover { background-color: var(--tk-popover); }
+      .text-popover { color: var(--tk-popover); }
+      .border-popover { border-color: var(--tk-popover); }
+      .ring-popover { --tw-ring-color: var(--tk-popover); }
+      .bg-popover-foreground { background-color: var(--tk-popover-foreground); }
+      .text-popover-foreground { color: var(--tk-popover-foreground); }
+      .border-popover-foreground { border-color: var(--tk-popover-foreground); }
+      .ring-popover-foreground { --tw-ring-color: var(--tk-popover-foreground); }
+      .bg-primary { background-color: var(--tk-primary); }
+      .text-primary { color: var(--tk-primary); }
+      .border-primary { border-color: var(--tk-primary); }
+      .ring-primary { --tw-ring-color: var(--tk-primary); }
+      .bg-primary-foreground { background-color: var(--tk-primary-foreground); }
+      .text-primary-foreground { color: var(--tk-primary-foreground); }
+      .border-primary-foreground { border-color: var(--tk-primary-foreground); }
+      .ring-primary-foreground { --tw-ring-color: var(--tk-primary-foreground); }
+      .bg-secondary { background-color: var(--tk-secondary); }
+      .text-secondary { color: var(--tk-secondary); }
+      .border-secondary { border-color: var(--tk-secondary); }
+      .ring-secondary { --tw-ring-color: var(--tk-secondary); }
+      .bg-secondary-foreground { background-color: var(--tk-secondary-foreground); }
+      .text-secondary-foreground { color: var(--tk-secondary-foreground); }
+      .border-secondary-foreground { border-color: var(--tk-secondary-foreground); }
+      .ring-secondary-foreground { --tw-ring-color: var(--tk-secondary-foreground); }
+      .bg-muted { background-color: var(--tk-muted); }
+      .text-muted { color: var(--tk-muted); }
+      .border-muted { border-color: var(--tk-muted); }
+      .ring-muted { --tw-ring-color: var(--tk-muted); }
+      .bg-muted-foreground { background-color: var(--tk-muted-foreground); }
+      .text-muted-foreground { color: var(--tk-muted-foreground); }
+      .border-muted-foreground { border-color: var(--tk-muted-foreground); }
+      .ring-muted-foreground { --tw-ring-color: var(--tk-muted-foreground); }
+      .bg-accent { background-color: var(--tk-accent); }
+      .text-accent { color: var(--tk-accent); }
+      .border-accent { border-color: var(--tk-accent); }
+      .ring-accent { --tw-ring-color: var(--tk-accent); }
+      .bg-accent-foreground { background-color: var(--tk-accent-foreground); }
+      .text-accent-foreground { color: var(--tk-accent-foreground); }
+      .border-accent-foreground { border-color: var(--tk-accent-foreground); }
+      .ring-accent-foreground { --tw-ring-color: var(--tk-accent-foreground); }
+      .bg-destructive { background-color: var(--tk-destructive); }
+      .text-destructive { color: var(--tk-destructive); }
+      .border-destructive { border-color: var(--tk-destructive); }
+      .ring-destructive { --tw-ring-color: var(--tk-destructive); }
+      .bg-destructive-foreground { background-color: var(--tk-destructive-foreground); }
+      .text-destructive-foreground { color: var(--tk-destructive-foreground); }
+      .border-destructive-foreground { border-color: var(--tk-destructive-foreground); }
+      .ring-destructive-foreground { --tw-ring-color: var(--tk-destructive-foreground); }
+      .bg-border { background-color: var(--tk-border); }
+      .text-border { color: var(--tk-border); }
+      .border-border { border-color: var(--tk-border); }
+      .ring-border { --tw-ring-color: var(--tk-border); }
+      .bg-input { background-color: var(--tk-input); }
+      .text-input { color: var(--tk-input); }
+      .border-input { border-color: var(--tk-input); }
+      .ring-input { --tw-ring-color: var(--tk-input); }
+      .bg-ring { background-color: var(--tk-ring); }
+      .text-ring { color: var(--tk-ring); }
+      .border-ring { border-color: var(--tk-ring); }
+      .ring-ring { --tw-ring-color: var(--tk-ring); }
+      .bg-chart-1 { background-color: var(--tk-chart-1); }
+      .text-chart-1 { color: var(--tk-chart-1); }
+      .border-chart-1 { border-color: var(--tk-chart-1); }
+      .ring-chart-1 { --tw-ring-color: var(--tk-chart-1); }
+      .bg-chart-2 { background-color: var(--tk-chart-2); }
+      .text-chart-2 { color: var(--tk-chart-2); }
+      .border-chart-2 { border-color: var(--tk-chart-2); }
+      .ring-chart-2 { --tw-ring-color: var(--tk-chart-2); }
+      .bg-chart-3 { background-color: var(--tk-chart-3); }
+      .text-chart-3 { color: var(--tk-chart-3); }
+      .border-chart-3 { border-color: var(--tk-chart-3); }
+      .ring-chart-3 { --tw-ring-color: var(--tk-chart-3); }
+      .bg-chart-4 { background-color: var(--tk-chart-4); }
+      .text-chart-4 { color: var(--tk-chart-4); }
+      .border-chart-4 { border-color: var(--tk-chart-4); }
+      .ring-chart-4 { --tw-ring-color: var(--tk-chart-4); }
+      .bg-chart-5 { background-color: var(--tk-chart-5); }
+      .text-chart-5 { color: var(--tk-chart-5); }
+      .border-chart-5 { border-color: var(--tk-chart-5); }
+      .ring-chart-5 { --tw-ring-color: var(--tk-chart-5); }
+      .bg-sidebar { background-color: var(--tk-sidebar); }
+      .text-sidebar { color: var(--tk-sidebar); }
+      .border-sidebar { border-color: var(--tk-sidebar); }
+      .ring-sidebar { --tw-ring-color: var(--tk-sidebar); }
+      .bg-sidebar-foreground { background-color: var(--tk-sidebar-foreground); }
+      .text-sidebar-foreground { color: var(--tk-sidebar-foreground); }
+      .border-sidebar-foreground { border-color: var(--tk-sidebar-foreground); }
+      .ring-sidebar-foreground { --tw-ring-color: var(--tk-sidebar-foreground); }
+      .bg-sidebar-primary { background-color: var(--tk-sidebar-primary); }
+      .text-sidebar-primary { color: var(--tk-sidebar-primary); }
+      .border-sidebar-primary { border-color: var(--tk-sidebar-primary); }
+      .ring-sidebar-primary { --tw-ring-color: var(--tk-sidebar-primary); }
+      .bg-sidebar-primary-foreground { background-color: var(--tk-sidebar-primary-foreground); }
+      .text-sidebar-primary-foreground { color: var(--tk-sidebar-primary-foreground); }
+      .border-sidebar-primary-foreground { border-color: var(--tk-sidebar-primary-foreground); }
+      .ring-sidebar-primary-foreground { --tw-ring-color: var(--tk-sidebar-primary-foreground); }
+      .bg-sidebar-accent { background-color: var(--tk-sidebar-accent); }
+      .text-sidebar-accent { color: var(--tk-sidebar-accent); }
+      .border-sidebar-accent { border-color: var(--tk-sidebar-accent); }
+      .ring-sidebar-accent { --tw-ring-color: var(--tk-sidebar-accent); }
+      .bg-sidebar-accent-foreground { background-color: var(--tk-sidebar-accent-foreground); }
+      .text-sidebar-accent-foreground { color: var(--tk-sidebar-accent-foreground); }
+      .border-sidebar-accent-foreground { border-color: var(--tk-sidebar-accent-foreground); }
+      .ring-sidebar-accent-foreground { --tw-ring-color: var(--tk-sidebar-accent-foreground); }
+    </style>
+    <style>
+      .no-scrollbar::-webkit-scrollbar { display: none; }
+      .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+      [data-icon] {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        -webkit-mask-size: contain;
+        mask-size: contain;
+        -webkit-mask-repeat: no-repeat;
+        mask-repeat: no-repeat;
+        -webkit-mask-position: center;
+        mask-position: center;
+        background-color: currentColor;
+      }
+    </style>
+</head>
+<body class="font-sans antialiased">
+    <main>
+<style id="critical-layout">
+  /* ===== App Shell · critical layout (static, no Tailwind dependency) ===== */
+  html, body { margin: 0; padding: 0; background: var(--background); color: var(--foreground); font-family: var(--font-sans); }
+  .app-shell { display: flex; height: 100vh; overflow: hidden; background: var(--background); }
+  .app-sidebar { width: 232px; flex-shrink: 0; display: flex; flex-direction: column; background: var(--video-bg); border-right: 1px solid var(--border); }
+  .app-main-col { flex: 1; min-width: 0; display: flex; flex-direction: column; height: 100vh; }
+  .app-topbar { height: 56px; flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 20px; border-bottom: 1px solid var(--border); background: var(--background); }
+  .app-content { flex: 1; min-height: 0; overflow-y: auto; }
+  .brand-block { display: flex; align-items: center; gap: 10px; height: 56px; padding: 0 16px; text-decoration: none; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+  .brand-mark { width: 28px; height: 28px; border-radius: var(--radius-md); background: var(--primary); color: var(--primary-foreground); display: inline-flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 700; flex-shrink: 0; }
+  .brand-name { color: var(--foreground); font-size: 14px; font-weight: 600; line-height: 1.1; letter-spacing: 0.01em; }
+  .brand-sub { display: block; color: var(--muted-foreground); font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase; margin-top: 3px; }
+  .sidebar-nav { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 10px 8px; }
+  .nav-label { margin: 0 10px 6px; font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted-foreground); opacity: 0.85; }
+  .nav-label + .nav-label { margin-top: 14px; }
+  .nav-item { display: flex; align-items: center; gap: 10px; height: 38px; padding: 0 10px; border-radius: var(--radius-md); color: var(--muted-foreground); font-size: 13.5px; text-decoration: none; transition: background-color 0.18s ease, color 0.18s ease; }
+  .nav-item:hover, .nav-item:focus-visible { color: var(--foreground); background: var(--card); outline: none; }
+  .nav-item[data-active="true"] { background: var(--card-elevated); color: var(--foreground); font-weight: 600; }
+  .nav-item[data-active="true"] .nav-icon-dot { display: inline-block; }
+  .nav-icon-dot { display: none; width: 6px; height: 6px; border-radius: 999px; background: var(--primary); margin-left: auto; }
+  .sidebar-foot { flex-shrink: 0; padding: 10px; border-top: 1px solid var(--border); }
+  .topbar-title { display: flex; align-items: baseline; gap: 12px; min-width: 0; }
+  .topbar-kicker { margin: 0; font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted-foreground); }
+  .topbar-heading { margin: 0; font-size: 16px; font-weight: 600; color: var(--foreground); letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .topbar-actions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+  .icon-btn { position: relative; width: 34px; height: 34px; border-radius: var(--radius-md); border: 1px solid var(--border); background: var(--card); color: var(--muted-foreground); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; transition: color 0.18s ease, border-color 0.18s ease; }
+  .icon-btn:hover, .icon-btn:focus-visible { color: var(--foreground); border-color: var(--muted-foreground); outline: none; }
+  .dot-badge { position: absolute; top: -3px; right: -3px; min-width: 15px; height: 15px; padding: 0 4px; border-radius: 999px; background: var(--primary); color: var(--primary-foreground); font-size: 9px; font-weight: 700; line-height: 15px; text-align: center; border: 2px solid var(--background); }
+  .avatar-sm { width: 30px; height: 30px; border-radius: 999px; background: var(--tk-red-700); color: var(--primary-foreground); display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; }
+  .kicker { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted-foreground); }
+  .app-content::-webkit-scrollbar, .sidebar-nav::-webkit-scrollbar, .panel-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
+  .app-content::-webkit-scrollbar-thumb, .sidebar-nav::-webkit-scrollbar-thumb, .panel-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 999px; }
+  .app-content::-webkit-scrollbar-track, .sidebar-nav::-webkit-scrollbar-track, .panel-scroll::-webkit-scrollbar-track { background: transparent; }
+  @media (max-width: 1024px) {
+    .app-sidebar { width: 64px; }
+    .brand-text, .nav-label, .nav-item span:not([data-icon]) { display: none; }
+    .nav-item { justify-content: center; padding: 0; }
+    .nav-icon-dot { margin-left: 0; position: absolute; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .nav-item, .icon-btn { transition: none; }
+  }
+</style>
+<div class="app-shell" data-viewport-mode="app-shell">
+  <aside class="app-sidebar">
+    <a class="brand-block" href="#" data-dom-id="brand-chat" aria-label="云书 Agent 首页">
+      <span class="brand-mark">云</span>
+      <span class="brand-text">
+        <span class="brand-name">云书 Agent</span>
+        <span class="brand-sub">Multi-Agent Platform</span>
+      </span>
+    </a>
+    <nav class="sidebar-nav" aria-label="主导航">
+      <p class="nav-label">核心工作</p>
+      <a class="nav-item" data-nav-key="chat" data-dom-id="nav-chat" href="#" aria-current="false">
+        <span data-icon="chat-circle" style="width:18px;height:18px;mask-image:url(../assets/icons/dl_builtin_tik_tok/chat-circle.svg);flex-shrink:0"></span>
+        <span>聊天工作台</span>
+      </a>
+      <a class="nav-item" data-nav-key="knowledge" data-dom-id="nav-knowledge" href="#" aria-current="false">
+        <span data-icon="bookmark-simple" style="width:18px;height:18px;mask-image:url(../assets/icons/dl_builtin_tik_tok/bookmark-simple.svg);flex-shrink:0"></span>
+        <span>知识库</span>
+      </a>
+      <a class="nav-item" data-nav-key="experience" data-dom-id="nav-experience" href="#" aria-current="false">
+        <span data-icon="share-fat" style="width:18px;height:18px;mask-image:url(../assets/icons/dl_builtin_tik_tok/share-fat.svg);flex-shrink:0"></span>
+        <span>经验中心</span>
+      </a>
+      <p class="nav-label">组织与治理</p>
+      <a class="nav-item" data-nav-key="approval" data-dom-id="nav-approval" href="#" aria-current="false">
+        <i data-lucide="clipboard-check" style="width:18px;height:18px;flex-shrink:0"></i>
+        <span>审批中心</span>
+        <span class="nav-icon-dot"></span>
+      </a>
+      <a class="nav-item" data-nav-key="org" data-dom-id="nav-org" href="#" aria-current="false">
+        <span data-icon="user" style="width:18px;height:18px;mask-image:url(../assets/icons/dl_builtin_tik_tok/user.svg);flex-shrink:0"></span>
+        <span>组织架构</span>
+      </a>
+      <a class="nav-item" data-nav-key="config" data-active="true" data-dom-id="nav-config" href="#" aria-current="page">
+        <span data-icon="gear" style="width:18px;height:18px;mask-image:url(../assets/icons/dl_builtin_tik_tok/gear.svg);flex-shrink:0"></span>
+        <span>配置中心</span>
+      </a>
+      <a class="nav-item" data-nav-key="monitor" data-dom-id="nav-monitor" href="#" aria-current="false">
+        <span data-icon="play" style="width:18px;height:18px;mask-image:url(../assets/icons/dl_builtin_tik_tok/play.svg);flex-shrink:0"></span>
+        <span>监测中心</span>
+      </a>
+    </nav>
+    <div class="sidebar-foot">
+      <div style="display:flex;align-items:center;gap:10px;padding:4px 6px;">
+        <span class="avatar-sm">晚</span>
+        <div style="flex:1;min-width:0;">
+          <p style="margin:0;font-size:13px;font-weight:600;color:var(--foreground);line-height:1.2;">林晚晴</p>
+          <p style="margin:2px 0 0;font-size:11px;color:var(--muted-foreground);line-height:1.2;">市场总监 · 运营</p>
+        </div>
+        <button class="icon-btn" type="button" style="width:28px;height:28px;" aria-label="账户设置">
+          <i data-lucide="settings" style="width:15px;height:15px;"></i>
+        </button>
+      </div>
+    </div>
+  </aside>
+  <div class="app-main-col">
+    <header class="app-topbar">
+      <div class="topbar-title">
+        <p class="topbar-kicker" data-slot="topbar-kicker">SYSTEM CONFIG</p>
+        <h1 class="topbar-heading" data-slot="topbar-heading">配置中心</h1>
+      </div>
+      <div class="topbar-actions">
+        <button class="icon-btn" type="button" data-dom-id="top-approval" aria-label="审批中心，2 个待办">
+          <i data-lucide="bell" style="width:17px;height:17px;"></i>
+          <span class="dot-badge">2</span>
+        </button>
+        <span class="avatar-sm" aria-label="当前用户头像">晚</span>
+      </div>
+    </header>
+    <div class="app-content overflow-y-auto" data-slot="page-content" data-scroll-region="primary" role="region" aria-label="页面内容">
+      <style id="critical-layout">
+        /* ===== 配置中心 · critical layout (static, no Tailwind dependency) ===== */
+        .cfg-page { max-width: 1180px; margin: 0 auto; padding: 20px 24px 40px; }
+
+        /* Tabs · top-tab component (from dl_builtin_tik_tok) */
+        .cfg-tabs { display: flex; gap: 18px; align-items: center; }
+        .cfg-tab { position: relative; border: 0; background: none; padding: 0 0 8px; color: color-mix(in srgb, var(--foreground) 70%, transparent); font: 400 15px/1.2 var(--font-sans); cursor: pointer; transition: color 0.18s ease; }
+        .cfg-tab:hover, .cfg-tab:focus-visible { color: var(--secondary); outline: none; }
+        .cfg-tab.active { color: var(--foreground); font-weight: 600; }
+        .cfg-tab.active::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 1px; background: var(--primary); }
+
+        /* Sections / panels */
+        .cfg-section + .cfg-section { margin-top: 24px; }
+        .cfg-panel { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; }
+
+        /* Tool row */
+        .cfg-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 16px; }
+        .cfg-search { position: relative; display: flex; align-items: center; }
+        .cfg-search i, .cfg-search .lucide { position: absolute; left: 10px; width: 15px; height: 15px; color: var(--muted-foreground); pointer-events: none; }
+        .cfg-search-input { width: 280px; height: 34px; padding: 0 12px 0 32px; border-radius: var(--radius-md); border: 1px solid var(--border); background: var(--card); color: var(--foreground); font-size: 13px; font-family: var(--font-sans); transition: border-color 0.18s ease, background-color 0.18s ease; }
+        .cfg-search-input::placeholder { color: var(--muted-foreground); }
+
+        /* Buttons */
+        .cfg-btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: 34px; padding: 0 14px; border-radius: var(--radius-md); border: 0; font-size: 13px; font-weight: 600; font-family: var(--font-sans); cursor: pointer; white-space: nowrap; transition: background-color 0.18s ease, color 0.18s ease, opacity 0.18s ease; }
+        .cfg-btn-primary { background: var(--primary); color: var(--on-accent); }
+        .cfg-btn-primary:hover, .cfg-btn-primary:focus-visible { background: var(--tk-red-600); outline: none; }
+        .cfg-btn-primary:active { opacity: 0.85; }
+        .cfg-btn-sm { height: 30px; padding: 0 12px; font-size: 12px; }
+        .cfg-btn-ghost { display: inline-flex; align-items: center; justify-content: center; gap: 5px; height: 28px; padding: 0 10px; border-radius: var(--radius-md); border: 1px solid var(--border); background: transparent; color: var(--muted-foreground); font-size: 12px; font-family: var(--font-sans); cursor: pointer; white-space: nowrap; transition: color 0.18s ease, border-color 0.18s ease, background-color 0.18s ease; }
+        .cfg-btn-ghost:hover, .cfg-btn-ghost:focus-visible { color: var(--foreground); border-color: var(--muted-foreground); background: var(--card-elevated); outline: none; }
+        .cfg-icon-btn { width: 28px; height: 28px; border-radius: var(--radius-md); border: 0; background: transparent; color: var(--muted-foreground); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; transition: color 0.18s ease, background-color 0.18s ease; }
+        .cfg-icon-btn:hover, .cfg-icon-btn:focus-visible { color: var(--foreground); background: var(--card-elevated); outline: none; }
+
+        /* Tables */
+        .cfg-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        .cfg-table thead th { font-family: var(--font-mono); font-size: 10px; font-weight: 400; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted-foreground); text-align: left; padding: 10px 16px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+        .cfg-table tbody td { padding: 12px 16px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+        .cfg-table tbody tr:last-child td { border-bottom: 0; }
+        .cfg-table tbody tr { transition: background-color 0.18s ease; }
+        .cfg-table tbody tr:hover { background: var(--card-elevated); }
+
+        .cfg-agent-line { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+        .cfg-agent-code { font-family: var(--font-mono); font-size: 12px; font-weight: 600; color: var(--foreground); }
+        .cfg-agent-name { font-size: 13px; font-weight: 600; color: var(--foreground); white-space: nowrap; }
+        .cfg-agent-name .cfg-tag { color: var(--muted-foreground); font-weight: 400; }
+        .cfg-agent-desc { margin: 2px 0 0; font-size: 12px; color: var(--muted-foreground); }
+
+        /* Toggle switch */
+        .cfg-status { display: flex; align-items: center; gap: 8px; font-size: 12px; white-space: nowrap; }
+        .cfg-status-on { color: var(--success-fg); }
+        .cfg-status-off { color: var(--muted-foreground); }
+        .cfg-toggle { position: relative; width: 34px; height: 18px; border-radius: var(--radius-pill); border: 0; padding: 0; background: var(--card-elevated); cursor: pointer; flex-shrink: 0; transition: background-color 0.18s ease; }
+        .cfg-toggle-on { background: var(--success); }
+        .cfg-toggle-knob { position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: var(--radius-pill); background: var(--on-media); transition: transform 0.18s ease; }
+        .cfg-toggle-on .cfg-toggle-knob { transform: translateX(16px); }
+        .cfg-toggle:focus-visible { outline: 2px solid var(--secondary); outline-offset: 2px; }
+
+        .cfg-model { font-family: var(--font-mono); font-size: 12px; color: var(--foreground); white-space: nowrap; }
+        .cfg-model-ctx { color: var(--muted-foreground); }
+        .cfg-time { font-size: 12px; color: var(--muted-foreground); white-space: nowrap; }
+        .cfg-ops { display: flex; align-items: center; gap: 6px; justify-content: flex-end; }
+
+        /* Inline new-agent form */
+        .cfg-form-panel { padding: 20px; }
+        .cfg-form-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 14px; }
+        .cfg-form-title { margin: 0; font-size: 14px; font-weight: 600; color: var(--foreground); }
+        .cfg-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+        .cfg-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+        .cfg-field-wide { grid-column: 1 / -1; }
+        .cfg-field-label { font-size: 12px; color: var(--muted-foreground); }
+        .cfg-input { width: 100%; height: 34px; padding: 0 12px; border-radius: var(--radius-md); border: 1px solid var(--border); background: var(--video-bg); color: var(--foreground); font-size: 13px; font-family: var(--font-sans); box-sizing: border-box; transition: border-color 0.18s ease, background-color 0.18s ease; }
+        textarea.cfg-input { height: auto; min-height: 56px; padding: 8px 12px; line-height: 1.5; resize: vertical; }
+        .cfg-input::placeholder { color: var(--muted-foreground); }
+        .cfg-input:focus { outline: none; border-color: var(--secondary); background: var(--card-elevated); }
+        .cfg-input:focus-visible { outline: 2px solid color-mix(in srgb, var(--secondary) 55%, transparent); outline-offset: 1px; }
+        .cfg-select { position: relative; display: block; }
+        .cfg-select select { width: 100%; height: 34px; padding: 0 30px 0 12px; border-radius: var(--radius-md); border: 1px solid var(--border); background: var(--video-bg); color: var(--foreground); font-size: 13px; font-family: var(--font-sans); box-sizing: border-box; appearance: none; -webkit-appearance: none; cursor: pointer; transition: border-color 0.18s ease, background-color 0.18s ease; }
+        .cfg-select i, .cfg-select .lucide { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); width: 14px; height: 14px; color: var(--muted-foreground); pointer-events: none; }
+        .cfg-select select:focus { outline: none; border-color: var(--secondary); background: var(--card-elevated); }
+        .cfg-select select:focus-visible { outline: 2px solid color-mix(in srgb, var(--secondary) 55%, transparent); outline-offset: 1px; }
+        .cfg-select option { background: var(--card-elevated); color: var(--foreground); }
+        .cfg-search-input:focus { outline: none; border-color: var(--secondary); background: var(--card-elevated); }
+        .cfg-search-input:focus-visible { outline: 2px solid color-mix(in srgb, var(--secondary) 55%, transparent); outline-offset: 1px; }
+
+        /* Checkbox rows · 记忆开关 */
+        .cfg-check-list { display: flex; flex-direction: column; gap: 8px; padding-top: 2px; }
+        .cfg-check { position: relative; display: inline-flex; align-items: center; gap: 8px; min-height: 18px; font-size: 13px; color: var(--foreground); cursor: pointer; }
+        .cfg-check input { position: absolute; opacity: 0; width: 0; height: 0; }
+        .cfg-checkbox { display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--video-bg); flex-shrink: 0; transition: background-color 0.18s ease, border-color 0.18s ease; }
+        .cfg-checkbox i, .cfg-checkbox svg { display: none; width: 10px; height: 10px; color: var(--on-accent); }
+        .cfg-check input:checked + .cfg-checkbox { background: var(--primary); border-color: var(--primary); }
+        .cfg-check input:checked + .cfg-checkbox svg { display: block; }
+        .cfg-check input:focus-visible + .cfg-checkbox { outline: 2px solid var(--secondary); outline-offset: 1px; }
+        .cfg-check:hover .cfg-checkbox { border-color: var(--muted-foreground); }
+
+        .cfg-form-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
+        .cfg-form-actions .cfg-btn-ghost { height: 34px; padding: 0 14px; font-size: 13px; }
+
+        /* Panel spacing */
+        .cfg-toolbar + .cfg-panel, .cfg-panel + .cfg-panel { margin-top: 12px; }
+        .cfg-col-ops { text-align: right; }
+
+        /* MCP 服务 */
+        .mcp-head { display: flex; align-items: center; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--border); }
+        .mcp-title-lg { margin: 0; font-size: 14px; font-weight: 600; color: var(--foreground); }
+        .mcp-sub { margin: 0; font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.12em; color: var(--muted-foreground); }
+        .mcp-head .cfg-btn { margin-left: auto; }
+        .mcp-list { list-style: none; margin: 0; padding: 0; }
+        .mcp-row { display: flex; align-items: center; gap: 16px; padding: 12px 16px; border-bottom: 1px solid var(--border); transition: background-color 0.18s ease; }
+        .mcp-row:last-child { border-bottom: 0; }
+        .mcp-row:hover { background: var(--card-elevated); }
+        .mcp-name { display: flex; align-items: center; gap: 10px; flex: 1 1 auto; min-width: 0; }
+        .mcp-icon { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: var(--radius-md); border: 1px solid var(--border); background: var(--video-bg); color: var(--muted-foreground); flex-shrink: 0; }
+        .mcp-title { margin: 0; font-size: 13px; font-weight: 600; color: var(--foreground); line-height: 1.3; }
+        .mcp-url { margin: 2px 0 0; font-family: var(--font-mono); font-size: 10.5px; color: var(--muted-foreground); line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .mcp-badge { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: var(--radius-pill); font-size: 11px; white-space: nowrap; flex-shrink: 0; }
+        .mcp-badge-on { color: var(--success-fg); background: var(--success-bg); }
+        .mcp-badge-off { color: var(--muted-foreground); background: var(--card-elevated); }
+        .mcp-latency { min-width: 56px; font-family: var(--font-mono); font-size: 12px; color: var(--foreground); text-align: right; white-space: nowrap; flex-shrink: 0; }
+        .mcp-latency-off { color: var(--muted-foreground); }
+        .mcp-note { margin: 0; padding: 10px 16px; border-top: 1px solid var(--border); font-size: 12px; color: var(--muted-foreground); }
+
+        /* 模型映射 */
+        .cfg-model-alt { color: var(--muted-foreground); }
+        .cfg-temp { font-family: var(--font-mono); font-size: 12px; color: var(--foreground); white-space: nowrap; }
+
+        @media (max-width: 768px) {
+          .cfg-form-grid { grid-template-columns: 1fr; }
+          .cfg-search-input { width: 200px; }
+          .mcp-row { flex-wrap: wrap; }
+          .mcp-latency { min-width: 0; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .cfg-tab, .cfg-btn, .cfg-btn-ghost, .cfg-icon-btn, .cfg-toggle, .cfg-toggle-knob, .cfg-input, .cfg-select select, .cfg-checkbox, .cfg-table tbody tr, .mcp-row { transition: none; }
+        }
+      </style>
+      <div class="cfg-page">
+
+        <!-- Tabs · top-tab 组件（仅视觉层级示意，三个分区均在同一页展示） -->
+        <nav class="cfg-tabs" aria-label="配置分类">
+          <button class="cfg-tab active" type="button" aria-current="page">Agent 管理</button>
+          <button class="cfg-tab" type="button">MCP 服务</button>
+          <button class="cfg-tab" type="button">模型配置</button>
+        </nav>
+
+        <!-- 分区一 · Agent 管理 -->
+        <section class="cfg-section" aria-label="Agent 管理">
+          <div class="cfg-toolbar">
+            <div class="cfg-search">
+              <i data-lucide="search" style="width:15px;height:15px;color:var(--muted-foreground);pointer-events:none;"></i>
+              <input class="cfg-search-input" type="text" placeholder="搜索 Agent / 模型 / 状态" aria-label="搜索 Agent">
+            </div>
+            <button class="cfg-btn cfg-btn-primary" type="button">
+              <span data-icon="plus" style="width:15px;height:15px;mask-image:url(../assets/icons/dl_builtin_tik_tok/plus.svg);flex-shrink:0"></span>
+              新建 Agent
+            </button>
+          </div>
+
+          <div class="cfg-panel">
+            <table class="cfg-table" aria-label="Agent 列表">
+              <thead>
+                <tr>
+                  <th>Agent</th>
+                  <th>状态</th>
+                  <th>模型</th>
+                  <th>更新时间</th>
+                  <th class="cfg-col-ops">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>
+                    <div class="cfg-agent-line">
+                      <span class="cfg-agent-code">YUNSHU-SUPERVISOR</span>
+                      <span class="cfg-agent-name">Supervisor 主控</span>
+                    </div>
+                    <p class="cfg-agent-desc">意图识别与任务分发</p>
+                  </td>
+                  <td>
+                    <span class="cfg-status">
+                      <button class="cfg-toggle cfg-toggle-on" type="button" role="switch" aria-checked="true" aria-label="YUNSHU-SUPERVISOR 状态：启用"><span class="cfg-toggle-knob"></span></button>
+                      <span class="cfg-status-on">启用</span>
+                    </span>
+                  </td>
+                  <td><span class="cfg-model">doubao-seed-1.6 <span class="cfg-model-ctx">· 32k</span></span></td>
+                  <td><span class="cfg-time">今天 09:00</span></td>
+                  <td class="cfg-col-ops">
+                    <div class="cfg-ops">
+                      <button class="cfg-btn-ghost" type="button"><i data-lucide="pencil" style="width:13px;height:13px;flex-shrink:0;"></i>编辑</button>
+                      <button class="cfg-icon-btn" type="button" aria-label="更多操作"><i data-lucide="more-horizontal" style="width:16px;height:16px;"></i></button>
+                    </div>
+                  </td>
+                </tr>
+                <tr>
+                  <td>
+                    <div class="cfg-agent-line">
+                      <span class="cfg-agent-code">YUNSHU-MARKETING</span>
+                      <span class="cfg-agent-name">营销助手</span>
+                    </div>
+                    <p class="cfg-agent-desc">营销方案策划与投放分析</p>
+                  </td>
+                  <td>
+                    <span class="cfg-status">
+                      <button class="cfg-toggle cfg-toggle-on" type="button" role="switch" aria-checked="true" aria-label="YUNSHU-MARKETING 状态：启用"><span class="cfg-toggle-knob"></span></button>
+                      <span class="cfg-status-on">启用</span>
+                    </span>
+                  </td>
+                  <td><span class="cfg-model">doubao-seed-1.6 <span class="cfg-model-ctx">· 128k</span></span></td>
+                  <td><span class="cfg-time">今天 09:00</span></td>
+                  <td class="cfg-col-ops">
+                    <div class="cfg-ops">
+                      <button class="cfg-btn-ghost" type="button"><i data-lucide="pencil" style="width:13px;height:13px;flex-shrink:0;"></i>编辑</button>
+                      <button class="cfg-icon-btn" type="button" aria-label="更多操作"><i data-lucide="more-horizontal" style="width:16px;height:16px;"></i></button>
+                    </div>
+                  </td>
+                </tr>
+                <tr>
+                  <td>
+                    <div class="cfg-agent-line">
+                      <span class="cfg-agent-code">YUNSHU-ANALYTICS</span>
+                      <span class="cfg-agent-name">经营分析</span>
+                    </div>
+                    <p class="cfg-agent-desc">销售数据洞察与预测</p>
+                  </td>
+                  <td>
+                    <span class="cfg-status">
+                      <button class="cfg-toggle cfg-toggle-on" type="button" role="switch" aria-checked="true" aria-label="YUNSHU-ANALYTICS 状态：启用"><span class="cfg-toggle-knob"></span></button>
+                      <span class="cfg-status-on">启用</span>
+                    </span>
+                  </td>
+                  <td><span class="cfg-model">doubao-seed-1.6 <span class="cfg-model-ctx">· 128k</span></span></td>
+                  <td><span class="cfg-time">昨天 18:30</span></td>
+                  <td class="cfg-col-ops">
+                    <div class="cfg-ops">
+                      <button class="cfg-btn-ghost" type="button"><i data-lucide="pencil" style="width:13px;height:13px;flex-shrink:0;"></i>编辑</button>
+                      <button class="cfg-icon-btn" type="button" aria-label="更多操作"><i data-lucide="more-horizontal" style="width:16px;height:16px;"></i></button>
+                    </div>
+                  </td>
+                </tr>
+                <tr>
+                  <td>
+                    <div class="cfg-agent-line">
+                      <span class="cfg-agent-code">YUNSHU-SCHEDULING</span>
+                      <span class="cfg-agent-name">调度优化</span>
+                    </div>
+                    <p class="cfg-agent-desc">物流排班与路径优化</p>
+                  </td>
+                  <td>
+                    <span class="cfg-status">
+                      <button class="cfg-toggle cfg-toggle-on" type="button" role="switch" aria-checked="true" aria-label="YUNSHU-SCHEDULING 状态：启用"><span class="cfg-toggle-knob"></span></button>
+                      <span class="cfg-status-on">启用</span>
+                    </span>
+                  </td>
+                  <td><span class="cfg-model">doubao-seed-lite</span></td>
+                  <td><span class="cfg-time">7-28</span></td>
+                  <td class="cfg-col-ops">
+                    <div class="cfg-ops">
+                      <button class="cfg-btn-ghost" type="button"><i data-lucide="pencil" style="width:13px;height:13px;flex-shrink:0;"></i>编辑</button>
+                      <button class="cfg-icon-btn" type="button" aria-label="更多操作"><i data-lucide="more-horizontal" style="width:16px;height:16px;"></i></button>
+                    </div>
+                  </td>
+                </tr>
+                <tr>
+                  <td>
+                    <div class="cfg-agent-line">
+                      <span class="cfg-agent-code">YUNSHU-RESEARCH</span>
+                      <span class="cfg-agent-name">行业研究<span class="cfg-tag">（内测）</span></span>
+                    </div>
+                    <p class="cfg-agent-desc">竞品与行业情报</p>
+                  </td>
+                  <td>
+                    <span class="cfg-status">
+                      <button class="cfg-toggle" type="button" role="switch" aria-checked="false" aria-label="YUNSHU-RESEARCH 状态：停用"><span class="cfg-toggle-knob"></span></button>
+                      <span class="cfg-status-off">停用</span>
+                    </span>
+                  </td>
+                  <td><span class="cfg-model">doubao-seed-lite</span></td>
+                  <td><span class="cfg-time">7-20</span></td>
+                  <td class="cfg-col-ops">
+                    <div class="cfg-ops">
+                      <button class="cfg-btn-ghost" type="button"><i data-lucide="pencil" style="width:13px;height:13px;flex-shrink:0;"></i>编辑</button>
+                      <button class="cfg-icon-btn" type="button" aria-label="更多操作"><i data-lucide="more-horizontal" style="width:16px;height:16px;"></i></button>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="cfg-panel cfg-form-panel">
+            <div class="cfg-form-head">
+              <p class="kicker">New Agent</p>
+              <h2 class="cfg-form-title">新建 Agent</h2>
+            </div>
+            <form action="#" method="post">
+              <div class="cfg-form-grid">
+                <div class="cfg-field">
+                  <label class="cfg-field-label" for="f-agent-code">Agent code</label>
+                  <input class="cfg-input" id="f-agent-code" type="text" placeholder="YUNSHU-XXX">
+                </div>
+                <div class="cfg-field">
+                  <label class="cfg-field-label" for="f-agent-name">名称</label>
+                  <input class="cfg-input" id="f-agent-name" type="text" placeholder="如 客服助手">
+                </div>
+                <div class="cfg-field cfg-field-wide">
+                  <label class="cfg-field-label" for="f-agent-desc">描述</label>
+                  <textarea class="cfg-input" id="f-agent-desc" rows="2" placeholder="一句话说明该 Agent 的职责与边界"></textarea>
+                </div>
+                <div class="cfg-field">
+                  <label class="cfg-field-label" for="f-agent-model">模型映射</label>
+                  <span class="cfg-select">
+                    <select id="f-agent-model">
+                      <option>doubao-seed-1.6 · 32k</option>
+                      <option>doubao-seed-1.6 · 128k</option>
+                      <option>doubao-seed-lite</option>
+                    </select>
+                    <i data-lucide="chevron-down" style="width:14px;height:14px;"></i>
+                  </span>
+                </div>
+                <div class="cfg-field">
+                  <span class="cfg-field-label">记忆开关</span>
+                  <span class="cfg-check-list">
+                    <label class="cfg-check">
+                      <input type="checkbox" checked>
+                      <span class="cfg-checkbox"><i data-lucide="check" style="width:10px;height:10px;"></i></span>
+                      <span>启用企业经验召回</span>
+                    </label>
+                    <label class="cfg-check">
+                      <input type="checkbox" checked>
+                      <span class="cfg-checkbox"><i data-lucide="check" style="width:10px;height:10px;"></i></span>
+                      <span>启用知识库 RAG</span>
+                    </label>
+                  </span>
+                </div>
+              </div>
+              <div class="cfg-form-actions">
+                <button class="cfg-btn-ghost" type="button">取消</button>
+                <button class="cfg-btn cfg-btn-primary" type="button">
+                  <span data-icon="plus" style="width:14px;height:14px;mask-image:url(../assets/icons/dl_builtin_tik_tok/plus.svg);flex-shrink:0"></span>
+                  创建 Agent
+                </button>
+              </div>
+            </form>
+          </div>
+        </section>
+
+        <!-- 分区二 · MCP 服务 -->
+        <section class="cfg-section" aria-label="MCP 服务">
+          <div class="cfg-panel">
+            <div class="mcp-head">
+              <h2 class="mcp-title-lg">MCP 服务</h2>
+              <p class="mcp-sub">3 个已连接 · 2 个可用</p>
+              <button class="cfg-btn cfg-btn-primary cfg-btn-sm" type="button">
+                <span data-icon="plus" style="width:14px;height:14px;mask-image:url(../assets/icons/dl_builtin_tik_tok/plus.svg);flex-shrink:0"></span>
+                添加服务
+              </button>
+            </div>
+            <ul class="mcp-list">
+              <li class="mcp-row">
+                <div class="mcp-name">
+                  <span class="mcp-icon"><i data-lucide="plug" style="width:15px;height:15px;"></i></span>
+                  <div style="min-width:0;">
+                    <p class="mcp-title">企业 CRM</p>
+                    <p class="mcp-url">https://crm.internal.example.com/mcp</p>
+                  </div>
+                </div>
+                <span class="mcp-badge mcp-badge-on">已连接</span>
+                <span class="mcp-latency">48ms</span>
+                <div class="cfg-ops">
+                  <button class="cfg-btn-ghost" type="button"><i data-lucide="zap" style="width:13px;height:13px;flex-shrink:0;"></i>测试</button>
+                  <button class="cfg-icon-btn" type="button" aria-label="更多操作"><i data-lucide="more-horizontal" style="width:16px;height:16px;"></i></button>
+                </div>
+              </li>
+              <li class="mcp-row">
+                <div class="mcp-name">
+                  <span class="mcp-icon"><i data-lucide="plug" style="width:15px;height:15px;"></i></span>
+                  <div style="min-width:0;">
+                    <p class="mcp-title">物流 TMS</p>
+                    <p class="mcp-url">https://tms.internal.example.com/mcp</p>
+                  </div>
+                </div>
+                <span class="mcp-badge mcp-badge-on">已连接</span>
+                <span class="mcp-latency">62ms</span>
+                <div class="cfg-ops">
+                  <button class="cfg-btn-ghost" type="button"><i data-lucide="zap" style="width:13px;height:13px;flex-shrink:0;"></i>测试</button>
+                  <button class="cfg-icon-btn" type="button" aria-label="更多操作"><i data-lucide="more-horizontal" style="width:16px;height:16px;"></i></button>
+                </div>
+              </li>
+              <li class="mcp-row">
+                <div class="mcp-name">
+                  <span class="mcp-icon"><i data-lucide="plug" style="width:15px;height:15px;"></i></span>
+                  <div style="min-width:0;">
+                    <p class="mcp-title">财务 ERP</p>
+                    <p class="mcp-url">https://erp.internal.example.com/mcp</p>
+                  </div>
+                </div>
+                <span class="mcp-badge mcp-badge-off">未连接</span>
+                <span class="mcp-latency mcp-latency-off">—</span>
+                <div class="cfg-ops">
+                  <button class="cfg-btn-ghost" type="button"><i data-lucide="zap" style="width:13px;height:13px;flex-shrink:0;"></i>测试</button>
+                  <button class="cfg-icon-btn" type="button" aria-label="更多操作"><i data-lucide="more-horizontal" style="width:16px;height:16px;"></i></button>
+                </div>
+              </li>
+            </ul>
+            <p class="mcp-note">MCP 服务供 Agent 调用外部工具，需管理员授权启用。</p>
+          </div>
+        </section>
+
+        <!-- 分区三 · 模型配置 -->
+        <section class="cfg-section" aria-label="模型配置">
+          <div class="cfg-panel">
+            <div class="mcp-head">
+              <h2 class="mcp-title-lg">模型映射</h2>
+              <p class="mcp-sub">模型 × Agent 路由</p>
+            </div>
+            <table class="cfg-table" aria-label="模型映射列表">
+              <thead>
+                <tr>
+                  <th>Agent</th>
+                  <th>主模型</th>
+                  <th>备选模型</th>
+                  <th>温度</th>
+                  <th>上下文</th>
+                  <th class="cfg-col-ops">修改</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><span class="cfg-agent-name">Supervisor 主控</span></td>
+                  <td><span class="cfg-model">doubao-seed-1.6</span></td>
+                  <td><span class="cfg-model cfg-model-alt">doubao-seed-lite</span></td>
+                  <td><span class="cfg-temp">0.2</span></td>
+                  <td><span class="cfg-model cfg-model-ctx">32k</span></td>
+                  <td class="cfg-col-ops"><div class="cfg-ops"><button class="cfg-btn-ghost" type="button">修改</button></div></td>
+                </tr>
+                <tr>
+                  <td><span class="cfg-agent-name">营销助手</span></td>
+                  <td><span class="cfg-model">doubao-seed-1.6</span></td>
+                  <td><span class="cfg-model cfg-model-alt">doubao-seed-lite</span></td>
+                  <td><span class="cfg-temp">0.4</span></td>
+                  <td><span class="cfg-model cfg-model-ctx">128k</span></td>
+                  <td class="cfg-col-ops"><div class="cfg-ops"><button class="cfg-btn-ghost" type="button">修改</button></div></td>
+                </tr>
+                <tr>
+                  <td><span class="cfg-agent-name">经营分析</span></td>
+                  <td><span class="cfg-model">doubao-seed-1.6</span></td>
+                  <td><span class="cfg-model cfg-model-alt">doubao-seed-lite</span></td>
+                  <td><span class="cfg-temp">0.3</span></td>
+                  <td><span class="cfg-model cfg-model-ctx">128k</span></td>
+                  <td class="cfg-col-ops"><div class="cfg-ops"><button class="cfg-btn-ghost" type="button">修改</button></div></td>
+                </tr>
+                <tr>
+                  <td><span class="cfg-agent-name">调度优化</span></td>
+                  <td><span class="cfg-model">doubao-seed-lite</span></td>
+                  <td><span class="cfg-model cfg-model-alt">doubao-seed-1.6</span></td>
+                  <td><span class="cfg-temp">0.6</span></td>
+                  <td><span class="cfg-model cfg-model-ctx">16k</span></td>
+                  <td class="cfg-col-ops"><div class="cfg-ops"><button class="cfg-btn-ghost" type="button">修改</button></div></td>
+                </tr>
+                <tr>
+                  <td><span class="cfg-agent-name">行业研究</span></td>
+                  <td><span class="cfg-model">doubao-seed-lite</span></td>
+                  <td><span class="cfg-model cfg-model-alt">—</span></td>
+                  <td><span class="cfg-temp">0.5</span></td>
+                  <td><span class="cfg-model cfg-model-ctx">8k</span></td>
+                  <td class="cfg-col-ops"><div class="cfg-ops"><button class="cfg-btn-ghost" type="button">修改</button></div></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+      </div>
+    </div>
+  </div>
+</div>
+    </main>
+    <script>lucide.createIcons();</script>
+</body>
+</html>

@@ -206,7 +206,7 @@ erDiagram
 
 | 表 | 关键字段 | 说明 |
 |---|---|---|
-| `users` | id UUID, username UK, password_hash, department_id FK, role_id FK, display_name | 用户 |
+| `users` | id UUID, username UK, password_hash, department_id FK, role_code FK（关联 roles.code）, display_name | 用户 |
 | `departments` | id UUID, name UK, owner_id FK（负责人） | 部门 |
 | `roles` | id UUID, code UK（dept_owner/admin/member） | 角色 |
 | `conversations` | id UUID, user_id FK, title, summary（滚动摘要）, current_trace_id, created_at | 会话 |
@@ -219,7 +219,6 @@ erDiagram
 | `execution_traces` | id UUID, user_id FK, conversation_id FK, status, supervisor_routes, started_at | 执行轨迹汇总 |
 | `trace_events` | id 自增（高频写特例）, trace_id FK, type（route/llm/tool/memory/hitl）, payload JSONB, created_at | 留痕事件明细（只追加） |
 | `hitl_tasks` | id UUID, trace_id FK, node_id, reason, context JSONB, status, approver_id FK, decided_at | 人工确认任务 |
-| `agents` | code PK, name, description, model_key, config JSONB（提示词/工具白名单）, enabled | Agent 注册表 |
 | `mcp_servers` | name PK, url, auth_type, config JSONB, enabled | 外部 MCP 配置表 |
 
 ### 4.3 核心设计决策
@@ -227,8 +226,8 @@ erDiagram
 1. **向量统一 pgvector**：经验与知识 chunk 同库存储，避免独立向量库（简化运维）
 2. **经验审批独立表**：每次晋升一条记录，支持审计追溯
 3. **HITL 与 trace 关联**：`interrupt()` 时写入待确认任务，确认后 resume
-4. **agents + mcp_servers 均为配置表**：新 agent / 新 MCP 接入 = 插入记录，不改代码
-5. **不使用物理外键**：数据库层不建 FOREIGN KEY 约束（避免锁竞争、迁移灵活、允许临时不一致）；关联列用普通列 + `relationship(foreign_keys=...)` 保持 ORM 关联能力（join / selectinload 预加载照常可用），级联删除由 ORM `cascade` 保证。§4.2 表中"FK"字样均指逻辑外键。
+4. **mcp_servers 为配置表**：新 MCP 接入 = 插入记录，不改代码；agent 信息在代码中定义（新增 agent 必须开发子图代码，无需配置表）
+5. **不使用物理外键**：数据库层不建 FOREIGN KEY 约束（避免锁竞争、迁移灵活、允许临时不一致）；关联列用普通列 `String(36) + index`；不使用 relationship，关联查询在 repo/service 层用 id 手动查。§4.2 表中"FK"字样均指逻辑外键。
 6. **主键统一 UUID 字符串**：全库主键由应用层 `uuid4()` 生成（`UUID(as_uuid=False)` 列），客户端/异步链路无需等 DB 分配即可拿到 id（trace、会话创建即用）；不可枚举、分布式不冲突；所有逻辑外键统一 `String(36)`。**唯一特例**：`trace_events` 保留自增主键——留痕为高频批量写入，顺序自增比 UUID 更省索引与页分裂。
 
 ---
@@ -240,10 +239,10 @@ erDiagram
 ```mermaid
 flowchart TD
     subgraph 注册与装配
-        REG[AgentRegistry 注册中心] --> |读 agents 表| SYS["Supervisor 主图<br/>循环路由 LLM"]
-        REG --> |动态装配子图| A1[营销助手子图]
-        REG --> |动态装配子图| A2[经营分析子图]
-        REG --> |动态装配子图| A3[调度优化子图]
+        REG[AgentRegistry 注册中心] --> |代码中注册| SYS["Supervisor 主图<br/>循环路由 LLM"]
+        REG --> |装配子图| A1[营销助手子图]
+        REG --> |装配子图| A2[经营分析子图]
+        REG --> |装配子图| A3[调度优化子图]
     end
 
     subgraph 工具层
@@ -271,7 +270,7 @@ flowchart TD
 
 ### 5.2 设计要点
 
-1. **Agent 动态注册**：每个 agent = LangGraph 子图 + `agents` 表配置（系统提示词、模型 key、工具白名单）。新增 agent = 写子图文件 + 插入配置记录，主图不改
+1. **Agent 代码注册**：每个 agent = LangGraph 子图，在代码中定义（系统提示词、模型 key、工具白名单）。新增 agent = 写子图文件 + 在 registry 注册，主图不改
 2. **Supervisor 循环路由**：官方 supervisor 模式，结构化输出 `{agent, reason, confidence}`，决策写入留痕；支持多 agent 协作链
 3. **DataFacade 统一门面**：内置工具集与外部 MCP 服务统一为 Tool 接口，agent 只认工具名；工具按 agent 白名单授权
 4. **风险分级 + HITL**：工具声明风险等级（低=查询 / 中=写操作 / 高=资金、删除、外发等）；高风险工具执行前 `interrupt()` 暂停，生成 `hitl_tasks`，人工确认后 resume
@@ -319,7 +318,7 @@ yunshu-agent-2/
 │   │   ├── agents/                 # LangGraph 图
 │   │   │   ├── graph.py            # 主图装配（Supervisor 循环）
 │   │   │   ├── supervisor.py       # 路由节点（结构化输出）
-│   │   │   ├── registry.py         # AgentRegistry（读 agents 表动态装配）
+│   │   │   ├── registry.py         # AgentRegistry（代码注册子图）
 │   │   │   ├── marketing/          # 营销助手子图
 │   │   │   ├── sales_analysis/     # 经营分析子图
 │   │   │   └── scheduling/         # 调度优化子图

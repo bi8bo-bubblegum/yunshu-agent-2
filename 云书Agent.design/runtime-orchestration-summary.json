@@ -1,0 +1,1956 @@
+{
+  "skillProvenance": {
+    "name": "solo-design",
+    "version": "2026.07.22.00.00.00",
+    "version_source": "skill-release-manifest.json",
+    "runtime_skill_dir": "/Users/best/.trae-cn/builtin/design/default/skills/solo-design",
+    "recorded_at": "2026-07-31T08:00:00.000Z",
+    "read_status": "ok"
+  },
+  "designSource": {
+    "operatingMode": "library-bound",
+    "libraryIdentity": {
+      "name": "抖音",
+      "id": "dl_builtin_tik_tok",
+      "version": "",
+      "scope": "built-in-global",
+      "path": "/Users/best/.trae-cn/design_libraries/dl_builtin_tik_tok",
+      "versionSource": "metadata.json"
+    },
+    "brandPrefix": "tk",
+    "cssFilePath": "/Users/best/.trae-cn/design_libraries/dl_builtin_tik_tok/colors_and_type.css",
+    "tokenFidelity": "strict",
+    "componentConformance": "strict",
+    "actualTokenNameReference": [
+      "--background",
+      "--card",
+      "--card-elevated",
+      "--video-bg",
+      "--foreground",
+      "--muted-foreground",
+      "--on-media",
+      "--on-accent",
+      "--primary",
+      "--secondary",
+      "--destructive",
+      "--border",
+      "--success",
+      "--success-bg",
+      "--success-fg",
+      "--error-bg",
+      "--error-fg",
+      "--radius-xs",
+      "--radius-sm",
+      "--radius-md",
+      "--radius-lg",
+      "--radius-xl",
+      "--radius-pill",
+      "--font-display",
+      "--font-sans",
+      "--font-mono",
+      "--kicker-size",
+      "--kicker-letter-spacing",
+      "--tk-red-100",
+      "--tk-red-200",
+      "--tk-red-300",
+      "--tk-red-400",
+      "--tk-red-500",
+      "--tk-red-600",
+      "--tk-red-700",
+      "--tk-red-800",
+      "--tk-red-900",
+      "--tk-red-1000",
+      "--tk-cyan-100",
+      "--tk-cyan-200",
+      "--tk-cyan-300",
+      "--tk-cyan-400",
+      "--tk-cyan-500",
+      "--tk-cyan-600",
+      "--tk-cyan-700",
+      "--tk-cyan-800",
+      "--tk-cyan-900",
+      "--tk-cyan-1000",
+      "--tk-black-100",
+      "--tk-black-200",
+      "--tk-black-300",
+      "--tk-black-400",
+      "--tk-black-500",
+      "--tk-black-600",
+      "--tk-black-700",
+      "--tk-black-800",
+      "--tk-black-900",
+      "--tk-black-1000",
+      "--tk-white-100",
+      "--tk-white-200",
+      "--tk-white-300",
+      "--tk-white-400",
+      "--tk-white-500",
+      "--tk-white-600",
+      "--tk-white-700",
+      "--tk-white-800",
+      "--tk-white-900",
+      "--tk-white-1000"
+    ],
+    "componentPlan": [
+      {
+        "slug": "top-tab",
+        "contractKind": "legacy-json",
+        "previewFile": "/Users/best/.trae-cn/design_libraries/dl_builtin_tik_tok/preview/component-top-tab.html",
+        "contractFile": "/Users/best/.trae-cn/design_libraries/dl_builtin_tik_tok/components/top-tab.json",
+        "applyToPages": [
+          "experience",
+          "approval",
+          "config"
+        ]
+      },
+      {
+        "slug": "editorial-cover",
+        "contractKind": "legacy-json",
+        "previewFile": "/Users/best/.trae-cn/design_libraries/dl_builtin_tik_tok/preview/component-editorial-cover.html",
+        "contractFile": "/Users/best/.trae-cn/design_libraries/dl_builtin_tik_tok/components/editorial-cover.json",
+        "applyToPages": [
+          "login"
+        ]
+      }
+    ],
+    "componentIndexSummary": "6 components (mobile-top-tab, mobile-right-rail, mobile-bottom-info, mobile-bottom-nav, web-video-card, editorial-mag-cover). Only top-tab (text-only tabs + 1px primary underline, hover=secondary) and editorial-cover (mono metadata, sparing red/cyan accent spans) are usable for this enterprise web app; mobile feed components are out of scope for desktop SaaS chrome.",
+    "uiKitSummary": "ui_kits/app/index.html is a mobile short-video shell (phone frame, top tab, right rail, bottom info, bottom nav). Not applicable to desktop SaaS sidebar/topbar layout; token + type discipline is carried over instead.",
+    "allowedComponents": [
+      "top-tab",
+      "editorial-cover"
+    ],
+    "forbiddenInventedComponents": [],
+    "designDecisionSummary": "Dark editorial 'control-room' language derived from TikTok tokens: background #0B0B10, card #161823, card-elevated #1C1E2A, video-bg #16161C for sidebar; foreground #F5F5F7 / muted-foreground #AEB2C0; primary red #FE2C55 (CTAs, high-risk HITL, active underline, red-dot badges), secondary cyan #25F4EE as small accent (agent identity, route highlights); border #3A3D52 hairline separators; radius 2/6/8/12 restrained; Inter + JetBrains Mono kicker (11px, 0.14em uppercase); spacing rhythm 4/8/12/16/24/32; border-first depth (no decorative shadows); red/cyan <=10% area.",
+    "iconAssets": {
+      "source": "assets/icons",
+      "projectIconDir": "assets/icons/dl_builtin_tik_tok",
+      "libraryKey": "dl_builtin_tik_tok",
+      "renderMethod": "css-mask",
+      "pathTemplate": "../assets/icons/dl_builtin_tik_tok/{name}.svg",
+      "availableNames": [
+        "arrow-left",
+        "bookmark-simple",
+        "chat-circle",
+        "compass",
+        "gear",
+        "heart",
+        "house",
+        "music-notes",
+        "play",
+        "plus",
+        "share-fat",
+        "user"
+      ],
+      "totalCount": 12,
+      "coloringRule": "currentColor by default; override with Library token when needed"
+    }
+  },
+  "pages": [
+    {
+      "nodeId": "page-login",
+      "htmlSrc": "pages/login.html",
+      "title": "登录 · 云书 Agent",
+      "pageType": "task-driven",
+      "deviceType": "desktop",
+      "viewportMode": "document-scroll",
+      "componentPlan": [
+        "editorial-cover"
+      ],
+      "domIdsRequired": [
+        "login-submit"
+      ],
+      "qualityRisks": [
+        "auth card centered split layout must not overflow on narrow widths",
+        "brand panel editorial copy hierarchy"
+      ]
+    },
+    {
+      "nodeId": "page-chat",
+      "htmlSrc": "pages/chat.html",
+      "title": "聊天工作台",
+      "pageType": "task-driven",
+      "deviceType": "desktop",
+      "viewportMode": "app-shell",
+      "componentPlan": [],
+      "domIdsRequired": [
+        "nav-chat",
+        "nav-knowledge",
+        "nav-experience",
+        "nav-approval",
+        "nav-org",
+        "nav-config",
+        "nav-monitor",
+        "top-approval",
+        "brand-chat"
+      ],
+      "qualityRisks": [
+        "three-pane density: session list + message stream + HITL drawer",
+        "typing animation must respect reduced motion",
+        "source citation chips clickable"
+      ]
+    },
+    {
+      "nodeId": "page-knowledge",
+      "htmlSrc": "pages/knowledge.html",
+      "title": "知识库管理",
+      "pageType": "information-dense",
+      "deviceType": "desktop",
+      "viewportMode": "app-shell",
+      "componentPlan": [],
+      "domIdsRequired": [
+        "nav-chat",
+        "nav-knowledge",
+        "nav-experience",
+        "nav-approval",
+        "nav-org",
+        "nav-config",
+        "nav-monitor",
+        "top-approval",
+        "brand-chat"
+      ],
+      "qualityRisks": [
+        "table density + upload zone + retrieval test in one frame",
+        "CJK long titles in doc rows"
+      ]
+    },
+    {
+      "nodeId": "page-experience",
+      "htmlSrc": "pages/experience.html",
+      "title": "经验中心",
+      "pageType": "information-dense",
+      "deviceType": "desktop",
+      "viewportMode": "app-shell",
+      "componentPlan": [
+        "top-tab"
+      ],
+      "domIdsRequired": [
+        "nav-chat",
+        "nav-knowledge",
+        "nav-experience",
+        "nav-approval",
+        "nav-org",
+        "nav-config",
+        "nav-monitor",
+        "top-approval",
+        "brand-chat"
+      ],
+      "qualityRisks": [
+        "tab hierarchy 我的/部门/公司 + card grid density",
+        "effect metrics alignment in cards"
+      ]
+    },
+    {
+      "nodeId": "page-approval",
+      "htmlSrc": "pages/approval.html",
+      "title": "审批中心",
+      "pageType": "task-driven",
+      "deviceType": "desktop",
+      "viewportMode": "app-shell",
+      "componentPlan": [
+        "top-tab"
+      ],
+      "domIdsRequired": [
+        "nav-chat",
+        "nav-knowledge",
+        "nav-experience",
+        "nav-approval",
+        "nav-org",
+        "nav-config",
+        "nav-monitor",
+        "top-approval",
+        "brand-chat"
+      ],
+      "qualityRisks": [
+        "two approval types (experience promotion + HITL) need clear visual differentiation",
+        "detail drawer full context density"
+      ]
+    },
+    {
+      "nodeId": "page-org",
+      "htmlSrc": "pages/org.html",
+      "title": "组织架构",
+      "pageType": "information-dense",
+      "deviceType": "desktop",
+      "viewportMode": "app-shell",
+      "componentPlan": [],
+      "domIdsRequired": [
+        "nav-chat",
+        "nav-knowledge",
+        "nav-experience",
+        "nav-approval",
+        "nav-org",
+        "nav-config",
+        "nav-monitor",
+        "top-approval",
+        "brand-chat"
+      ],
+      "qualityRisks": [
+        "department tree + user table two-column density",
+        "role selector states"
+      ]
+    },
+    {
+      "nodeId": "page-config",
+      "htmlSrc": "pages/config.html",
+      "title": "配置中心",
+      "pageType": "task-driven",
+      "deviceType": "desktop",
+      "viewportMode": "app-shell",
+      "componentPlan": [
+        "top-tab"
+      ],
+      "domIdsRequired": [
+        "nav-chat",
+        "nav-knowledge",
+        "nav-experience",
+        "nav-approval",
+        "nav-org",
+        "nav-config",
+        "nav-monitor",
+        "top-approval",
+        "brand-chat"
+      ],
+      "qualityRisks": [
+        "three config sections (Agent / MCP / 模型) via tabs",
+        "create form inline panel"
+      ]
+    },
+    {
+      "nodeId": "page-monitor",
+      "htmlSrc": "pages/monitor.html",
+      "title": "监测中心",
+      "pageType": "information-dense",
+      "deviceType": "desktop",
+      "viewportMode": "app-shell",
+      "componentPlan": [],
+      "domIdsRequired": [
+        "nav-chat",
+        "nav-knowledge",
+        "nav-experience",
+        "nav-approval",
+        "nav-org",
+        "nav-config",
+        "nav-monitor",
+        "top-approval",
+        "brand-chat"
+      ],
+      "qualityRisks": [
+        "execution record table + timeline detail master-detail",
+        "timeline colored event types (route/LLM/tool/HITL) must use declared trace color vars",
+        "expandable event IO panels"
+      ]
+    }
+  ],
+  "project": {
+    "resolvedLane": "library_bound",
+    "selectedIntentWorkflowRead": true,
+    "contextReadScope": "lane-context-only",
+    "contextRequirementsLoaded": [
+      {
+        "path": "shared-runtime/runtime-boundaries/lane-runtime-contracts.md",
+        "readStatus": "loaded",
+        "bodyRead": true
+      },
+      {
+        "path": "shared-runtime/agent-dispatch-runtime/lane-dispatch-index.md",
+        "readStatus": "loaded",
+        "bodyRead": true
+      },
+      {
+        "path": "delivery-quality/page-rendering-quality-gate.md",
+        "readStatus": "loaded",
+        "bodyRead": true
+      },
+      {
+        "path": "delivery-quality/design-artifact-validation.md",
+        "readStatus": "loaded",
+        "bodyRead": true
+      },
+      {
+        "path": "delivery-quality/delivery-evidence-contract.md",
+        "readStatus": "loaded",
+        "bodyRead": true
+      },
+      {
+        "path": "shared-runtime/agent-dispatch-runtime/shared-page-rendering-kernel.md",
+        "readStatus": "loaded",
+        "bodyRead": true
+      },
+      {
+        "path": "intent-workflows/intent-page-library-bound/INTENT_WORKFLOW.md",
+        "readStatus": "loaded",
+        "bodyRead": true
+      },
+      {
+        "path": "intent-workflows/intent-page-library-bound/start-library-bound-project.md",
+        "readStatus": "loaded",
+        "bodyRead": true
+      },
+      {
+        "path": "intent-workflows/intent-page-library-bound/library-bound-page-runtime.md",
+        "readStatus": "loaded",
+        "bodyRead": true
+      },
+      {
+        "path": "intent-workflows/intent-page-library-bound/dispatch-contract.md",
+        "readStatus": "loaded",
+        "bodyRead": true
+      },
+      {
+        "path": "intent-workflows/intent-page-library-bound/orchestration-summary-fields.md",
+        "readStatus": "loaded",
+        "bodyRead": true
+      },
+      {
+        "path": "intent-workflows/intent-page-library-bound/design-library-ingestion.md",
+        "readStatus": "loaded",
+        "bodyRead": true
+      },
+      {
+        "path": "intent-workflows/intent-page-library-bound/design-token-fidelity-rules.md",
+        "readStatus": "loaded",
+        "bodyRead": true
+      },
+      {
+        "path": "intent-workflows/intent-page-library-bound/component-conformance-rules.md",
+        "readStatus": "loaded",
+        "bodyRead": true
+      },
+      {
+        "path": "intent-workflows/intent-page-library-bound/icon-source-priority-rules.md",
+        "readStatus": "loaded",
+        "bodyRead": true
+      },
+      {
+        "path": "shared-runtime/agent-dispatch-runtime/sub-agent-runtime-boundaries.md",
+        "readStatus": "loaded",
+        "bodyRead": true
+      }
+    ],
+    "validationRunDiscipline": {
+      "maxFullValidationRuns": 2,
+      "softWarningsTriggerRepair": false,
+      "blockingRepairMode": "targeted-once",
+      "forbiddenRepairTriggers": [
+        "soft-warning-only",
+        "provenance-warning-only",
+        "style-warning-only"
+      ]
+    },
+    "lowValueCallWatchdog": {
+      "applies": true,
+      "noProgressNextAction": "enter_readiness_or_blocked_summary"
+    },
+    "deviceType": "desktop",
+    "language": "zh-CN",
+    "viewportMode": "app-shell",
+    "visualNorthStar": "全链路留痕的智能控制室：暗色高对比基底 + 红主青辅的品牌强调，mono kicker 元数据贯穿，边框分层替代阴影，让 Agent 路由、记忆召回、HITL 与执行回放清晰可见、可追溯。",
+    "compositionPattern": "app-shell dashboard with sidebar navigation + task/information-dense content panes; login uses editorial split auth layout",
+    "continuityAnchors": [
+      "shared dark app shell (232px sidebar + 56px topbar, hairline border separation) across all 7 app pages",
+      "red primary CTA / red dot badges + cyan agent-identity accents",
+      "mono uppercase kicker metadata on every page header and card",
+      "radius 2/6/8/12 restrained, border-first surfaces, no decorative shadows",
+      "line icon language (Library masks + Lucide fallback)"
+    ],
+    "sharedProjectShellContract": {
+      "shellPartial": "partials/app-shell.html",
+      "navigation": {
+        "items": [
+          "chat",
+          "knowledge",
+          "experience",
+          "approval",
+          "org",
+          "config",
+          "monitor"
+        ],
+        "activeNavSlot": "data-active=\"true\"",
+        "navKeyAttribute": "data-nav-key",
+        "domIds": {
+          "chat": "nav-chat",
+          "knowledge": "nav-knowledge",
+          "experience": "nav-experience",
+          "approval": "nav-approval",
+          "org": "nav-org",
+          "config": "nav-config",
+          "monitor": "nav-monitor"
+        }
+      },
+      "primaryColorSystem": "primary #FE2C55 (red), secondary #25F4EE (cyan) accent-only; neutral surfaces background/card/card-elevated/video-bg",
+      "typeStack": "Inter sans for UI, JetBrains Mono for kicker/metadata; body 13-14px, headings 16-18px weight 600",
+      "radiusScale": "2/6/8/12 + pill only for badges/avatars",
+      "surfaceModel": "border-first, hairline 1px var(--border) separators, no decorative shadows",
+      "ctaStyle": "red primary buttons with white text, ghost/secondary buttons with border + muted text",
+      "alignmentRhythm": "left-edge aligned sidebar, topbar baseline title row, content max-width fluid"
+    },
+    "styleContinuityAnchors": {
+      "colorSystem": "dark neutral surfaces (#0B0B10/#161823/#1C1E2A) + red primary #FE2C55 + cyan secondary #25F4EE accents + status success/error tokens",
+      "shapeSystem": "radius 2/6/8/12, 1px hairline borders, pill only for badges/avatars",
+      "typographySystem": "Inter sans + JetBrains Mono kicker (11px/0.14em uppercase), body 13-14px, headings 16-18px w600",
+      "spacingSystem": "4/8/12/16/24/32 rhythm, content padding 20-24px",
+      "componentLanguage": "cards = card surface + 1px border; buttons = red primary / bordered ghost; nav active = card-elevated + foreground; tabs = text + 1px primary underline",
+      "surfaceAndDepth": "border-first; shadow only for floating layers (drawers/modals/dropdowns)",
+      "imageryAndIconography": "line icons 2px stroke; Library SVG masks preferred, Lucide fallback; avatars = initials circles",
+      "interactionTone": "hover = surface step + color step, 0.18s ease transitions; focus-visible rings; reduced-motion respected"
+    },
+    "generationTree": "generation-tree.json",
+    "validationHistory": [
+      {
+        "reportPath": "validation-report.json",
+        "reportHash": "1c8bf73d8917770585880305dc6c5b03cc32771d352fe18addb79155e72b83b0",
+        "checkedAt": "2026-08-03T03:21:58.584Z",
+        "success": false,
+        "exitCode": 1,
+        "renderBlockingErrorCount": 37,
+        "repairPlanHints": [
+          "hardcoded-color-in-body",
+          "hardcoded-color-in-body",
+          "hardcoded-color-in-body",
+          "hardcoded-color-in-body",
+          "hardcoded-color-in-body",
+          "hardcoded-color-in-body",
+          "hardcoded-color-in-body"
+        ],
+        "errorSignatures": [
+          {
+            "errorClass": "head-infrastructure",
+            "normalized": "[html-head-style] monitor.html: found 1 custom <style> block(s) in <head>. The <head> is owned by apply-html-head-contract.mjs; move custom styles before </body> or re-run apply-html-head-contract.mjs <css-path> <html-file> --replace-head to relocate them.",
+            "signature": "ca657fbbe03516a0a6a75bb1383cd75140dcfb85974ca53a493d1ab1af7ab5bf"
+          },
+          {
+            "errorClass": "app-shell-viewport",
+            "normalized": "[app-shell-viewport] pages/chat.html: viewportMode is app-shell but data-viewport-mode=\"app-shell\" is missing on the shell container.",
+            "signature": "6bdd35f4c8e1eab41b6b1968ca1cda92ac3af06094616d5214e78ae4cb35338b"
+          },
+          {
+            "errorClass": "app-shell-viewport",
+            "normalized": "[app-shell-viewport] pages/chat.html: app-shell pages must declare data-scroll-region=\"primary\" on a class list containing overflow-y-auto.",
+            "signature": "d81ddc7ff3f3cc6ff7b4c22f9e9a423f7de4f784745d44ae712ee4a630a9de3e"
+          },
+          {
+            "errorClass": "app-shell-viewport",
+            "normalized": "[app-shell-viewport] pages/chat.html: app-shell page still looks like natural document flow (min-h-screen) without a complete internal scroll shell.",
+            "signature": "83664db9032176c97acd2649046fbabad1b745bdf4ccc15a847bd06eacaee2a3"
+          },
+          {
+            "errorClass": "app-shell-viewport",
+            "normalized": "[app-shell-viewport] pages/knowledge.html: viewportMode is app-shell but data-viewport-mode=\"app-shell\" is missing on the shell container.",
+            "signature": "01026fc33fa5c89833d386a5e909e8aaf59e12e973f065237f55c888b63a76da"
+          },
+          {
+            "errorClass": "app-shell-viewport",
+            "normalized": "[app-shell-viewport] pages/knowledge.html: app-shell pages must declare data-scroll-region=\"primary\" on a class list containing overflow-y-auto.",
+            "signature": "a25b13b0ef68e3db0c9c172875e688efcf027ae46bc04b2d2b9264bee3e06009"
+          },
+          {
+            "errorClass": "app-shell-viewport",
+            "normalized": "[app-shell-viewport] pages/knowledge.html: app-shell page still looks like natural document flow (min-h-screen) without a complete internal scroll shell.",
+            "signature": "d7725d72b7b934bb6e8ba4773ab3ea9214097e10f38011cb64c16d880cb3af3e"
+          },
+          {
+            "errorClass": "app-shell-viewport",
+            "normalized": "[app-shell-viewport] pages/experience.html: viewportMode is app-shell but data-viewport-mode=\"app-shell\" is missing on the shell container.",
+            "signature": "644571ee356b05dc329cd3fa5165a48ab7e33014372012e55acf7810df1ca7c0"
+          },
+          {
+            "errorClass": "app-shell-viewport",
+            "normalized": "[app-shell-viewport] pages/experience.html: app-shell pages must declare data-scroll-region=\"primary\" on a class list containing overflow-y-auto.",
+            "signature": "19f28d7869dbd2d094e34360e1d455bea0ea3ba5930445ad80e5ab79a292baa9"
+          },
+          {
+            "errorClass": "app-shell-viewport",
+            "normalized": "[app-shell-viewport] pages/experience.html: app-shell page still looks like natural document flow (min-h-screen) without a complete internal scroll shell.",
+            "signature": "cf05cb7288a1c562fea7cff007ff0edbe9948c161f6589ce613b49ebefb1776a"
+          },
+          {
+            "errorClass": "app-shell-viewport",
+            "normalized": "[app-shell-viewport] pages/approval.html: viewportMode is app-shell but data-viewport-mode=\"app-shell\" is missing on the shell container.",
+            "signature": "26cf0ee8d4f44f39491a5e4337d2cb640aab439e05b9c0848294a17ea83a66aa"
+          },
+          {
+            "errorClass": "app-shell-viewport",
+            "normalized": "[app-shell-viewport] pages/approval.html: app-shell pages must declare data-scroll-region=\"primary\" on a class list containing overflow-y-auto.",
+            "signature": "a88bcbbe2bbff5b0022df2e6e95628ee4c73c8daea09e4315d4e7455847de655"
+          },
+          {
+            "errorClass": "app-shell-viewport",
+            "normalized": "[app-shell-viewport] pages/approval.html: app-shell page still looks like natural document flow (min-h-screen) without a complete internal scroll shell.",
+            "signature": "0bd61be6651e76f85460a10530ce871e21ca5f96f9dc70af53a8f1c1e75d41db"
+          },
+          {
+            "errorClass": "app-shell-viewport",
+            "normalized": "[app-shell-viewport] pages/org.html: viewportMode is app-shell but data-viewport-mode=\"app-shell\" is missing on the shell container.",
+            "signature": "8118ec291c5ef1d01c81349823a526f11849935df75b56c96b84290a9a0962eb"
+          },
+          {
+            "errorClass": "app-shell-viewport",
+            "normalized": "[app-shell-viewport] pages/org.html: app-shell pages must declare data-scroll-region=\"primary\" on a class list containing overflow-y-auto.",
+            "signature": "9d86826d66ac6805446848ef795d6095af3f02dba85ddfe02e9cd2bd83f843c2"
+          },
+          {
+            "errorClass": "app-shell-viewport",
+            "normalized": "[app-shell-viewport] pages/org.html: app-shell page still looks like natural document flow (min-h-screen) without a complete internal scroll shell.",
+            "signature": "1e5ae135b6d8b5f4b0f7da0ca0cf9201d7d369ee6333dc89c649103185093752"
+          },
+          {
+            "errorClass": "app-shell-viewport",
+            "normalized": "[app-shell-viewport] pages/config.html: viewportMode is app-shell but data-viewport-mode=\"app-shell\" is missing on the shell container.",
+            "signature": "4b63d2d86d82e9d7ff4007300a998d3593286c2fde79d5f4d6c381a3365c64ef"
+          },
+          {
+            "errorClass": "app-shell-viewport",
+            "normalized": "[app-shell-viewport] pages/config.html: app-shell pages must declare data-scroll-region=\"primary\" on a class list containing overflow-y-auto.",
+            "signature": "2df7df89e982b10f640e5edfccdbadab46df63d99edb8e90ac54db485a155c73"
+          },
+          {
+            "errorClass": "app-shell-viewport",
+            "normalized": "[app-shell-viewport] pages/config.html: app-shell page still looks like natural document flow (min-h-screen) without a complete internal scroll shell.",
+            "signature": "e0298bae750b604e6d6927bbc3f5b417a1b1ae5b7fe6b91d9db2610246c07d46"
+          },
+          {
+            "errorClass": "app-shell-viewport",
+            "normalized": "[app-shell-viewport] pages/monitor.html: viewportMode is app-shell but data-viewport-mode=\"app-shell\" is missing on the shell container.",
+            "signature": "beb268945b7a08939f1c0d30c66322e87468df6fcef7c47fc868bf3255649303"
+          },
+          {
+            "errorClass": "app-shell-viewport",
+            "normalized": "[app-shell-viewport] pages/monitor.html: app-shell pages must declare data-scroll-region=\"primary\" on a class list containing overflow-y-auto.",
+            "signature": "532ee7c5e80d47d8a859a7355f0a1b599c668db7a921a8ac4ee5e1bd97df13bd"
+          },
+          {
+            "errorClass": "app-shell-viewport",
+            "normalized": "[app-shell-viewport] pages/monitor.html: app-shell page still looks like natural document flow (min-h-screen) without a complete internal scroll shell.",
+            "signature": "2d3f0b8abe620ccd5f8c747bc9466110ac8d0b06f61b4c84b5a38768b7cd3a5b"
+          },
+          {
+            "errorClass": "dispatch-preflight-or-ownership",
+            "normalized": "[dispatch-changed-files] pages/login.html: matching project.expectedDispatches[] completion row is required",
+            "signature": "f32798c4555b228ffd65a347b9650e1caab3f70ca1601145ab6302584f337c29"
+          },
+          {
+            "errorClass": "dispatch-preflight-or-ownership",
+            "normalized": "[dispatch-changed-files] pages/chat.html: matching project.expectedDispatches[] completion row is required",
+            "signature": "f836b892063579470d62155bfce0fa8d91cef8b59eef8216ca139bb42c0e4955"
+          },
+          {
+            "errorClass": "dispatch-preflight-or-ownership",
+            "normalized": "[dispatch-changed-files] pages/knowledge.html: matching project.expectedDispatches[] completion row is required",
+            "signature": "507e5e314082fa1ed5dc5f111301147ae24a8e634dba8e57461c675053b6f6f6"
+          },
+          {
+            "errorClass": "dispatch-preflight-or-ownership",
+            "normalized": "[dispatch-changed-files] pages/experience.html: matching project.expectedDispatches[] completion row is required",
+            "signature": "5259f41bf36d433beba6311da2684525317344729cd690af5ddd456b30a58b80"
+          },
+          {
+            "errorClass": "dispatch-preflight-or-ownership",
+            "normalized": "[dispatch-changed-files] pages/approval.html: matching project.expectedDispatches[] completion row is required",
+            "signature": "78b13b50e50afb0679892995116a4b4d95021b176b864b66e4990f1d67d57c6b"
+          },
+          {
+            "errorClass": "dispatch-preflight-or-ownership",
+            "normalized": "[dispatch-changed-files] pages/org.html: matching project.expectedDispatches[] completion row is required",
+            "signature": "d9201f74786756740ad28d54b0e6a826718f90506c47fa9ad34fe7c2e61278ab"
+          },
+          {
+            "errorClass": "dispatch-preflight-or-ownership",
+            "normalized": "[dispatch-changed-files] pages/config.html: matching project.expectedDispatches[] completion row is required",
+            "signature": "083dfd4919d83304353b4997676b8eaa6e3f409c6a27f67c135884827a7a24ff"
+          },
+          {
+            "errorClass": "artifact-readiness",
+            "normalized": "[dispatch-changed-files] pages/monitor.html: controlled file changed after dispatch preflight without mainAgentPostDispatchMutations evidence: 云书Agent.design",
+            "signature": "fd0cef640b643b49cf9eee47d39d4a51bb26c6ae8c9bcad8459be05db98641b0"
+          },
+          {
+            "errorClass": "head-infrastructure",
+            "normalized": "[html-quality] approval.html: hardcoded colors are forbidden outside <style id=\"theme-vars\">. Use brand CSS variables from the token reference.",
+            "signature": "52d94bbc5a76619140995fe395720fc37c16db424ca1b1aaf54c7467dd579fd4"
+          },
+          {
+            "errorClass": "head-infrastructure",
+            "normalized": "[html-quality] chat.html: hardcoded colors are forbidden outside <style id=\"theme-vars\">. Use brand CSS variables from the token reference.",
+            "signature": "6d24ac4a62eaa5902deea91235d2d37d90ed1525ec7f1cca45effeb68f3071b8"
+          },
+          {
+            "errorClass": "head-infrastructure",
+            "normalized": "[html-quality] config.html: hardcoded colors are forbidden outside <style id=\"theme-vars\">. Use brand CSS variables from the token reference.",
+            "signature": "f498b94945efd6e7f33384f018f119bf6e004fd65981664ee83e8fd45af2dd08"
+          },
+          {
+            "errorClass": "head-infrastructure",
+            "normalized": "[html-quality] experience.html: hardcoded colors are forbidden outside <style id=\"theme-vars\">. Use brand CSS variables from the token reference.",
+            "signature": "3b8c2e64b82dbe1082533cd331138fb26b6ea233800fa13945f313ca04108a75"
+          },
+          {
+            "errorClass": "head-infrastructure",
+            "normalized": "[html-quality] knowledge.html: hardcoded colors are forbidden outside <style id=\"theme-vars\">. Use brand CSS variables from the token reference.",
+            "signature": "e628cfde4816b1b758b65c97978a444d35f5da4bfd011278be9a54f20ae3a11c"
+          },
+          {
+            "errorClass": "head-infrastructure",
+            "normalized": "[html-quality] monitor.html: hardcoded colors are forbidden outside <style id=\"theme-vars\">. Use brand CSS variables from the token reference.",
+            "signature": "0f55aa9751823c1580f29f6c65ac63e74c445c3652a4cfc766f4d4637c7c9df6"
+          },
+          {
+            "errorClass": "head-infrastructure",
+            "normalized": "[html-quality] org.html: hardcoded colors are forbidden outside <style id=\"theme-vars\">. Use brand CSS variables from the token reference.",
+            "signature": "3486ab2a9820b431fb7be22747e84ee2fb2cd2064c3ec979e6a5810b3796bb13"
+          }
+        ],
+        "terminalState": null
+      }
+    ],
+    "repairStopConditionMet": false,
+    "repairStopReason": "",
+    "remainingBlockingIssues": [],
+    "lastValidationReportPath": "",
+    "dispatchPreflightManifest": [
+      {
+        "recorded_at": "2026-07-31T09:06:44.176Z",
+        "generatedBy": "build-page-dispatch-manifest.mjs",
+        "packetType": "LibraryBoundPagePacket",
+        "laneContract": {
+          "resolvedLane": "library_bound",
+          "packetType": "LibraryBoundPagePacket",
+          "pageRuntimeGuide": "intent-workflows/intent-page-library-bound/library-bound-page-runtime.md",
+          "dispatchContract": "intent-workflows/intent-page-library-bound/dispatch-contract.md"
+        },
+        "taskLinePresent": true,
+        "outputPathPresent": true,
+        "sharedTemplate": "intent-workflows/intent-page-library-bound/library-bound-page-runtime.md",
+        "nodeId": "page-login",
+        "htmlSrc": "pages/login.html",
+        "supplementaryReads": [],
+        "allowedWritePaths": [
+          "pages/login.html",
+          "assets/"
+        ],
+        "forbiddenWriteRoots": [
+          "*.design",
+          "runtime-orchestration-summary.json",
+          "validation-report.json",
+          "finish-readiness-report.json",
+          "restore-contract-report.json",
+          "page-generation-summary.json"
+        ],
+        "toolPolicy": {
+          "todoWriteAllowed": false,
+          "validationScriptsAllowed": false,
+          "previewAllowed": false,
+          "helperScriptsAllowed": false,
+          "designFileWriteAllowed": false,
+          "allowedWritePaths": [
+            "pages/login.html",
+            "assets/"
+          ]
+        },
+        "skillRuntime": {
+          "skillDir": "/Users/best/.trae-cn/builtin/design/default/skills/solo-design",
+          "deterministicToolDir": "/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling",
+          "toolPaths": {
+            "applyHtmlHeadContract": "/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling/apply-html-head-contract.mjs",
+            "recordDispatchCompletion": "/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling/record-dispatch-completion.mjs",
+            "buildPageDispatchManifest": "/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling/build-page-dispatch-manifest.mjs",
+            "validateDesignWorkspace": "/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling/validate-design-workspace.mjs",
+            "validateFinishReadiness": "/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling/validate-finish-readiness.mjs",
+            "validateRestoreContract": "/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling/validate-restore-contract.mjs"
+          },
+          "requiredForPageSubAgent": [
+            "applyHtmlHeadContract",
+            "recordDispatchCompletion"
+          ],
+          "pathInjection": "absolute",
+          "pathContract": "Do not use {SKILL_DIR} placeholders inside Page Sub-Agent packets; use toolPaths.* absolute paths.",
+          "commandTemplates": {
+            "recordDispatchCompletion": "node '/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling/record-dispatch-completion.mjs' '/Users/best/Desktop/yunshu-agent-2/云书Agent.design' --node-id='page-login' --html-src='pages/login.html' --status=completed --changed-files=<comma-separated-project-relative-files> --trace-digest=<main-agent-runtime-trace-digest> --tool-ledger-json=<tool-ledger-json-or-file>"
+          }
+        },
+        "cssFilePath": "/Users/best/.trae-cn/design_libraries/dl_builtin_tik_tok/colors_and_type.css",
+        "htmlFilePath": "/Users/best/Desktop/yunshu-agent-2/云书Agent.design/pages/login.html",
+        "brandPrefix": "tk",
+        "aestheticsMode": "library-bound",
+        "toolDisciplineBlockPresent": true,
+        "fillHtmlHeadCommand": "node '/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling/apply-html-head-contract.mjs' '/Users/best/.trae-cn/design_libraries/dl_builtin_tik_tok/colors_and_type.css' '/Users/best/Desktop/yunshu-agent-2/云书Agent.design/pages/login.html' --title='登录 · 云书 Agent' --lang='zh-CN' --prefix='tk'",
+        "headFillMode": "skeleton-first",
+        "viewportMode": "document-scroll",
+        "completionSchemaExpected": "full",
+        "restoreFields": null,
+        "restoreContractStatus": null,
+        "restoreCompactPacket": null,
+        "deterministicCommands": null,
+        "sourceAuthorityLock": null,
+        "preDispatchFileHashes": {
+          "云书Agent.design": "4a5b7487a90a831f00d55f3c3ea97a346712e9e4d940d4efa2b70dc0eb0f677b"
+        },
+        "contextPreflight": {
+          "workflowPath": "intent-workflows/intent-page-library-bound/INTENT_WORKFLOW.md",
+          "requiredContextFiles": [
+            "shared-runtime/runtime-boundaries/lane-runtime-contracts.md",
+            "shared-runtime/agent-dispatch-runtime/lane-dispatch-index.md",
+            "delivery-quality/page-rendering-quality-gate.md",
+            "delivery-quality/design-artifact-validation.md",
+            "delivery-quality/delivery-evidence-contract.md"
+          ],
+          "optionalContextFiles": [
+            "visual-experience/visual-experience-guidelines.md"
+          ],
+          "passed": true
+        },
+        "pageSliceOnly": true,
+        "requiredFieldsPresent": true,
+        "missingFields": [],
+        "fillHtmlHeadCommandValid": true,
+        "mobileNavigation": {
+          "required": false,
+          "appliesToThisPage": false,
+          "canonicalHtmlIncluded": false,
+          "missingFields": []
+        },
+        "persistedToSummary": true,
+        "taskQueryAudited": false,
+        "proofSource": "summary-only",
+        "largeWorkflowFilesInTaskQuery": null
+      },
+      {
+        "recorded_at": "2026-07-31T09:06:44.176Z",
+        "generatedBy": "build-page-dispatch-manifest.mjs",
+        "packetType": "LibraryBoundPagePacket",
+        "laneContract": {
+          "resolvedLane": "library_bound",
+          "packetType": "LibraryBoundPagePacket",
+          "pageRuntimeGuide": "intent-workflows/intent-page-library-bound/library-bound-page-runtime.md",
+          "dispatchContract": "intent-workflows/intent-page-library-bound/dispatch-contract.md"
+        },
+        "taskLinePresent": true,
+        "outputPathPresent": true,
+        "sharedTemplate": "intent-workflows/intent-page-library-bound/library-bound-page-runtime.md",
+        "nodeId": "page-chat",
+        "htmlSrc": "pages/chat.html",
+        "supplementaryReads": [],
+        "allowedWritePaths": [
+          "pages/chat.html",
+          "assets/"
+        ],
+        "forbiddenWriteRoots": [
+          "*.design",
+          "runtime-orchestration-summary.json",
+          "validation-report.json",
+          "finish-readiness-report.json",
+          "restore-contract-report.json",
+          "page-generation-summary.json"
+        ],
+        "toolPolicy": {
+          "todoWriteAllowed": false,
+          "validationScriptsAllowed": false,
+          "previewAllowed": false,
+          "helperScriptsAllowed": false,
+          "designFileWriteAllowed": false,
+          "allowedWritePaths": [
+            "pages/chat.html",
+            "assets/"
+          ]
+        },
+        "skillRuntime": {
+          "skillDir": "/Users/best/.trae-cn/builtin/design/default/skills/solo-design",
+          "deterministicToolDir": "/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling",
+          "toolPaths": {
+            "applyHtmlHeadContract": "/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling/apply-html-head-contract.mjs",
+            "recordDispatchCompletion": "/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling/record-dispatch-completion.mjs",
+            "buildPageDispatchManifest": "/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling/build-page-dispatch-manifest.mjs",
+            "validateDesignWorkspace": "/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling/validate-design-workspace.mjs",
+            "validateFinishReadiness": "/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling/validate-finish-readiness.mjs",
+            "validateRestoreContract": "/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling/validate-restore-contract.mjs"
+          },
+          "requiredForPageSubAgent": [
+            "applyHtmlHeadContract",
+            "recordDispatchCompletion"
+          ],
+          "pathInjection": "absolute",
+          "pathContract": "Do not use {SKILL_DIR} placeholders inside Page Sub-Agent packets; use toolPaths.* absolute paths.",
+          "commandTemplates": {
+            "recordDispatchCompletion": "node '/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling/record-dispatch-completion.mjs' '/Users/best/Desktop/yunshu-agent-2/云书Agent.design' --node-id='page-chat' --html-src='pages/chat.html' --status=completed --changed-files=<comma-separated-project-relative-files> --trace-digest=<main-agent-runtime-trace-digest> --tool-ledger-json=<tool-ledger-json-or-file>"
+          }
+        },
+        "cssFilePath": "/Users/best/.trae-cn/design_libraries/dl_builtin_tik_tok/colors_and_type.css",
+        "htmlFilePath": "/Users/best/Desktop/yunshu-agent-2/云书Agent.design/pages/chat.html",
+        "brandPrefix": "tk",
+        "aestheticsMode": "library-bound",
+        "toolDisciplineBlockPresent": true,
+        "fillHtmlHeadCommand": "node '/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling/apply-html-head-contract.mjs' '/Users/best/.trae-cn/design_libraries/dl_builtin_tik_tok/colors_and_type.css' '/Users/best/Desktop/yunshu-agent-2/云书Agent.design/pages/chat.html' --title='聊天工作台' --lang='zh-CN' --prefix='tk'",
+        "headFillMode": "skeleton-first",
+        "viewportMode": "app-shell",
+        "completionSchemaExpected": "full",
+        "restoreFields": null,
+        "restoreContractStatus": null,
+        "restoreCompactPacket": null,
+        "deterministicCommands": null,
+        "sourceAuthorityLock": null,
+        "preDispatchFileHashes": {
+          "云书Agent.design": "4a5b7487a90a831f00d55f3c3ea97a346712e9e4d940d4efa2b70dc0eb0f677b"
+        },
+        "contextPreflight": {
+          "workflowPath": "intent-workflows/intent-page-library-bound/INTENT_WORKFLOW.md",
+          "requiredContextFiles": [
+            "shared-runtime/runtime-boundaries/lane-runtime-contracts.md",
+            "shared-runtime/agent-dispatch-runtime/lane-dispatch-index.md",
+            "delivery-quality/page-rendering-quality-gate.md",
+            "delivery-quality/design-artifact-validation.md",
+            "delivery-quality/delivery-evidence-contract.md"
+          ],
+          "optionalContextFiles": [
+            "visual-experience/visual-experience-guidelines.md"
+          ],
+          "passed": true
+        },
+        "pageSliceOnly": true,
+        "requiredFieldsPresent": true,
+        "missingFields": [],
+        "fillHtmlHeadCommandValid": true,
+        "mobileNavigation": {
+          "required": false,
+          "appliesToThisPage": false,
+          "canonicalHtmlIncluded": false,
+          "missingFields": []
+        },
+        "persistedToSummary": true,
+        "taskQueryAudited": false,
+        "proofSource": "summary-only",
+        "largeWorkflowFilesInTaskQuery": null
+      },
+      {
+        "recorded_at": "2026-07-31T09:06:44.176Z",
+        "generatedBy": "build-page-dispatch-manifest.mjs",
+        "packetType": "LibraryBoundPagePacket",
+        "laneContract": {
+          "resolvedLane": "library_bound",
+          "packetType": "LibraryBoundPagePacket",
+          "pageRuntimeGuide": "intent-workflows/intent-page-library-bound/library-bound-page-runtime.md",
+          "dispatchContract": "intent-workflows/intent-page-library-bound/dispatch-contract.md"
+        },
+        "taskLinePresent": true,
+        "outputPathPresent": true,
+        "sharedTemplate": "intent-workflows/intent-page-library-bound/library-bound-page-runtime.md",
+        "nodeId": "page-knowledge",
+        "htmlSrc": "pages/knowledge.html",
+        "supplementaryReads": [],
+        "allowedWritePaths": [
+          "pages/knowledge.html",
+          "assets/"
+        ],
+        "forbiddenWriteRoots": [
+          "*.design",
+          "runtime-orchestration-summary.json",
+          "validation-report.json",
+          "finish-readiness-report.json",
+          "restore-contract-report.json",
+          "page-generation-summary.json"
+        ],
+        "toolPolicy": {
+          "todoWriteAllowed": false,
+          "validationScriptsAllowed": false,
+          "previewAllowed": false,
+          "helperScriptsAllowed": false,
+          "designFileWriteAllowed": false,
+          "allowedWritePaths": [
+            "pages/knowledge.html",
+            "assets/"
+          ]
+        },
+        "skillRuntime": {
+          "skillDir": "/Users/best/.trae-cn/builtin/design/default/skills/solo-design",
+          "deterministicToolDir": "/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling",
+          "toolPaths": {
+            "applyHtmlHeadContract": "/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling/apply-html-head-contract.mjs",
+            "recordDispatchCompletion": "/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling/record-dispatch-completion.mjs",
+            "buildPageDispatchManifest": "/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling/build-page-dispatch-manifest.mjs",
+            "validateDesignWorkspace": "/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling/validate-design-workspace.mjs",
+            "validateFinishReadiness": "/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling/validate-finish-readiness.mjs",
+            "validateRestoreContract": "/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling/validate-restore-contract.mjs"
+          },
+          "requiredForPageSubAgent": [
+            "applyHtmlHeadContract",
+            "recordDispatchCompletion"
+          ],
+          "pathInjection": "absolute",
+          "pathContract": "Do not use {SKILL_DIR} placeholders inside Page Sub-Agent packets; use toolPaths.* absolute paths.",
+          "commandTemplates": {
+            "recordDispatchCompletion": "node '/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling/record-dispatch-completion.mjs' '/Users/best/Desktop/yunshu-agent-2/云书Agent.design' --node-id='page-knowledge' --html-src='pages/knowledge.html' --status=completed --changed-files=<comma-separated-project-relative-files> --trace-digest=<main-agent-runtime-trace-digest> --tool-ledger-json=<tool-ledger-json-or-file>"
+          }
+        },
+        "cssFilePath": "/Users/best/.trae-cn/design_libraries/dl_builtin_tik_tok/colors_and_type.css",
+        "htmlFilePath": "/Users/best/Desktop/yunshu-agent-2/云书Agent.design/pages/knowledge.html",
+        "brandPrefix": "tk",
+        "aestheticsMode": "library-bound",
+        "toolDisciplineBlockPresent": true,
+        "fillHtmlHeadCommand": "node '/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling/apply-html-head-contract.mjs' '/Users/best/.trae-cn/design_libraries/dl_builtin_tik_tok/colors_and_type.css' '/Users/best/Desktop/yunshu-agent-2/云书Agent.design/pages/knowledge.html' --title='知识库管理' --lang='zh-CN' --prefix='tk'",
+        "headFillMode": "skeleton-first",
+        "viewportMode": "app-shell",
+        "completionSchemaExpected": "full",
+        "restoreFields": null,
+        "restoreContractStatus": null,
+        "restoreCompactPacket": null,
+        "deterministicCommands": null,
+        "sourceAuthorityLock": null,
+        "preDispatchFileHashes": {
+          "云书Agent.design": "4a5b7487a90a831f00d55f3c3ea97a346712e9e4d940d4efa2b70dc0eb0f677b"
+        },
+        "contextPreflight": {
+          "workflowPath": "intent-workflows/intent-page-library-bound/INTENT_WORKFLOW.md",
+          "requiredContextFiles": [
+            "shared-runtime/runtime-boundaries/lane-runtime-contracts.md",
+            "shared-runtime/agent-dispatch-runtime/lane-dispatch-index.md",
+            "delivery-quality/page-rendering-quality-gate.md",
+            "delivery-quality/design-artifact-validation.md",
+            "delivery-quality/delivery-evidence-contract.md"
+          ],
+          "optionalContextFiles": [
+            "visual-experience/visual-experience-guidelines.md"
+          ],
+          "passed": true
+        },
+        "pageSliceOnly": true,
+        "requiredFieldsPresent": true,
+        "missingFields": [],
+        "fillHtmlHeadCommandValid": true,
+        "mobileNavigation": {
+          "required": false,
+          "appliesToThisPage": false,
+          "canonicalHtmlIncluded": false,
+          "missingFields": []
+        },
+        "persistedToSummary": true,
+        "taskQueryAudited": false,
+        "proofSource": "summary-only",
+        "largeWorkflowFilesInTaskQuery": null
+      },
+      {
+        "recorded_at": "2026-07-31T09:06:44.176Z",
+        "generatedBy": "build-page-dispatch-manifest.mjs",
+        "packetType": "LibraryBoundPagePacket",
+        "laneContract": {
+          "resolvedLane": "library_bound",
+          "packetType": "LibraryBoundPagePacket",
+          "pageRuntimeGuide": "intent-workflows/intent-page-library-bound/library-bound-page-runtime.md",
+          "dispatchContract": "intent-workflows/intent-page-library-bound/dispatch-contract.md"
+        },
+        "taskLinePresent": true,
+        "outputPathPresent": true,
+        "sharedTemplate": "intent-workflows/intent-page-library-bound/library-bound-page-runtime.md",
+        "nodeId": "page-experience",
+        "htmlSrc": "pages/experience.html",
+        "supplementaryReads": [],
+        "allowedWritePaths": [
+          "pages/experience.html",
+          "assets/"
+        ],
+        "forbiddenWriteRoots": [
+          "*.design",
+          "runtime-orchestration-summary.json",
+          "validation-report.json",
+          "finish-readiness-report.json",
+          "restore-contract-report.json",
+          "page-generation-summary.json"
+        ],
+        "toolPolicy": {
+          "todoWriteAllowed": false,
+          "validationScriptsAllowed": false,
+          "previewAllowed": false,
+          "helperScriptsAllowed": false,
+          "designFileWriteAllowed": false,
+          "allowedWritePaths": [
+            "pages/experience.html",
+            "assets/"
+          ]
+        },
+        "skillRuntime": {
+          "skillDir": "/Users/best/.trae-cn/builtin/design/default/skills/solo-design",
+          "deterministicToolDir": "/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling",
+          "toolPaths": {
+            "applyHtmlHeadContract": "/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling/apply-html-head-contract.mjs",
+            "recordDispatchCompletion": "/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling/record-dispatch-completion.mjs",
+            "buildPageDispatchManifest": "/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling/build-page-dispatch-manifest.mjs",
+            "validateDesignWorkspace": "/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling/validate-design-workspace.mjs",
+            "validateFinishReadiness": "/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling/validate-finish-readiness.mjs",
+            "validateRestoreContract": "/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling/validate-restore-contract.mjs"
+          },
+          "requiredForPageSubAgent": [
+            "applyHtmlHeadContract",
+            "recordDispatchCompletion"
+          ],
+          "pathInjection": "absolute",
+          "pathContract": "Do not use {SKILL_DIR} placeholders inside Page Sub-Agent packets; use toolPaths.* absolute paths.",
+          "commandTemplates": {
+            "recordDispatchCompletion": "node '/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling/record-dispatch-completion.mjs' '/Users/best/Desktop/yunshu-agent-2/云书Agent.design' --node-id='page-experience' --html-src='pages/experience.html' --status=completed --changed-files=<comma-separated-project-relative-files> --trace-digest=<main-agent-runtime-trace-digest> --tool-ledger-json=<tool-ledger-json-or-file>"
+          }
+        },
+        "cssFilePath": "/Users/best/.trae-cn/design_libraries/dl_builtin_tik_tok/colors_and_type.css",
+        "htmlFilePath": "/Users/best/Desktop/yunshu-agent-2/云书Agent.design/pages/experience.html",
+        "brandPrefix": "tk",
+        "aestheticsMode": "library-bound",
+        "toolDisciplineBlockPresent": true,
+        "fillHtmlHeadCommand": "node '/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling/apply-html-head-contract.mjs' '/Users/best/.trae-cn/design_libraries/dl_builtin_tik_tok/colors_and_type.css' '/Users/best/Desktop/yunshu-agent-2/云书Agent.design/pages/experience.html' --title='经验中心' --lang='zh-CN' --prefix='tk'",
+        "headFillMode": "skeleton-first",
+        "viewportMode": "app-shell",
+        "completionSchemaExpected": "full",
+        "restoreFields": null,
+        "restoreContractStatus": null,
+        "restoreCompactPacket": null,
+        "deterministicCommands": null,
+        "sourceAuthorityLock": null,
+        "preDispatchFileHashes": {
+          "云书Agent.design": "4a5b7487a90a831f00d55f3c3ea97a346712e9e4d940d4efa2b70dc0eb0f677b"
+        },
+        "contextPreflight": {
+          "workflowPath": "intent-workflows/intent-page-library-bound/INTENT_WORKFLOW.md",
+          "requiredContextFiles": [
+            "shared-runtime/runtime-boundaries/lane-runtime-contracts.md",
+            "shared-runtime/agent-dispatch-runtime/lane-dispatch-index.md",
+            "delivery-quality/page-rendering-quality-gate.md",
+            "delivery-quality/design-artifact-validation.md",
+            "delivery-quality/delivery-evidence-contract.md"
+          ],
+          "optionalContextFiles": [
+            "visual-experience/visual-experience-guidelines.md"
+          ],
+          "passed": true
+        },
+        "pageSliceOnly": true,
+        "requiredFieldsPresent": true,
+        "missingFields": [],
+        "fillHtmlHeadCommandValid": true,
+        "mobileNavigation": {
+          "required": false,
+          "appliesToThisPage": false,
+          "canonicalHtmlIncluded": false,
+          "missingFields": []
+        },
+        "persistedToSummary": true,
+        "taskQueryAudited": false,
+        "proofSource": "summary-only",
+        "largeWorkflowFilesInTaskQuery": null
+      },
+      {
+        "recorded_at": "2026-07-31T09:06:44.176Z",
+        "generatedBy": "build-page-dispatch-manifest.mjs",
+        "packetType": "LibraryBoundPagePacket",
+        "laneContract": {
+          "resolvedLane": "library_bound",
+          "packetType": "LibraryBoundPagePacket",
+          "pageRuntimeGuide": "intent-workflows/intent-page-library-bound/library-bound-page-runtime.md",
+          "dispatchContract": "intent-workflows/intent-page-library-bound/dispatch-contract.md"
+        },
+        "taskLinePresent": true,
+        "outputPathPresent": true,
+        "sharedTemplate": "intent-workflows/intent-page-library-bound/library-bound-page-runtime.md",
+        "nodeId": "page-approval",
+        "htmlSrc": "pages/approval.html",
+        "supplementaryReads": [],
+        "allowedWritePaths": [
+          "pages/approval.html",
+          "assets/"
+        ],
+        "forbiddenWriteRoots": [
+          "*.design",
+          "runtime-orchestration-summary.json",
+          "validation-report.json",
+          "finish-readiness-report.json",
+          "restore-contract-report.json",
+          "page-generation-summary.json"
+        ],
+        "toolPolicy": {
+          "todoWriteAllowed": false,
+          "validationScriptsAllowed": false,
+          "previewAllowed": false,
+          "helperScriptsAllowed": false,
+          "designFileWriteAllowed": false,
+          "allowedWritePaths": [
+            "pages/approval.html",
+            "assets/"
+          ]
+        },
+        "skillRuntime": {
+          "skillDir": "/Users/best/.trae-cn/builtin/design/default/skills/solo-design",
+          "deterministicToolDir": "/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling",
+          "toolPaths": {
+            "applyHtmlHeadContract": "/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling/apply-html-head-contract.mjs",
+            "recordDispatchCompletion": "/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling/record-dispatch-completion.mjs",
+            "buildPageDispatchManifest": "/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling/build-page-dispatch-manifest.mjs",
+            "validateDesignWorkspace": "/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling/validate-design-workspace.mjs",
+            "validateFinishReadiness": "/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling/validate-finish-readiness.mjs",
+            "validateRestoreContract": "/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling/validate-restore-contract.mjs"
+          },
+          "requiredForPageSubAgent": [
+            "applyHtmlHeadContract",
+            "recordDispatchCompletion"
+          ],
+          "pathInjection": "absolute",
+          "pathContract": "Do not use {SKILL_DIR} placeholders inside Page Sub-Agent packets; use toolPaths.* absolute paths.",
+          "commandTemplates": {
+            "recordDispatchCompletion": "node '/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling/record-dispatch-completion.mjs' '/Users/best/Desktop/yunshu-agent-2/云书Agent.design' --node-id='page-approval' --html-src='pages/approval.html' --status=completed --changed-files=<comma-separated-project-relative-files> --trace-digest=<main-agent-runtime-trace-digest> --tool-ledger-json=<tool-ledger-json-or-file>"
+          }
+        },
+        "cssFilePath": "/Users/best/.trae-cn/design_libraries/dl_builtin_tik_tok/colors_and_type.css",
+        "htmlFilePath": "/Users/best/Desktop/yunshu-agent-2/云书Agent.design/pages/approval.html",
+        "brandPrefix": "tk",
+        "aestheticsMode": "library-bound",
+        "toolDisciplineBlockPresent": true,
+        "fillHtmlHeadCommand": "node '/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling/apply-html-head-contract.mjs' '/Users/best/.trae-cn/design_libraries/dl_builtin_tik_tok/colors_and_type.css' '/Users/best/Desktop/yunshu-agent-2/云书Agent.design/pages/approval.html' --title='审批中心' --lang='zh-CN' --prefix='tk'",
+        "headFillMode": "skeleton-first",
+        "viewportMode": "app-shell",
+        "completionSchemaExpected": "full",
+        "restoreFields": null,
+        "restoreContractStatus": null,
+        "restoreCompactPacket": null,
+        "deterministicCommands": null,
+        "sourceAuthorityLock": null,
+        "preDispatchFileHashes": {
+          "云书Agent.design": "4a5b7487a90a831f00d55f3c3ea97a346712e9e4d940d4efa2b70dc0eb0f677b"
+        },
+        "contextPreflight": {
+          "workflowPath": "intent-workflows/intent-page-library-bound/INTENT_WORKFLOW.md",
+          "requiredContextFiles": [
+            "shared-runtime/runtime-boundaries/lane-runtime-contracts.md",
+            "shared-runtime/agent-dispatch-runtime/lane-dispatch-index.md",
+            "delivery-quality/page-rendering-quality-gate.md",
+            "delivery-quality/design-artifact-validation.md",
+            "delivery-quality/delivery-evidence-contract.md"
+          ],
+          "optionalContextFiles": [
+            "visual-experience/visual-experience-guidelines.md"
+          ],
+          "passed": true
+        },
+        "pageSliceOnly": true,
+        "requiredFieldsPresent": true,
+        "missingFields": [],
+        "fillHtmlHeadCommandValid": true,
+        "mobileNavigation": {
+          "required": false,
+          "appliesToThisPage": false,
+          "canonicalHtmlIncluded": false,
+          "missingFields": []
+        },
+        "persistedToSummary": true,
+        "taskQueryAudited": false,
+        "proofSource": "summary-only",
+        "largeWorkflowFilesInTaskQuery": null
+      },
+      {
+        "recorded_at": "2026-07-31T09:06:44.176Z",
+        "generatedBy": "build-page-dispatch-manifest.mjs",
+        "packetType": "LibraryBoundPagePacket",
+        "laneContract": {
+          "resolvedLane": "library_bound",
+          "packetType": "LibraryBoundPagePacket",
+          "pageRuntimeGuide": "intent-workflows/intent-page-library-bound/library-bound-page-runtime.md",
+          "dispatchContract": "intent-workflows/intent-page-library-bound/dispatch-contract.md"
+        },
+        "taskLinePresent": true,
+        "outputPathPresent": true,
+        "sharedTemplate": "intent-workflows/intent-page-library-bound/library-bound-page-runtime.md",
+        "nodeId": "page-org",
+        "htmlSrc": "pages/org.html",
+        "supplementaryReads": [],
+        "allowedWritePaths": [
+          "pages/org.html",
+          "assets/"
+        ],
+        "forbiddenWriteRoots": [
+          "*.design",
+          "runtime-orchestration-summary.json",
+          "validation-report.json",
+          "finish-readiness-report.json",
+          "restore-contract-report.json",
+          "page-generation-summary.json"
+        ],
+        "toolPolicy": {
+          "todoWriteAllowed": false,
+          "validationScriptsAllowed": false,
+          "previewAllowed": false,
+          "helperScriptsAllowed": false,
+          "designFileWriteAllowed": false,
+          "allowedWritePaths": [
+            "pages/org.html",
+            "assets/"
+          ]
+        },
+        "skillRuntime": {
+          "skillDir": "/Users/best/.trae-cn/builtin/design/default/skills/solo-design",
+          "deterministicToolDir": "/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling",
+          "toolPaths": {
+            "applyHtmlHeadContract": "/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling/apply-html-head-contract.mjs",
+            "recordDispatchCompletion": "/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling/record-dispatch-completion.mjs",
+            "buildPageDispatchManifest": "/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling/build-page-dispatch-manifest.mjs",
+            "validateDesignWorkspace": "/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling/validate-design-workspace.mjs",
+            "validateFinishReadiness": "/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling/validate-finish-readiness.mjs",
+            "validateRestoreContract": "/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling/validate-restore-contract.mjs"
+          },
+          "requiredForPageSubAgent": [
+            "applyHtmlHeadContract",
+            "recordDispatchCompletion"
+          ],
+          "pathInjection": "absolute",
+          "pathContract": "Do not use {SKILL_DIR} placeholders inside Page Sub-Agent packets; use toolPaths.* absolute paths.",
+          "commandTemplates": {
+            "recordDispatchCompletion": "node '/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling/record-dispatch-completion.mjs' '/Users/best/Desktop/yunshu-agent-2/云书Agent.design' --node-id='page-org' --html-src='pages/org.html' --status=completed --changed-files=<comma-separated-project-relative-files> --trace-digest=<main-agent-runtime-trace-digest> --tool-ledger-json=<tool-ledger-json-or-file>"
+          }
+        },
+        "cssFilePath": "/Users/best/.trae-cn/design_libraries/dl_builtin_tik_tok/colors_and_type.css",
+        "htmlFilePath": "/Users/best/Desktop/yunshu-agent-2/云书Agent.design/pages/org.html",
+        "brandPrefix": "tk",
+        "aestheticsMode": "library-bound",
+        "toolDisciplineBlockPresent": true,
+        "fillHtmlHeadCommand": "node '/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling/apply-html-head-contract.mjs' '/Users/best/.trae-cn/design_libraries/dl_builtin_tik_tok/colors_and_type.css' '/Users/best/Desktop/yunshu-agent-2/云书Agent.design/pages/org.html' --title='组织架构' --lang='zh-CN' --prefix='tk'",
+        "headFillMode": "skeleton-first",
+        "viewportMode": "app-shell",
+        "completionSchemaExpected": "full",
+        "restoreFields": null,
+        "restoreContractStatus": null,
+        "restoreCompactPacket": null,
+        "deterministicCommands": null,
+        "sourceAuthorityLock": null,
+        "preDispatchFileHashes": {
+          "云书Agent.design": "4a5b7487a90a831f00d55f3c3ea97a346712e9e4d940d4efa2b70dc0eb0f677b"
+        },
+        "contextPreflight": {
+          "workflowPath": "intent-workflows/intent-page-library-bound/INTENT_WORKFLOW.md",
+          "requiredContextFiles": [
+            "shared-runtime/runtime-boundaries/lane-runtime-contracts.md",
+            "shared-runtime/agent-dispatch-runtime/lane-dispatch-index.md",
+            "delivery-quality/page-rendering-quality-gate.md",
+            "delivery-quality/design-artifact-validation.md",
+            "delivery-quality/delivery-evidence-contract.md"
+          ],
+          "optionalContextFiles": [
+            "visual-experience/visual-experience-guidelines.md"
+          ],
+          "passed": true
+        },
+        "pageSliceOnly": true,
+        "requiredFieldsPresent": true,
+        "missingFields": [],
+        "fillHtmlHeadCommandValid": true,
+        "mobileNavigation": {
+          "required": false,
+          "appliesToThisPage": false,
+          "canonicalHtmlIncluded": false,
+          "missingFields": []
+        },
+        "persistedToSummary": true,
+        "taskQueryAudited": false,
+        "proofSource": "summary-only",
+        "largeWorkflowFilesInTaskQuery": null
+      },
+      {
+        "recorded_at": "2026-07-31T09:06:44.176Z",
+        "generatedBy": "build-page-dispatch-manifest.mjs",
+        "packetType": "LibraryBoundPagePacket",
+        "laneContract": {
+          "resolvedLane": "library_bound",
+          "packetType": "LibraryBoundPagePacket",
+          "pageRuntimeGuide": "intent-workflows/intent-page-library-bound/library-bound-page-runtime.md",
+          "dispatchContract": "intent-workflows/intent-page-library-bound/dispatch-contract.md"
+        },
+        "taskLinePresent": true,
+        "outputPathPresent": true,
+        "sharedTemplate": "intent-workflows/intent-page-library-bound/library-bound-page-runtime.md",
+        "nodeId": "page-config",
+        "htmlSrc": "pages/config.html",
+        "supplementaryReads": [],
+        "allowedWritePaths": [
+          "pages/config.html",
+          "assets/"
+        ],
+        "forbiddenWriteRoots": [
+          "*.design",
+          "runtime-orchestration-summary.json",
+          "validation-report.json",
+          "finish-readiness-report.json",
+          "restore-contract-report.json",
+          "page-generation-summary.json"
+        ],
+        "toolPolicy": {
+          "todoWriteAllowed": false,
+          "validationScriptsAllowed": false,
+          "previewAllowed": false,
+          "helperScriptsAllowed": false,
+          "designFileWriteAllowed": false,
+          "allowedWritePaths": [
+            "pages/config.html",
+            "assets/"
+          ]
+        },
+        "skillRuntime": {
+          "skillDir": "/Users/best/.trae-cn/builtin/design/default/skills/solo-design",
+          "deterministicToolDir": "/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling",
+          "toolPaths": {
+            "applyHtmlHeadContract": "/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling/apply-html-head-contract.mjs",
+            "recordDispatchCompletion": "/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling/record-dispatch-completion.mjs",
+            "buildPageDispatchManifest": "/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling/build-page-dispatch-manifest.mjs",
+            "validateDesignWorkspace": "/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling/validate-design-workspace.mjs",
+            "validateFinishReadiness": "/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling/validate-finish-readiness.mjs",
+            "validateRestoreContract": "/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling/validate-restore-contract.mjs"
+          },
+          "requiredForPageSubAgent": [
+            "applyHtmlHeadContract",
+            "recordDispatchCompletion"
+          ],
+          "pathInjection": "absolute",
+          "pathContract": "Do not use {SKILL_DIR} placeholders inside Page Sub-Agent packets; use toolPaths.* absolute paths.",
+          "commandTemplates": {
+            "recordDispatchCompletion": "node '/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling/record-dispatch-completion.mjs' '/Users/best/Desktop/yunshu-agent-2/云书Agent.design' --node-id='page-config' --html-src='pages/config.html' --status=completed --changed-files=<comma-separated-project-relative-files> --trace-digest=<main-agent-runtime-trace-digest> --tool-ledger-json=<tool-ledger-json-or-file>"
+          }
+        },
+        "cssFilePath": "/Users/best/.trae-cn/design_libraries/dl_builtin_tik_tok/colors_and_type.css",
+        "htmlFilePath": "/Users/best/Desktop/yunshu-agent-2/云书Agent.design/pages/config.html",
+        "brandPrefix": "tk",
+        "aestheticsMode": "library-bound",
+        "toolDisciplineBlockPresent": true,
+        "fillHtmlHeadCommand": "node '/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling/apply-html-head-contract.mjs' '/Users/best/.trae-cn/design_libraries/dl_builtin_tik_tok/colors_and_type.css' '/Users/best/Desktop/yunshu-agent-2/云书Agent.design/pages/config.html' --title='配置中心' --lang='zh-CN' --prefix='tk'",
+        "headFillMode": "skeleton-first",
+        "viewportMode": "app-shell",
+        "completionSchemaExpected": "full",
+        "restoreFields": null,
+        "restoreContractStatus": null,
+        "restoreCompactPacket": null,
+        "deterministicCommands": null,
+        "sourceAuthorityLock": null,
+        "preDispatchFileHashes": {
+          "云书Agent.design": "4a5b7487a90a831f00d55f3c3ea97a346712e9e4d940d4efa2b70dc0eb0f677b"
+        },
+        "contextPreflight": {
+          "workflowPath": "intent-workflows/intent-page-library-bound/INTENT_WORKFLOW.md",
+          "requiredContextFiles": [
+            "shared-runtime/runtime-boundaries/lane-runtime-contracts.md",
+            "shared-runtime/agent-dispatch-runtime/lane-dispatch-index.md",
+            "delivery-quality/page-rendering-quality-gate.md",
+            "delivery-quality/design-artifact-validation.md",
+            "delivery-quality/delivery-evidence-contract.md"
+          ],
+          "optionalContextFiles": [
+            "visual-experience/visual-experience-guidelines.md"
+          ],
+          "passed": true
+        },
+        "pageSliceOnly": true,
+        "requiredFieldsPresent": true,
+        "missingFields": [],
+        "fillHtmlHeadCommandValid": true,
+        "mobileNavigation": {
+          "required": false,
+          "appliesToThisPage": false,
+          "canonicalHtmlIncluded": false,
+          "missingFields": []
+        },
+        "persistedToSummary": true,
+        "taskQueryAudited": false,
+        "proofSource": "summary-only",
+        "largeWorkflowFilesInTaskQuery": null
+      },
+      {
+        "recorded_at": "2026-07-31T09:06:44.176Z",
+        "generatedBy": "build-page-dispatch-manifest.mjs",
+        "packetType": "LibraryBoundPagePacket",
+        "laneContract": {
+          "resolvedLane": "library_bound",
+          "packetType": "LibraryBoundPagePacket",
+          "pageRuntimeGuide": "intent-workflows/intent-page-library-bound/library-bound-page-runtime.md",
+          "dispatchContract": "intent-workflows/intent-page-library-bound/dispatch-contract.md"
+        },
+        "taskLinePresent": true,
+        "outputPathPresent": true,
+        "sharedTemplate": "intent-workflows/intent-page-library-bound/library-bound-page-runtime.md",
+        "nodeId": "page-monitor",
+        "htmlSrc": "pages/monitor.html",
+        "supplementaryReads": [],
+        "allowedWritePaths": [
+          "pages/monitor.html",
+          "assets/"
+        ],
+        "forbiddenWriteRoots": [
+          "*.design",
+          "runtime-orchestration-summary.json",
+          "validation-report.json",
+          "finish-readiness-report.json",
+          "restore-contract-report.json",
+          "page-generation-summary.json"
+        ],
+        "toolPolicy": {
+          "todoWriteAllowed": false,
+          "validationScriptsAllowed": false,
+          "previewAllowed": false,
+          "helperScriptsAllowed": false,
+          "designFileWriteAllowed": false,
+          "allowedWritePaths": [
+            "pages/monitor.html",
+            "assets/"
+          ]
+        },
+        "skillRuntime": {
+          "skillDir": "/Users/best/.trae-cn/builtin/design/default/skills/solo-design",
+          "deterministicToolDir": "/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling",
+          "toolPaths": {
+            "applyHtmlHeadContract": "/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling/apply-html-head-contract.mjs",
+            "recordDispatchCompletion": "/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling/record-dispatch-completion.mjs",
+            "buildPageDispatchManifest": "/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling/build-page-dispatch-manifest.mjs",
+            "validateDesignWorkspace": "/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling/validate-design-workspace.mjs",
+            "validateFinishReadiness": "/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling/validate-finish-readiness.mjs",
+            "validateRestoreContract": "/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling/validate-restore-contract.mjs"
+          },
+          "requiredForPageSubAgent": [
+            "applyHtmlHeadContract",
+            "recordDispatchCompletion"
+          ],
+          "pathInjection": "absolute",
+          "pathContract": "Do not use {SKILL_DIR} placeholders inside Page Sub-Agent packets; use toolPaths.* absolute paths.",
+          "commandTemplates": {
+            "recordDispatchCompletion": "node '/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling/record-dispatch-completion.mjs' '/Users/best/Desktop/yunshu-agent-2/云书Agent.design' --node-id='page-monitor' --html-src='pages/monitor.html' --status=completed --changed-files=<comma-separated-project-relative-files> --trace-digest=<main-agent-runtime-trace-digest> --tool-ledger-json=<tool-ledger-json-or-file>"
+          }
+        },
+        "cssFilePath": "/Users/best/.trae-cn/design_libraries/dl_builtin_tik_tok/colors_and_type.css",
+        "htmlFilePath": "/Users/best/Desktop/yunshu-agent-2/云书Agent.design/pages/monitor.html",
+        "brandPrefix": "tk",
+        "aestheticsMode": "library-bound",
+        "toolDisciplineBlockPresent": true,
+        "fillHtmlHeadCommand": "node '/Users/best/.trae-cn/builtin/design/default/skills/solo-design/shared-runtime/deterministic-tooling/apply-html-head-contract.mjs' '/Users/best/.trae-cn/design_libraries/dl_builtin_tik_tok/colors_and_type.css' '/Users/best/Desktop/yunshu-agent-2/云书Agent.design/pages/monitor.html' --title='监测中心' --lang='zh-CN' --prefix='tk'",
+        "headFillMode": "skeleton-first",
+        "viewportMode": "app-shell",
+        "completionSchemaExpected": "full",
+        "restoreFields": null,
+        "restoreContractStatus": null,
+        "restoreCompactPacket": null,
+        "deterministicCommands": null,
+        "sourceAuthorityLock": null,
+        "preDispatchFileHashes": {
+          "云书Agent.design": "4a5b7487a90a831f00d55f3c3ea97a346712e9e4d940d4efa2b70dc0eb0f677b"
+        },
+        "contextPreflight": {
+          "workflowPath": "intent-workflows/intent-page-library-bound/INTENT_WORKFLOW.md",
+          "requiredContextFiles": [
+            "shared-runtime/runtime-boundaries/lane-runtime-contracts.md",
+            "shared-runtime/agent-dispatch-runtime/lane-dispatch-index.md",
+            "delivery-quality/page-rendering-quality-gate.md",
+            "delivery-quality/design-artifact-validation.md",
+            "delivery-quality/delivery-evidence-contract.md"
+          ],
+          "optionalContextFiles": [
+            "visual-experience/visual-experience-guidelines.md"
+          ],
+          "passed": true
+        },
+        "pageSliceOnly": true,
+        "requiredFieldsPresent": true,
+        "missingFields": [],
+        "fillHtmlHeadCommandValid": true,
+        "mobileNavigation": {
+          "required": false,
+          "appliesToThisPage": false,
+          "canonicalHtmlIncluded": false,
+          "missingFields": []
+        },
+        "persistedToSummary": true,
+        "taskQueryAudited": false,
+        "proofSource": "summary-only",
+        "largeWorkflowFilesInTaskQuery": null
+      }
+    ],
+    "readScopeLedger": [
+      {
+        "actor": "page-sub-agent",
+        "lane": "library_bound",
+        "path": "intent-workflows/intent-page-library-bound/library-bound-page-runtime.md",
+        "reason": "page runtime guide",
+        "scopeClass": "page-runtime",
+        "declaredBeforeRead": true,
+        "recordedAt": "2026-07-31T09:06:44.176Z",
+        "nodeId": "page-login",
+        "htmlSrc": "pages/login.html"
+      },
+      {
+        "actor": "page-sub-agent",
+        "lane": "library_bound",
+        "path": "intent-workflows/intent-page-library-bound/dispatch-contract.md",
+        "reason": "dispatch contract",
+        "scopeClass": "dispatch-contract",
+        "declaredBeforeRead": true,
+        "recordedAt": "2026-07-31T09:06:44.176Z",
+        "nodeId": "page-login",
+        "htmlSrc": "pages/login.html"
+      }
+    ],
+    "expectedDispatches": [
+      {
+        "nodeId": "page-monitor",
+        "pageId": "page-monitor",
+        "targetPageId": "page-monitor",
+        "htmlSrc": "pages/monitor.html",
+        "packetType": "LibraryBoundPagePacket",
+        "status": "completed",
+        "changedFiles": [
+          "pages/monitor.html"
+        ],
+        "toolCallLedger": {
+          "source": "main-agent-runtime-trace",
+          "traceDigest": "monitor-page-repair",
+          "todoWriteCalls": 0,
+          "previewCalls": 0,
+          "validationScriptCalls": 0,
+          "helperScriptWrites": 0
+        },
+        "recordedAt": "2026-08-03T03:27:20.402Z",
+        "source": "record-dispatch-completion.mjs"
+      },
+      {
+        "nodeId": "page-chat",
+        "pageId": "page-chat",
+        "targetPageId": "page-chat",
+        "htmlSrc": "pages/chat.html",
+        "packetType": "LibraryBoundPagePacket",
+        "status": "completed",
+        "changedFiles": [
+          "pages/chat.html"
+        ],
+        "toolCallLedger": {
+          "source": "main-agent-runtime-trace",
+          "traceDigest": "chat-page-repair-app-shell",
+          "todoWriteCalls": 0,
+          "previewCalls": 0,
+          "validationScriptCalls": 0,
+          "helperScriptWrites": 0
+        },
+        "recordedAt": "2026-08-03T03:27:18.854Z",
+        "source": "record-dispatch-completion.mjs"
+      },
+      {
+        "nodeId": "page-knowledge",
+        "pageId": "page-knowledge",
+        "targetPageId": "page-knowledge",
+        "htmlSrc": "pages/knowledge.html",
+        "packetType": "LibraryBoundPagePacket",
+        "status": "completed",
+        "changedFiles": [
+          "pages/knowledge.html"
+        ],
+        "toolCallLedger": {
+          "source": "main-agent-runtime-trace",
+          "traceDigest": "knowledge-page-repair",
+          "todoWriteCalls": 0,
+          "previewCalls": 0,
+          "validationScriptCalls": 0,
+          "helperScriptWrites": 0
+        },
+        "recordedAt": "2026-08-03T03:27:19.236Z",
+        "source": "record-dispatch-completion.mjs"
+      },
+      {
+        "nodeId": "page-experience",
+        "pageId": "page-experience",
+        "targetPageId": "page-experience",
+        "htmlSrc": "pages/experience.html",
+        "packetType": "LibraryBoundPagePacket",
+        "status": "completed",
+        "changedFiles": [
+          "pages/experience.html"
+        ],
+        "toolCallLedger": {
+          "source": "main-agent-runtime-trace",
+          "traceDigest": "experience-page-repair",
+          "todoWriteCalls": 0,
+          "previewCalls": 0,
+          "validationScriptCalls": 0,
+          "helperScriptWrites": 0
+        },
+        "recordedAt": "2026-08-03T03:27:19.614Z",
+        "source": "record-dispatch-completion.mjs"
+      },
+      {
+        "nodeId": "page-approval",
+        "pageId": "page-approval",
+        "targetPageId": "page-approval",
+        "htmlSrc": "pages/approval.html",
+        "packetType": "LibraryBoundPagePacket",
+        "status": "completed",
+        "changedFiles": [
+          "pages/approval.html"
+        ],
+        "toolCallLedger": {
+          "source": "main-agent-runtime-trace",
+          "traceDigest": "approval-page-repair",
+          "todoWriteCalls": 0,
+          "previewCalls": 0,
+          "validationScriptCalls": 0,
+          "helperScriptWrites": 0
+        },
+        "recordedAt": "2026-08-03T03:27:19.927Z",
+        "source": "record-dispatch-completion.mjs"
+      },
+      {
+        "nodeId": "page-org",
+        "pageId": "page-org",
+        "targetPageId": "page-org",
+        "htmlSrc": "pages/org.html",
+        "packetType": "LibraryBoundPagePacket",
+        "status": "completed",
+        "changedFiles": [
+          "pages/org.html"
+        ],
+        "toolCallLedger": {
+          "source": "main-agent-runtime-trace",
+          "traceDigest": "org-page-repair",
+          "todoWriteCalls": 0,
+          "previewCalls": 0,
+          "validationScriptCalls": 0,
+          "helperScriptWrites": 0
+        },
+        "recordedAt": "2026-08-03T03:27:20.107Z",
+        "source": "record-dispatch-completion.mjs"
+      },
+      {
+        "nodeId": "page-config",
+        "pageId": "page-config",
+        "targetPageId": "page-config",
+        "htmlSrc": "pages/config.html",
+        "packetType": "LibraryBoundPagePacket",
+        "status": "completed",
+        "changedFiles": [
+          "pages/config.html"
+        ],
+        "toolCallLedger": {
+          "source": "main-agent-runtime-trace",
+          "traceDigest": "config-page-repair",
+          "todoWriteCalls": 0,
+          "previewCalls": 0,
+          "validationScriptCalls": 0,
+          "helperScriptWrites": 0
+        },
+        "recordedAt": "2026-08-03T03:27:20.265Z",
+        "source": "record-dispatch-completion.mjs"
+      },
+      {
+        "nodeId": "page-login",
+        "pageId": "page-login",
+        "targetPageId": "page-login",
+        "htmlSrc": "pages/login.html",
+        "packetType": "LibraryBoundPagePacket",
+        "status": "completed",
+        "changedFiles": [
+          "pages/login.html"
+        ],
+        "toolCallLedger": {
+          "source": "main-agent-runtime-trace",
+          "traceDigest": "login-page-sub-agent-generation",
+          "todoWriteCalls": 0,
+          "previewCalls": 0,
+          "validationScriptCalls": 0,
+          "helperScriptWrites": 0
+        },
+        "recordedAt": "2026-08-03T03:26:55.417Z",
+        "source": "record-dispatch-completion.mjs"
+      }
+    ],
+    "mainAgentPostDispatchMutations": [
+      {
+        "path": "云书Agent.design",
+        "reason": "dispatch-completion-recording",
+        "owner": "main-agent",
+        "recordedAt": "2026-08-03T03:26:55.417Z",
+        "source": "record-dispatch-completion.mjs"
+      },
+      {
+        "path": "云书Agent.design",
+        "reason": "validation-repair",
+        "owner": "main-agent",
+        "recordedAt": "2026-08-03T03:27:18.854Z",
+        "source": "record-dispatch-completion.mjs"
+      }
+    ],
+    "validationRepairLedger": [
+      {
+        "failedReportPath": "validation-report.json",
+        "failedReportHash": "1c8bf73d8917770585880305dc6c5b03cc32771d352fe18addb79155e72b83b0",
+        "repairWorkflowReadPath": "intent-workflows/intent-project-mutation/main-agent-repair-workflow.md",
+        "repairStartedAt": "2026-08-03T03:22:21.057Z",
+        "repairEntryStatus": "started-awaiting-owner-batch-repair",
+        "ownerTriage": [
+          {
+            "owner": "sub-agent",
+            "errorClass": "hardcoded-color-in-body",
+            "affectedFiles": [
+              "approval.html"
+            ],
+            "repairScope": "targeted-token-replace",
+            "strategy": "targeted_token_replace_once"
+          },
+          {
+            "owner": "sub-agent",
+            "errorClass": "hardcoded-color-in-body",
+            "affectedFiles": [
+              "chat.html"
+            ],
+            "repairScope": "targeted-token-replace",
+            "strategy": "targeted_token_replace_once"
+          },
+          {
+            "owner": "sub-agent",
+            "errorClass": "hardcoded-color-in-body",
+            "affectedFiles": [
+              "config.html"
+            ],
+            "repairScope": "targeted-token-replace",
+            "strategy": "targeted_token_replace_once"
+          },
+          {
+            "owner": "sub-agent",
+            "errorClass": "hardcoded-color-in-body",
+            "affectedFiles": [
+              "experience.html"
+            ],
+            "repairScope": "targeted-token-replace",
+            "strategy": "targeted_token_replace_once"
+          },
+          {
+            "owner": "sub-agent",
+            "errorClass": "hardcoded-color-in-body",
+            "affectedFiles": [
+              "knowledge.html"
+            ],
+            "repairScope": "targeted-token-replace",
+            "strategy": "targeted_token_replace_once"
+          },
+          {
+            "owner": "sub-agent",
+            "errorClass": "hardcoded-color-in-body",
+            "affectedFiles": [
+              "monitor.html"
+            ],
+            "repairScope": "targeted-token-replace",
+            "strategy": "targeted_token_replace_once"
+          },
+          {
+            "owner": "sub-agent",
+            "errorClass": "hardcoded-color-in-body",
+            "affectedFiles": [
+              "org.html"
+            ],
+            "repairScope": "targeted-token-replace",
+            "strategy": "targeted_token_replace_once"
+          }
+        ],
+        "repairPlanHints": [
+          {
+            "errorClass": "hardcoded-color-in-body",
+            "owner": "sub-agent",
+            "repairScope": "targeted-token-replace",
+            "strategy": "targeted_token_replace_once",
+            "affectedFiles": [
+              "approval.html"
+            ],
+            "repairReportPath": null,
+            "repairAlreadyAttempted": false,
+            "allowSourceRead": "no-full-html-read",
+            "maxValidationRuns": 2
+          },
+          {
+            "errorClass": "hardcoded-color-in-body",
+            "owner": "sub-agent",
+            "repairScope": "targeted-token-replace",
+            "strategy": "targeted_token_replace_once",
+            "affectedFiles": [
+              "chat.html"
+            ],
+            "repairReportPath": null,
+            "repairAlreadyAttempted": false,
+            "allowSourceRead": "no-full-html-read",
+            "maxValidationRuns": 2
+          },
+          {
+            "errorClass": "hardcoded-color-in-body",
+            "owner": "sub-agent",
+            "repairScope": "targeted-token-replace",
+            "strategy": "targeted_token_replace_once",
+            "affectedFiles": [
+              "config.html"
+            ],
+            "repairReportPath": null,
+            "repairAlreadyAttempted": false,
+            "allowSourceRead": "no-full-html-read",
+            "maxValidationRuns": 2
+          },
+          {
+            "errorClass": "hardcoded-color-in-body",
+            "owner": "sub-agent",
+            "repairScope": "targeted-token-replace",
+            "strategy": "targeted_token_replace_once",
+            "affectedFiles": [
+              "experience.html"
+            ],
+            "repairReportPath": null,
+            "repairAlreadyAttempted": false,
+            "allowSourceRead": "no-full-html-read",
+            "maxValidationRuns": 2
+          },
+          {
+            "errorClass": "hardcoded-color-in-body",
+            "owner": "sub-agent",
+            "repairScope": "targeted-token-replace",
+            "strategy": "targeted_token_replace_once",
+            "affectedFiles": [
+              "knowledge.html"
+            ],
+            "repairReportPath": null,
+            "repairAlreadyAttempted": false,
+            "allowSourceRead": "no-full-html-read",
+            "maxValidationRuns": 2
+          },
+          {
+            "errorClass": "hardcoded-color-in-body",
+            "owner": "sub-agent",
+            "repairScope": "targeted-token-replace",
+            "strategy": "targeted_token_replace_once",
+            "affectedFiles": [
+              "monitor.html"
+            ],
+            "repairReportPath": null,
+            "repairAlreadyAttempted": false,
+            "allowSourceRead": "no-full-html-read",
+            "maxValidationRuns": 2
+          },
+          {
+            "errorClass": "hardcoded-color-in-body",
+            "owner": "sub-agent",
+            "repairScope": "targeted-token-replace",
+            "strategy": "targeted_token_replace_once",
+            "affectedFiles": [
+              "org.html"
+            ],
+            "repairReportPath": null,
+            "repairAlreadyAttempted": false,
+            "allowSourceRead": "no-full-html-read",
+            "maxValidationRuns": 2
+          }
+        ],
+        "repairActions": [],
+        "revalidationReportPath": null,
+        "revalidationReportHash": null,
+        "revalidationSuccess": null,
+        "blockedReason": null
+      }
+    ],
+    "repairEntryEvidence": [
+      {
+        "failedReportPath": "validation-report.json",
+        "failedReportHash": "1c8bf73d8917770585880305dc6c5b03cc32771d352fe18addb79155e72b83b0",
+        "repairWorkflowReadPath": "intent-workflows/intent-project-mutation/main-agent-repair-workflow.md",
+        "repairStartedAt": "2026-08-03T03:22:21.057Z",
+        "ledgerIndex": 0,
+        "ownerTriageCount": 7,
+        "repairActionCount": 0,
+        "revalidationReportPath": null,
+        "revalidationReportHash": null,
+        "revalidationSuccess": null
+      }
+    ]
+  }
+}

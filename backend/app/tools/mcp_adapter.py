@@ -57,4 +57,5 @@ async def get_mcp_tools(server_name: str) -> list:
     from langchain_mcp_adapters.client import MultiServerMCPClient
     cfg = mcp_registry._servers[server_name]
     client = MultiServerMCPClient({server_name: _build_connection(cfg)})
-    return await client.get_tools(server_name)
+    # langchain-mcp-adapters 0.3.x 中 get_tools 的 server_name 为关键字参数
+    return await client.get_tools(server_name=server_name)
