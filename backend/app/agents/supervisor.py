@@ -13,7 +13,6 @@ class RouteDecision(BaseModel):
     confidence: float = Field(description="置信度 0~1")
 
 ROUTE_SCHEMA = RouteDecision.model_json_schema()
-AGENT_CODES = ["marketing", "sales_analysis", "scheduling", "general"]
 
 AGENT_KEYWORDS = {
     "marketing": ["营销", "活动", "推广", "策划", "投放", "广告", "campaign", "marketing"],
