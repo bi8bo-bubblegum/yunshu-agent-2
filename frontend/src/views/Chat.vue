@@ -15,6 +15,11 @@ const streaming = ref(false)
 const listRef = ref<HTMLElement>()
 const router = useRouter()
 const pendingApproval = ref<{ conversationId: string; approvalId: string } | null>(null)
+// 流式状态与会话绑定：切走再回来能恢复气泡与流程面板，互不串扰
+const streamActive = ref(false)
+const streamConv = ref('')
+const streamBuf = ref('')
+const stepsConv = ref('')
 
 onMounted(loadConvs)
 
@@ -55,11 +60,14 @@ async function selectConv(id: string) {
   stopPoll()
   currentId.value = id
   messages.value = []
-  steps.value = []
   try {
     const { data } = await client.get<Message[]>(`/conversations/${id}/messages`)
     messages.value = data
     if (data[data.length - 1]?.role === 'assistant') pendingApproval.value = null
+    // 回到正在流式输出的会话：把已缓冲的回复气泡接回来
+    if (streamActive.value && id === streamConv.value && data[data.length - 1]?.role !== 'assistant') {
+      messages.value.push({ id: 'stream-buf', role: 'assistant', content: streamBuf.value })
+    }
     maybePollPending()
   } catch { /* ignore */ }
 }
@@ -134,16 +142,23 @@ async function send() {
   const text = input.value.trim()
   if (!text || streaming.value || !currentId.value) return
   input.value = ''
+  streamActive.value = true
+  streamConv.value = currentId.value
+  streamBuf.value = ''
+  stepsConv.value = currentId.value
   steps.value = []
   messages.value.push({ id: `u-${Date.now()}`, role: 'user', content: text })
-  messages.value.push({ id: `a-${Date.now()}`, role: 'assistant', content: '' })
+  messages.value.push({ id: 'stream-buf', role: 'assistant', content: '' })
   streaming.value = true
   abortCtrl = new AbortController()
 
-  const ai = messages.value[messages.value.length - 1]
   try {
     await streamChat(currentId.value, text, (e: SSEEvent) => {
-      if (e.event === 'token') ai.content += e.content ?? ''
+      if (e.event === 'token') {
+        streamBuf.value += e.content ?? ''
+        const sb = messages.value.find(m => m.id === 'stream-buf')
+        if (sb) sb.content = streamBuf.value
+      }
       else if (e.event === 'route') {
         steps.value.push({ type: 'route', text: `已路由到 ${agentName(String(e.agent ?? ''))}` })
       } else if (e.event === 'tool_start') {
@@ -151,14 +166,15 @@ async function send() {
       } else if (e.event === 'tool_end') {
         steps.value.push({ type: 'tool_end', text: `工具返回 ${String(e.tool ?? '')}`, detail: fmtDetail(e.result) })
       } else if (e.event === 'answer') {
-        if (ai.content === '') ai.content = e.content ?? ''
+        const sb = messages.value.find(m => m.id === 'stream-buf')
+        if (sb && sb.content === '') sb.content = e.content ?? ''
       }
       else if (e.event === 'confirm_required') {
         const p = (e.payload ?? {}) as Record<string, unknown>
         const critical = Boolean(p.approval_id)
         if (critical) {
           // 移除临时的空回复气泡，改由“待审批”状态气泡展示
-          const idx = messages.value.indexOf(ai)
+          const idx = messages.value.findIndex(m => m.id === 'stream-buf')
           if (idx >= 0) messages.value.splice(idx, 1)
           pendingApproval.value = { conversationId: currentId.value, approvalId: String(p.approval_id ?? '') }
         }
@@ -179,7 +195,10 @@ async function send() {
     if (err.name !== 'AbortError') toast('连接中断', 'error')
   } finally {
     streaming.value = false
-    if (ai.content === '' && !pendingApproval.value) ai.content = '（无响应）'
+    streamActive.value = false
+    streamConv.value = ''
+    const sb = messages.value.find(m => m.id === 'stream-buf')
+    if (sb && sb.content === '' && !pendingApproval.value) sb.content = '（无响应）'
     maybePollPending()
   }
 }
@@ -206,9 +225,9 @@ async function decide(approved: boolean) {
       const critical = Boolean(p.approval_id)
       if (critical) {
         // 移除临时空回复气泡，置为待审批状态并开始轮询
-        const ai2 = messages.value[messages.value.length - 1]
-        if (ai2 && ai2.role === 'assistant' && ai2.content === '') {
-          messages.value.splice(messages.value.length - 1, 1)
+        const idx = messages.value.findIndex(m => m.id === 'stream-buf')
+        if (idx >= 0) {
+          messages.value.splice(idx, 1)
         }
         pendingApproval.value = { conversationId: convId, approvalId: String(p.approval_id ?? '') }
         maybePollPending()
@@ -253,7 +272,7 @@ const activeConv = computed(() => convs.value.find(c => c.id === currentId.value
 
     <!-- 消息区 -->
     <section class="msg-panel">
-      <div v-if="steps.length" class="steps-panel">
+      <div v-if="steps.length && stepsConv === currentId" class="steps-panel">
         <div class="steps-head">
           <span>⚙️ 执行过程</span>
           <button class="steps-clear" @click="steps = []">清空</button>
