@@ -16,3 +16,18 @@ async def test_mcp_config_crud():
         assert r.status_code == 200
         r = await c.get("/api/mcp-servers", headers=h)
         assert any(m["name"] == "erp" for m in r.json())
+
+
+@pytest.mark.asyncio
+async def test_binding_change_invalidates_graph(monkeypatch):
+    """Agent MCP 绑定增删后，主图缓存立即失效（下次对话懒重建，无需重启）。"""
+    from app.agents import graph as graph_module
+    from app.services.config_service import ConfigService
+    from app.core.database import SessionLocal
+
+    async with SessionLocal() as db:
+        svc = ConfigService(db)
+        await svc.add_agent_binding("marketing", "erp")
+        assert graph_module._graph is None
+        await svc.remove_agent_binding((await svc.list_agent_bindings("marketing"))[0].id)
+        assert graph_module._graph is None

@@ -26,6 +26,8 @@ register_builtin_tools(facade)
 MAX_ROUTES = 4  # 循环上限，防死循环
 
 _graph: object = None  # 懒初始化单例
+_build_lock: asyncio.Lock | None = None
+_bg_close_tasks: set[asyncio.Task] = set()  # 持有引用，防 GC 提前取消
 
 
 async def _build_registry(db) -> AgentRegistry:
@@ -155,13 +157,45 @@ async def get_graph():
     """懒初始化主图（应用事件循环内构建，连接池绑定当前 loop）。
     首次构建时确保 checkpoints 持久化表已建立。"""
     global _graph
-    if _graph is None:
-        async with SessionLocal() as db:
-            reg = await _build_registry(db)
-        cp = _make_checkpointer()
-        await cp.setup()
-        _graph = build_graph(reg, cp)
+    if _graph is not None:
+        return _graph
+    global _build_lock
+    if _build_lock is None:
+        _build_lock = asyncio.Lock()
+    async with _build_lock:
+        if _graph is None:  # 双检：多个协程同时触发时只构建一次
+            async with SessionLocal() as db:
+                reg = await _build_registry(db)
+            cp = _make_checkpointer()
+            await cp.setup()
+            _graph = build_graph(reg, cp)
     return _graph
+
+
+def invalidate_graph() -> None:
+    """配置变更（MCP 服务/绑定/风险/认证）后失效缓存主图。
+    下一次对话经 get_graph() 懒重建，无需重启；旧图连接池延迟关闭。"""
+    global _graph
+    old = _graph
+    _graph = None
+    if old is None:
+        return
+    checkpointer = getattr(old, "checkpointer", None)
+    pool = getattr(checkpointer, "pool", None) if checkpointer is not None else None
+    if pool is None:
+        return
+
+    async def _close_later():
+        # 给可能仍在执行的对话留出收尾时间，再关闭旧连接池
+        await asyncio.sleep(300)
+        try:
+            await pool.close()
+        except Exception:
+            pass
+
+    task = asyncio.create_task(_close_later())
+    _bg_close_tasks.add(task)
+    task.add_done_callback(_bg_close_tasks.discard)
 
 
 # 模块级兼容：同步环境下直接初始化（保留供测试等场景调用；

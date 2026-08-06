@@ -2,6 +2,7 @@
 """配置业务：mcp-server 增查 + agent MCP 绑定 CRUD + 工具风险配置。"""
 from fastapi import HTTPException
 
+from app.agents import graph as graph_module
 from app.models.configs import McpServer, AgentMcpBinding
 from app.repositories.config_repo import McpServerRepository, AgentMcpBindingRepository
 from app.tools.mcp_adapter import mcp_registry
@@ -23,6 +24,7 @@ class ConfigService:
             "name": row.name, "url": row.url, "auth_type": row.auth_type,
             "config": row.config, "enabled": True,
         })
+        await self._invalidate_if_bound(row.name)
         return row
 
     async def list_mcps(self) -> list[McpServer]:
@@ -39,6 +41,7 @@ class ConfigService:
         server.config = config
         await self.mcp_repo.commit()
         self._sync_registry(server)
+        await self._invalidate_if_bound(name)
         return {"ok": True, "tool_risks": tool_risks}
 
     async def update_mcp_auth(self, name: str, auth_type: str, api_key: str | None) -> dict:
@@ -58,6 +61,7 @@ class ConfigService:
         server.config = config
         await self.mcp_repo.commit()
         self._sync_registry(server)
+        await self._invalidate_if_bound(name)
         return {"ok": True, "auth_type": auth_type}
 
     def _sync_registry(self, server: McpServer) -> None:
@@ -79,6 +83,8 @@ class ConfigService:
         row = AgentMcpBinding(agent_code=agent_code, mcp_server_name=mcp_server_name)
         await self.binding_repo.add(row)
         await self.binding_repo.commit()
+        # 绑定变化直接影响 agent 工具集：立即失效主图，下次对话懒重建，无需重启
+        graph_module.invalidate_graph()
         return row
 
     async def remove_agent_binding(self, binding_id: str) -> None:
@@ -86,3 +92,9 @@ class ConfigService:
         if row:
             await self.binding_repo.delete(row)
             await self.binding_repo.commit()
+            graph_module.invalidate_graph()
+
+    async def _invalidate_if_bound(self, server_name: str) -> None:
+        """仅当服务被至少一个启用的 agent 绑定时才失效主图，避免无谓重建。"""
+        if await self.binding_repo.count_by_server(server_name) > 0:
+            graph_module.invalidate_graph()

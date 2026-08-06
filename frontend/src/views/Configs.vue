@@ -123,7 +123,7 @@ async function addBinding() {
   if (!bindServer.value) return
   try {
     await client.post(`/agents/${activeAgent.value}/mcp-bindings`, { mcp_server_name: bindServer.value })
-    toast('绑定已添加（重启后生效）', 'success')
+    toast('绑定已添加，下一次对话自动生效', 'success')
     bindServer.value = ''
     await loadBindings()
   } catch (err: any) {
@@ -196,7 +196,7 @@ async function removeBinding(id: string) {
             </tbody>
           </table>
         </div>
-        <p class="text-muted text-sm mt-8">提示：新增/修改配置后需重启后端生效；认证支持 api_key/bearer，凭证存数据库。</p>
+        <p class="text-muted text-sm mt-8">提示：MCP 服务/绑定/风险/认证修改后，下一次对话自动生效，无需重启；认证支持 api_key/bearer，凭证存数据库。</p>
       </div>
 
       <!-- Agent MCP 绑定 -->

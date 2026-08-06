@@ -15,3 +15,6 @@ class AgentMcpBindingRepository(BaseRepository[AgentMcpBinding]):
         return list((await self.db.scalars(
             select(AgentMcpBinding).where(AgentMcpBinding.agent_code == agent_code)
         )).all())
+
+    async def count_by_server(self, server_name: str) -> int:
+        return await self.count(mcp_server_name=server_name, enabled=True)
