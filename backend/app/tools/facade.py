@@ -78,7 +78,8 @@ class DataFacade:
                         await svc.create_approval(
                             category="tool_call", risk="critical", mode="sync",
                             ref_type="trace", ref_id=eff_trace_id,
-                            title=f"{name} - {tool.description}",
+                            # 审批单标题列限长 200，超长描述仅用于展示，截断即可
+                            title=f"{name} - {tool.description}"[:200],
                             context={"tool": name, "args": kwargs, "reason": tool.description},
                             requester_id=eff_requester, approver_role="admin",
                             approval_id=approval_id,
