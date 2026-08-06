@@ -49,6 +49,7 @@ async function newConv() {
 async function selectConv(id: string) {
   currentId.value = id
   messages.value = []
+  steps.value = []
   try {
     const { data } = await client.get<Message[]>(`/conversations/${id}/messages`)
     messages.value = data
@@ -74,11 +75,23 @@ async function removeConv(c: Conversation) {
 
 // ---- 发送 / SSE ----
 let abortCtrl: AbortController | null = null
+const steps = ref<{ type: 'route' | 'tool_start' | 'tool_end'; text: string; detail?: string }[]>([])
+
+function agentName(code: string) {
+  return ({ marketing: '营销助手', sales_analysis: '经营分析', scheduling: '调度优化', done: '完成' } as Record<string, string>)[code] || code || '未知'
+}
+
+function fmtDetail(v: unknown) {
+  if (v == null || v === '') return ''
+  const s = typeof v === 'string' ? v : JSON.stringify(v)
+  return s.length > 120 ? s.slice(0, 120) + '…' : s
+}
 
 async function send() {
   const text = input.value.trim()
   if (!text || streaming.value || !currentId.value) return
   input.value = ''
+  steps.value = []
   messages.value.push({ id: `u-${Date.now()}`, role: 'user', content: text })
   messages.value.push({ id: `a-${Date.now()}`, role: 'assistant', content: '' })
   streaming.value = true
@@ -88,6 +101,15 @@ async function send() {
   try {
     await streamChat(currentId.value, text, (e: SSEEvent) => {
       if (e.event === 'token') ai.content += e.content ?? ''
+      else if (e.event === 'route') {
+        steps.value.push({ type: 'route', text: `已路由到 ${agentName(String(e.agent ?? ''))}` })
+      } else if (e.event === 'tool_start') {
+        steps.value.push({ type: 'tool_start', text: `调用工具 ${String(e.tool ?? '')}`, detail: fmtDetail(e.args) })
+      } else if (e.event === 'tool_end') {
+        steps.value.push({ type: 'tool_end', text: `工具返回 ${String(e.tool ?? '')}`, detail: fmtDetail(e.result) })
+      } else if (e.event === 'answer') {
+        if (ai.content === '') ai.content = e.content ?? ''
+      }
       else if (e.event === 'confirm_required') {
         const p = (e.payload ?? {}) as Record<string, unknown>
         confirmState.value = {
@@ -171,6 +193,17 @@ const activeConv = computed(() => convs.value.find(c => c.id === currentId.value
 
     <!-- 消息区 -->
     <section class="msg-panel">
+      <div v-if="steps.length" class="steps-panel">
+        <div class="steps-head">
+          <span>⚙️ 执行过程</span>
+          <button class="steps-clear" @click="steps = []">清空</button>
+        </div>
+        <div v-for="(s, i) in steps" :key="i" class="step-row">
+          <span class="step-dot" :class="`dot-${s.type}`"></span>
+          <span class="step-text">{{ s.text }}</span>
+          <span v-if="s.detail" class="step-detail mono">{{ s.detail }}</span>
+        </div>
+      </div>
       <div class="msg-list" ref="listRef">
         <div v-if="!currentId" class="empty">
           <span class="icon">💬</span>
@@ -242,6 +275,17 @@ const activeConv = computed(() => convs.value.find(c => c.id === currentId.value
 .conv-del:hover { opacity: 1; background: var(--card); color: var(--foreground); }
 
 .msg-panel { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.steps-panel { flex-shrink: 0; max-height: 220px; overflow-y: auto; margin: 12px 24px 0; padding: 10px 14px; background: var(--video-bg); border: 1px solid var(--border); border-radius: var(--radius-md); }
+.steps-head { display: flex; justify-content: space-between; align-items: center; font-size: 12px; font-weight: 600; color: var(--muted-foreground); margin-bottom: 6px; }
+.steps-clear { background: none; border: none; color: var(--muted-foreground); cursor: pointer; font-size: 11px; padding: 0; }
+.steps-clear:hover { color: var(--foreground); }
+.step-row { display: flex; align-items: baseline; gap: 8px; padding: 3px 0; font-size: 12.5px; min-width: 0; }
+.step-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; align-self: center; }
+.dot-route { background: var(--info); }
+.dot-tool_start { background: var(--warning); }
+.dot-tool_end { background: var(--success); }
+.step-text { color: var(--foreground); flex-shrink: 0; }
+.step-detail { color: var(--muted-foreground); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .msg-list { flex: 1; min-height: 0; overflow-y: auto; padding: 20px 24px; display: flex; flex-direction: column; gap: 16px; }
 .msg { display: flex; gap: 10px; max-width: 78%; }
 .msg.user { align-self: flex-end; flex-direction: row-reverse; }
