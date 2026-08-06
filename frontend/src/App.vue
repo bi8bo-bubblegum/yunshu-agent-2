@@ -105,7 +105,12 @@ function logout() {
         </div>
       </header>
       <div class="app-content">
-        <router-view />
+        <!-- 聊天页 keep-alive：切到其他模块时保留流式对话状态，避免 agent 回复丢失/中断 -->
+        <router-view v-slot="{ Component }">
+          <keep-alive :include="['Chat']">
+            <component :is="Component" />
+          </keep-alive>
+        </router-view>
       </div>
     </div>
     <div class="toast-wrap">

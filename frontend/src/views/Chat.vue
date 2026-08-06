@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, onMounted } from 'vue'
+defineOptions({ name: 'Chat' })
+import { ref, computed, watch, nextTick, onMounted, onActivated } from 'vue'
 import { useRouter } from 'vue-router'
 import { streamChat, resumeChat, type SSEEvent } from '../api/chat'
 import client from '../api/client'
@@ -15,6 +16,12 @@ const listRef = ref<HTMLElement>()
 const router = useRouter()
 
 onMounted(loadConvs)
+
+// keep-alive 下从其他页面切回时滚动到底部（流式消息可能已推进）
+onActivated(async () => {
+  await nextTick()
+  listRef.value?.scrollTo({ top: listRef.value.scrollHeight })
+})
 
 // 新消息自动滚动到底部
 watch(() => messages.value.length, async () => {
