@@ -73,7 +73,7 @@ async def list_mcp_tools(name: str,
 
     # 查风险配置
     mcp_repo = McpServerRepository(db)
-    server = await mcp_repo.get(name)
+    server = await mcp_repo.get_by(name=name)
 
     return [
         {
