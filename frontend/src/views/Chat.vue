@@ -172,12 +172,15 @@ async function send() {
       } else if (e.event === 'tool_end') {
         streamLine(`✅ ${String(e.tool ?? '')} 完成`)
       } else if (e.event === 'answer') {
+        // token 已流式输出时，answer 是完整文本的冗余副本，跳过避免重复；
+        // 仅在没有任何 token（非流式模型/异常）时用其填充
         if (!answerStarted) {
           answerStarted = true
-          streamBuf.value = streamBuf.value === '⏳ 正在思考…' ? '' : `${streamBuf.value}\n\n`
+          streamBuf.value = streamBuf.value === '⏳ 正在思考…'
+            ? (e.content ?? '')
+            : `${streamBuf.value}\n\n${e.content ?? ''}`
+          renderStreamText()
         }
-        streamBuf.value += e.content ?? ''
-        renderStreamText()
       }
       else if (e.event === 'confirm_required') {
         const p = (e.payload ?? {}) as Record<string, unknown>
