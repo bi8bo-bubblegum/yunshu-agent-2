@@ -55,3 +55,42 @@ async def test_batch_preference_trigger(db_session, monkeypatch):
     await db_session.commit()
     await maybe_extract_batch(db_session, "u1", conv.id)
     assert calls == [10, 10]
+
+
+@pytest.mark.asyncio
+async def test_batch_preference_across_conversations(db_session, monkeypatch):
+    """偏好按用户跨会话累计：满10条触发；其他用户的消息不计入；对话按会话内配对。"""
+    from app.models.chat import Conversation, Message
+    from app.services.preference_svc import maybe_extract_batch
+
+    conv1 = Conversation(user_id="u1", title="c1")
+    conv2 = Conversation(user_id="u1", title="c2")
+    conv_other = Conversation(user_id="u9", title="other")
+    db_session.add_all([conv1, conv2, conv_other])
+    await db_session.commit()
+
+    calls = []
+    async def fake_extract(dialogs):
+        calls.append(dialogs)
+        return []
+    monkeypatch.setattr("app.services.preference_svc.extract_preferences_from_dialogs", fake_extract)
+
+    # u1：conv1 6 轮 + conv2 4 轮 = 10 条用户消息；u9 10 轮（不计入 u1）
+    for i in range(6):
+        db_session.add(Message(conversation_id=conv1.id, role="user", content=f"c1q{i}"))
+        db_session.add(Message(conversation_id=conv1.id, role="assistant", content=f"c1a{i}"))
+    for i in range(4):
+        db_session.add(Message(conversation_id=conv2.id, role="user", content=f"c2q{i}"))
+        db_session.add(Message(conversation_id=conv2.id, role="assistant", content=f"c2a{i}"))
+    for i in range(10):
+        db_session.add(Message(conversation_id=conv_other.id, role="user", content=f"oq{i}"))
+        db_session.add(Message(conversation_id=conv_other.id, role="assistant", content=f"oa{i}"))
+    await db_session.commit()
+
+    await maybe_extract_batch(db_session, "u1", conv1.id)
+    assert len(calls) == 1
+    dialogs = calls[0]
+    assert len(dialogs) == 10
+    assert sum("c1q" in d for d in dialogs) == 6
+    assert sum("c2q" in d for d in dialogs) == 4
+    assert all("助手：" in d for d in dialogs)

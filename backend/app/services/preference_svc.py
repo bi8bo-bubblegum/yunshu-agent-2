@@ -41,19 +41,25 @@ async def extract_preferences_from_dialogs(dialogs: list[str]) -> list[Preferenc
 
 async def maybe_extract_batch(db: AsyncSession, user_id: str, conversation_id: str) -> None:
     """增量批次偏好分析：用户消息达到 BATCH_SIZE 的整数倍时，
-    对最近一批（不含此前已分析过的）对话做一次分析并合并入库。"""
+    对最近一批（不含此前已分析过的）对话做一次分析并合并入库。
+    消息按 user_id 跨全部会话累计——偏好属于个人，不受会话边界影响。"""
     from app.repositories.conversation_repo import MessageRepository
-    msgs = await MessageRepository(db).list_by_conversation(conversation_id)
+    msgs = await MessageRepository(db).list_by_user(user_id)
     user_msgs = [m for m in msgs if m.role == "user"]
     # 未到批次边界则不触发；每批只分析一次（窗口 = 最近 BATCH_SIZE 条用户消息）
     if len(user_msgs) < BATCH_SIZE or len(user_msgs) % BATCH_SIZE != 0:
         return
     recent = user_msgs[-BATCH_SIZE:]
+    # 按会话分组，配对时在同一会话内找该用户消息之后的助手回复
+    by_conv: dict[str, list] = {}
+    for m in msgs:
+        by_conv.setdefault(m.conversation_id, []).append(m)
     dialogs = []
     for um in recent:
         dialog = f"用户：{um.content}"
-        idx = msgs.index(um)
-        for m in msgs[idx + 1:]:
+        conv_msgs = by_conv.get(um.conversation_id, [])
+        idx = conv_msgs.index(um)
+        for m in conv_msgs[idx + 1:]:
             if m.role == "assistant":
                 dialog += f"\n助手：{m.content}"
                 break
