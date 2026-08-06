@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import client from './api/client'
 import { toasts } from './api/toast'
@@ -29,13 +29,24 @@ const titleMap: Record<string, string> = {
 const me = ref<User | null>(null)
 const pendingApprovals = ref(0)
 
-onMounted(async () => {
+// 登录态随路由同步：进入登录页清空用户，进入工作台重新拉取，
+// 覆盖“登出后切换账号登录”仍显示上一账号的场景
+watch(() => route.path, async () => {
+  if (route.path === '/login') {
+    me.value = null
+    pendingApprovals.value = 0
+    return
+  }
+  if (!localStorage.getItem('token')) return
   try {
     const { data } = await client.get<User>('/auth/me')
     me.value = data
-  } catch { /* 未登录时由路由守卫处理 */ }
+  } catch {
+    me.value = null
+    return
+  }
   loadPending()
-})
+}, { immediate: true })
 
 async function loadPending() {
   try {
