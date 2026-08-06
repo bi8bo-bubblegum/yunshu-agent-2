@@ -147,7 +147,13 @@ const activeConv = computed(() => convs.value.find(c => c.id === currentId.value
     <!-- 消息区 -->
     <section class="msg-panel">
       <div class="msg-list" ref="listRef">
-        <div v-if="!messages.length" class="empty">
+        <div v-if="!currentId" class="empty">
+          <span class="icon">💬</span>
+          <p>还没有会话</p>
+          <p class="text-muted text-sm">先新建一个会话，再开始对话</p>
+          <button class="btn btn-primary mt-12" @click="newConv">+ 新建会话</button>
+        </div>
+        <div v-else-if="!messages.length" class="empty">
           <span class="icon">🤖</span>
           <p>向云书 Agent 描述你的任务</p>
           <p class="text-muted text-sm">示例：帮我策划一个国庆营销方案</p>
@@ -161,12 +167,12 @@ const activeConv = computed(() => convs.value.find(c => c.id === currentId.value
         </div>
       </div>
 
-      <div class="input-bar">
+      <div class="input-bar" v-if="currentId">
         <textarea class="textarea" v-model="input" rows="2" placeholder="输入消息，Enter 发送 / Shift+Enter 换行"
                   :disabled="streaming" @keydown.enter.exact.prevent="send" />
         <div class="row-between mt-8">
           <span class="text-muted text-sm">{{ streaming ? 'Agent 思考中…' : activeConv ? '会话已就绪' : '' }}</span>
-          <button class="btn btn-primary" :disabled="!input.trim() || streaming" @click="send">
+          <button class="btn btn-primary" :disabled="!input.trim() || streaming || !currentId" @click="send">
             <span v-if="streaming" class="spinner"></span>发送
           </button>
         </div>
