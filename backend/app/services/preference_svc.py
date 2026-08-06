@@ -22,12 +22,8 @@ class PreferenceOutput(BaseModel):
 async def extract_preferences(text: str) -> list[PreferenceItem]:
     llm = ModelFactory.get_llm().with_structured_output(PreferenceOutput)
     result = await llm.ainvoke(
-        "你是用户偏好分析器。从对话中识别用户**稳定的长期偏好与习惯**。\n"
-        "提取规则：\n"
-        "1. 只提取跨多次出现、体现稳定倾向的内容（沟通风格/决策倾向/长期习惯）；\n"
-        "2. 一次性决定、单次事件、临时选择（如“这次预算50000元”“本次用短信渠道”）不算偏好，不要提取；\n"
-        "3. 没有稳定偏好时返回空列表。\n"
-        f"偏好类别：style（沟通风格）/ decision（决策倾向）/ habit（习惯）。\n对话：{text}"
+        f"你是用户偏好分析器。根据对话提取用户偏好，提取偏好类别（style/decision/habit）、"
+        f"偏好内容和置信度。没有偏好时返回空列表。\n对话：{text}"
     )
     return result.preferences
 
