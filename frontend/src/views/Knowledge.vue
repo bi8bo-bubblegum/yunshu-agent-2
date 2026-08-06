@@ -124,9 +124,14 @@ const statusTag: Record<string, string> = { ready: 'tag-green', parsing: 'tag-bl
 </template>
 
 <style scoped>
-.page-wrap { padding: 20px; }
-.page-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
-@media (max-width: 1100px) { .page-grid { grid-template-columns: 1fr; } }
+.page-wrap { padding: 20px; height: calc(100vh - 56px); box-sizing: border-box; display: flex; flex-direction: column; }
+.page-grid { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+/* 文档库与检索测试各自独立滚动，互不影响 */
+.page-grid > .card { min-height: 0; overflow-y: auto; }
+@media (max-width: 1100px) {
+  .page-grid { grid-template-columns: 1fr; overflow-y: auto; }
+  .page-grid > .card { overflow-y: visible; }
+}
 .hit { background: var(--video-bg); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 12px; }
 .hit-content { margin: 8px 0 0; font-size: 13px; line-height: 1.6; color: var(--foreground); }
 .is-disabled { opacity: .6; cursor: default; }
