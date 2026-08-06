@@ -40,9 +40,11 @@ async def load_mcp_tools_with_risk(db: AsyncSession, server_name: str) -> list[T
     result = []
     for t in raw_tools:
         risk = get_mcp_risk(t.name, server.default_risk, server.config)
+        # langchain-mcp-adapters 0.3.x 的 MCP 工具可执行对象在 coroutine（异步）/ func（同步）上
+        callable_fn = getattr(t, "coroutine", None) or getattr(t, "func", None)
         result.append(Tool(
             name=f"mcp_{server_name}_{t.name}",
-            fn=t.func,
+            fn=callable_fn,
             risk=risk,
             description=t.description,
             args_schema=t.args_schema,
@@ -60,7 +62,8 @@ async def load_tools(db: AsyncSession, builtin_names: list[str], mcp_server_name
     # 2. MCP 工具（动态发现 + 注入 risk）
     for server_name in mcp_server_names:
         mcp_tools = await load_mcp_tools_with_risk(db, server_name)
-        tools.extend([facade.to_langchain_tool(t.name) for t in mcp_tools])
+        # MCP 工具未注册进 facade 注册表，直接按 Tool 对象转换
+        tools.extend([facade.to_langchain_tool_from(t) for t in mcp_tools])
     return tools
 
 

@@ -35,11 +35,15 @@ class DataFacade:
         return self._tools[name].risk
 
     def to_langchain_tool(self, name: str, trace_id: str = "", requester_id: str = "") -> StructuredTool:
+        """按名称取已注册工具并转换（内置工具路径）。"""
+        return self.to_langchain_tool_from(self._tools[name], trace_id, requester_id)
+
+    def to_langchain_tool_from(self, tool: Tool, trace_id: str = "", requester_id: str = "") -> StructuredTool:
         """DataFacade 工具 → LangChain StructuredTool；按风险等级分流：
         - low/medium：直接执行（包装为原生函数）
         - high：interrupt 即时确认（不进审批中心）
         - critical：创建审批单 + interrupt 冻结图，等审批中心处理"""
-        tool = self._tools[name]
+        name = tool.name
 
         if tool.risk in ("low", "medium"):
             fn = tool.fn
