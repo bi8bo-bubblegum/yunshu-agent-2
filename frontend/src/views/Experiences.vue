@@ -106,14 +106,16 @@ const scopeLabel: Record<string, string> = { personal: '个人', dept: '部门',
               <td><span class="tag" :class="scopeTag[e.scope] ?? 'tag-gray'">{{ e.scope }}</span></td>
               <td><span class="tag" :class="statusTag[e.status] ?? 'tag-gray'">{{ e.status }}</span></td>
               <td class="muted text-sm" style="max-width:280px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ e.summary }}</td>
-              <td style="text-align:right">
-                <button class="btn btn-sm" @click="openDetail(e)">查看</button>
-                <span v-if="e.scope === 'personal' && e.status === 'draft'" class="row" style="justify-content:flex-end">
+              <td style="text-align:right;white-space:nowrap">
+                <div class="row" style="justify-content:flex-end;gap:6px">
+                  <button class="btn btn-sm" @click="openDetail(e)">查看</button>
+                  <button class="btn btn-sm btn-danger" @click="removeItem(e)">删除</button>
+                  <template v-if="e.scope === 'personal' && e.status === 'draft'">
                   <button class="btn btn-sm" @click="submit(e.id, e.title, 'dept')">晋升部门</button>
                   <button class="btn btn-sm" @click="submit(e.id, e.title, 'company')">晋升公司</button>
-                </span>
-                <span v-else class="muted text-sm">{{ e.status === 'pending' ? '审批中' : e.status }}</span>
-                <button class="btn btn-sm btn-danger" style="margin-left:8px" @click="removeItem(e)">删除</button>
+                  </template>
+                  <span v-else class="muted text-sm">{{ e.status === 'pending' ? '审批中' : e.status }}</span>
+                </div>
               </td>
             </tr>
             <tr v-if="!items.length">
