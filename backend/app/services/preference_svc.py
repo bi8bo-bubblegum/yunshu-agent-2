@@ -1,10 +1,13 @@
 # backend/app/services/preference_svc.py 追加：LLM 结构化提取
+import logging
 from typing import Literal
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.llm.factory import ModelFactory
 from app.repositories.preference_repo import PreferenceRepository
+
+logger = logging.getLogger(__name__)
 
 class PreferenceItem(BaseModel):
     """单条用户偏好"""
@@ -26,7 +29,12 @@ async def extract_preferences(text: str) -> list[PreferenceItem]:
 
 async def extract_and_save(db: AsyncSession, user_id: str, text: str) -> None:
     repo = PreferenceRepository(db)
-    prefs = await extract_preferences(text)
+    try:
+        prefs = await extract_preferences(text)
+    except Exception as e:
+        # LLM 输出校验失败不影响聊天主流程
+        logger.warning("偏好提取 LLM 输出校验失败，跳过: %s", e)
+        return
     for p in prefs:
         await repo.merge(user_id, p.category, p.content, p.confidence, "auto")
     if prefs:

@@ -1,8 +1,11 @@
+import logging
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.llm.factory import ModelFactory
 from app.repositories.conversation_repo import ConversationRepository, MessageRepository
+
+logger = logging.getLogger(__name__)
 
 
 class SummaryOutput(BaseModel):
@@ -25,6 +28,10 @@ async def maybe_roll_summary(db: AsyncSession, conversation_id: str, force: bool
     recent = await msg_repo.list_recent(conversation_id, 10)
     text = "\n".join(f"{m.role}: {m.content}" for m in reversed(recent))
     old_summary = f"已有摘要：{conv.summary}\n" if conv.summary else ""
-    conv.summary = await summarize_text(old_summary + text)
+    try:
+        conv.summary = await summarize_text(old_summary + text)
+    except Exception as e:
+        # 摘要 LLM 失败保留旧摘要，不阻塞聊天
+        logger.warning("滚动摘要 LLM 调用失败，保留旧摘要: %s", e)
+        return
     await conv_repo.commit()
-
