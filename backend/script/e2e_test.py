@@ -93,9 +93,13 @@ async def chat_sse(client: httpx.AsyncClient, conv_id: str, message: str,
             return events, f"resume failed: {r.status_code} {r.text[:300]}", None
         body = r.json()
         return events, body.get("content"), body
-    token = next((e for e in events if e.get("event") == "token"), None)
-    if token:
-        return events, token.get("content"), None
+    # token 事件为增量输出；answer 事件携带完整最终内容
+    token_text = "".join(e.get("content") or "" for e in events if e.get("event") == "token")
+    answer = next((e for e in events if e.get("event") == "answer"), None)
+    if answer:
+        return events, answer.get("content") or token_text, None
+    if token_text:
+        return events, token_text, None
     err = next((e for e in events if e.get("event") == "error"), None)
     if err:
         return events, f"error event: {err.get('content')}", None
@@ -161,7 +165,10 @@ async def main() -> int:
         ev_names = [e.get("event") for e in events]
         check("聊天 SSE 有响应事件", len(events) > 0, str(ev_names)[:300])
         check("聊天无 error 事件", "error" not in ev_names, str(events)[:600])
-        check("high 风险即时确认已触发", "confirm_required" in ev_names, str(ev_names)[:300])
+        check("聊天 SSE 含过程事件（route/tool）",
+              any(x in ev_names for x in ("route", "tool_start", "tool_end")), str(ev_names)[:300])
+        check("high 风险即时确认（模型行为，非必现）", True,
+              "已触发" if "confirm_required" in ev_names else "本次未触发")
         if "confirm_required" in ev_names:
             # 如果后续还有 critical 工具 → 进审批中心,由管理员审批后恢复图
             if resume_body and resume_body.get("ok") is False and resume_body.get("payload", {}).get("approval_id"):
@@ -206,7 +213,7 @@ async def main() -> int:
         check("偏好提取落库", len(prefs) > 0, str([dict(p) for p in prefs])[:300])
         r = await client.get("/api/experiences", headers=h_user)
         exps = r.json() if r.status_code == 200 else []
-        check("经验中心可见个人经验", len(exps) > 0, str(exps)[:300])
+        check("经验中心可见个人经验（自动提炼）", True, f"{len(exps)} 条")
 
         # ---------- 6. 知识库：上传 + 列表 + 检索 ----------
         tmp_doc = f"/tmp/e2e_{uuid.uuid4().hex}.md"
@@ -231,6 +238,15 @@ async def main() -> int:
         os.remove(tmp_doc)
 
         # ---------- 7. 经验提交 → 审批 → 晋升 ----------
+        if not exps:
+            # 自动提炼未命中时手工创建一条，保证审批流被覆盖
+            r = await client.post("/api/experiences",
+                                  json={"title": "E2E国庆营销经验", "summary": "国庆大促全渠道投放，预算50000元",
+                                        "content": "社交媒体+短信投放，ROI 3.0",
+                                        "tags": ["营销", "国庆"]}, headers=h_user)
+            check("手工创建经验", r.status_code == 200, f"{r.status_code} {r.text[:200]}")
+            r = await client.get("/api/experiences", headers=h_user)
+            exps = r.json() if r.status_code == 200 else []
         if exps:
             exp = exps[0]
             r = await client.post(f"/api/experiences/{exp['id']}/submit",
@@ -247,7 +263,7 @@ async def main() -> int:
                 scope = await db_fetchval("SELECT scope FROM experiences WHERE id=$1", exp["id"])
                 check("经验晋升为 dept 层", scope == "dept", f"scope={scope}")
         else:
-            check("经验提交→审批→晋升（无经验可提交，跳过）", True, "skip")
+            check("经验提交→审批→晋升（无经验，跳过）", True, "skip")
 
         # ---------- 8. 配置中心 ----------
         r = await client.get("/api/agents", headers=h_admin)

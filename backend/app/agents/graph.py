@@ -97,7 +97,7 @@ def build_graph(registry: AgentRegistry, checkpointer=None):
     checkpointer 为空时不启用持久化（兼容无 DB 的单元测试场景）。"""
     g = StateGraph(AgentState)
 
-    async def supervisor_node(state: AgentState) -> dict:
+    async def supervisor_node(state: AgentState, config: RunnableConfig = None) -> dict:
         agents_with_done = registry.list() + ["done"]
         context = state.get("user_message", "")
         msgs = state.get("messages", [])
