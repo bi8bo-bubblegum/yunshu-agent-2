@@ -1,3 +1,4 @@
+# backend/app/services/chat_service.py —— 聊天业务
 import json
 import asyncio
 import logging
@@ -8,6 +9,7 @@ from langchain_core.messages import AIMessage, AIMessageChunk
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.graph import get_graph
+from app.core.database import SessionLocal
 from app.memory.assembly import assemble_memory
 from app.models.chat import Conversation, Message
 from app.models.trace import ExecutionTrace
@@ -21,6 +23,26 @@ from app.traces.collector import collector
 from app.traces.handlers import StreamEventHandler, TraceCallbackHandler
 
 logger = logging.getLogger(__name__)
+
+
+async def _auto_title_async(conv_id: str, message: str) -> str | None:
+    """后台标题生成通用方法：从独立 session 调用 LLM 生成并写入 DB。
+    仅在当前标题仍为默认值时写入，避免覆盖已有标题。
+    返回生成的标题（可能是 None），供 SSE done 事件携带给前端。"""
+    try:
+        new_title = await generate_title(message)
+        if not new_title or new_title == "新对话":
+            return None
+        async with SessionLocal() as db:
+            repo = ConversationRepository(db)
+            conv = await repo.get(conv_id)
+            if conv and conv.title in ("新对话", "", None):
+                conv.title = new_title
+                await repo.commit()
+                return new_title
+    except Exception as e:
+        logger.warning("后台标题生成失败（已降级）: %s", e)
+    return None
 
 
 class ChatService:
@@ -50,6 +72,16 @@ class ChatService:
         # 用户消息落库
         await self.message_repo.add(Message(conversation_id=conv_id, role="user", content=message))
         await self.message_repo.commit()
+        # 后台标题生成：用户消息落库后立即开跑，与图执行并行互不阻塞。
+        # done 事件携带标题，前端收到后只 patch 列表对应项，不影响消息区。
+        _title_result: dict[str, str] = {}
+
+        async def _auto_title():
+            title = await _auto_title_async(conv_id, message)
+            if title:
+                _title_result["title"] = title
+
+        asyncio.create_task(_auto_title())
         yield json.dumps({"event": "start", "trace_id": trace.id}, ensure_ascii=False)
         # 装配多层记忆
         user = await self.user_repo.get(user_id)
@@ -150,16 +182,10 @@ class ChatService:
             if exp:
                 await save_personal_experience(self.db, exp)
             await maybe_roll_summary(self.db, conv_id)
-            # 首次发送（标题仍为默认值）时由 LLM 提炼会话标题
-            if conv.title in ("新对话", "", None):
-                new_title = await generate_title(message)
-                if new_title and new_title != "新对话":
-                    conv.title = new_title
-                    await self.conversation_repo.commit()
         except Exception as e:
             logger.warning("记忆沉淀后处理失败（已降级）: %s", e)
-        yield json.dumps({"event": "answer", "content": text}, ensure_ascii=False)
-        yield json.dumps({"event": "done"}, ensure_ascii=False)
+        # done 事件携带标题，前端收到后只 patch 会话列表对应项，不影响消息区
+        yield json.dumps({"event": "done", "title": _title_result.get("title")}, ensure_ascii=False)
 
     async def resume(self, user_id: str, conv_id: str, approved: bool) -> dict:
         """high 风险工具即时确认后恢复图执行。
@@ -198,7 +224,7 @@ class ChatService:
             conv.current_trace_id = trace.id
             await self.trace_repo.commit()
             collector.emit(trace.id, "route", {"routes": trace.supervisor_routes})
-        # 与 stream_chat 完成路径对齐：偏好提取 / 经验提炼 / 摘要滚动 / 自动标题
+        # 偏好提取 / 经验提炼 / 摘要滚动：失败仅降级，不影响 SSE 正常收尾
         try:
             all_msgs = await self.message_repo.list_by_conversation(conv_id)
             user_msg = next((m.content for m in reversed(all_msgs) if m.role == "user"), "")
@@ -208,11 +234,9 @@ class ChatService:
             if exp:
                 await save_personal_experience(self.db, exp)
             await maybe_roll_summary(self.db, conv_id)
-            if conv.title in ("新对话", "", None) and user_msg:
-                new_title = await generate_title(user_msg)
-                if new_title and new_title != "新对话":
-                    conv.title = new_title
-                    await self.trace_repo.commit()
         except Exception as e:
             logger.warning("resume 后记忆沉淀处理失败（已降级）: %s", e)
+        # 标题生成兜底：stream_chat 被中断时其后台标题任务可能已取消，
+        # 在 resume 中重试以确保最终一定能生成标题
+        asyncio.create_task(_auto_title_async(conv_id, user_msg if user_msg else (text[:500])))
         return {"ok": True, "content": text}

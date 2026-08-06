@@ -183,6 +183,11 @@ async function send() {
           renderStreamText()
         }
       }
+      else if (e.event === 'done' && e.title && e.title !== '新对话') {
+        // 后端生成器完成后通过 done.title patch 会话列表对应项，无需全量刷新
+        const c = convs.value.find(c => c.id === currentId.value)
+        if (c) c.title = e.title as string
+      }
       else if (e.event === 'confirm_required') {
         const p = (e.payload ?? {}) as Record<string, unknown>
         const critical = Boolean(p.approval_id)
@@ -205,7 +210,7 @@ async function send() {
         toast(String(e.content ?? '请求失败'), 'error')
       }
     }, abortCtrl.signal)
-    await loadConvs()  // 首次发送后标题可能已被后端自动生成，刷新会话列表
+    // 标题已通过 done.title 做 inline patch，无需全量刷新
   } catch (err: any) {
     if (err.name !== 'AbortError') toast('连接中断', 'error')
   } finally {
