@@ -129,3 +129,50 @@ async def test_critical_approval_flow(db_session, monkeypatch):
         traces = (await c.get("/api/traces", headers=h_user)).json()
         trace = next(t for t in traces if t["conversation_id"] == conv_id)
         assert trace["status"] == "completed", trace
+
+
+@pytest.mark.asyncio
+async def test_critical_rejection_still_replies(db_session, monkeypatch):
+    """驳回 critical 审批：工具不执行，但图恢复完成并保存最终回复。"""
+    await _stubs(monkeypatch)
+    seq = SequencedLLM()
+    monkeypatch.setattr("app.agents.marketing.agent.ModelFactory.get_llm", lambda k: seq)
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        await c.post("/api/auth/register", json={"username": "rej_user", "password": "x123456", "display_name": "U"})
+        await c.post("/api/auth/register", json={"username": "rej_admin", "password": "x123456", "display_name": "A"})
+        r = await c.post("/api/auth/login", json={"username": "rej_user", "password": "x123456"})
+        h_user = {"Authorization": f"Bearer {r.json()['access_token']}"}
+        r = await c.post("/api/auth/login", json={"username": "rej_admin", "password": "x123456"})
+        h_admin = {"Authorization": f"Bearer {r.json()['access_token']}"}
+        await db_session.execute(update(User).where(User.username == "rej_admin").values(role_code="admin"))
+        await db_session.commit()
+
+        conv_id = (await c.post("/api/conversations", json={}, headers=h_user)).json()["id"]
+
+        events = []
+        async with c.stream("POST", "/api/chat/completions",
+                            json={"conversation_id": conv_id, "message": "策划并发布国庆活动"},
+                            headers=h_user) as resp:
+            async for line in resp.aiter_lines():
+                if line.startswith("data: "):
+                    events.append(json.loads(line[6:]))
+        assert "confirm_required" in [e["event"] for e in events], events
+
+        r = await c.post("/api/chat/resume", json={"conversation_id": conv_id, "approved": True}, headers=h_user)
+        approval_id = r.json()["payload"]["approval_id"]
+
+        # 驳回
+        r = await c.post(f"/api/approvals/{approval_id}/decide",
+                         json={"approve": False, "comment": "暂不发布"}, headers=h_admin)
+        assert r.status_code == 200, r.text
+
+        msgs = (await c.get(f"/api/conversations/{conv_id}/messages", headers=h_user)).json()
+        assistant = [m for m in msgs if m["role"] == "assistant"]
+        assert assistant, msgs
+        assert assistant[-1]["content"] == "最终方案已生成"
+
+        # 审批单状态应为 rejected
+        r = await c.get("/api/approvals", params={"status": "rejected"}, headers=h_admin)
+        assert any(a["id"] == approval_id for a in r.json()), r.text
