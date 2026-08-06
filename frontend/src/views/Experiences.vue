@@ -45,6 +45,17 @@ async function submit(id: string, title: string, toScope: 'dept' | 'company') {
   }
 }
 
+async function removeItem(e: ExperienceItem) {
+  if (!confirm(`确认删除经验「${e.title}」？删除后不可恢复`)) return
+  try {
+    await client.delete(`/experiences/${e.id}`)
+    toast('经验已删除', 'success')
+    await load()
+  } catch (err: any) {
+    toast(err.response?.data?.detail || '删除失败', 'error')
+  }
+}
+
 const scopeTag: Record<string, string> = { personal: 'tag-gray', dept: 'tag-cyan', company: 'tag-purple' }
 const statusTag: Record<string, string> = { draft: 'tag-gray', pending: 'tag-orange', approved: 'tag-green', rejected: 'tag-red' }
 </script>
@@ -88,6 +99,7 @@ const statusTag: Record<string, string> = { draft: 'tag-gray', pending: 'tag-ora
                   <button class="btn btn-sm" @click="submit(e.id, e.title, 'company')">晋升公司</button>
                 </span>
                 <span v-else class="muted text-sm">{{ e.status === 'pending' ? '审批中' : e.status }}</span>
+                <button class="btn btn-sm btn-danger" style="margin-left:8px" @click="removeItem(e)">删除</button>
               </td>
             </tr>
             <tr v-if="!items.length">

@@ -43,3 +43,13 @@ class ExperienceService:
 
     async def list_visible(self, user_id: str, department_id: str | None) -> list[Experience]:
         return await self.experience_repo.list_visible(user_id, department_id)
+
+    async def delete(self, user_id: str, exp_id: str, role_code: str | None = None) -> None:
+        """删除经验：仅作者本人或 admin 可删（含已晋升到部门/公司层级的本人经验）。"""
+        exp = await self.experience_repo.get(exp_id)
+        if not exp:
+            raise HTTPException(404, "经验不存在")
+        if exp.owner_id != user_id and role_code != "admin":
+            raise HTTPException(403, "无权删除该经验")
+        await self.experience_repo.delete(exp)
+        await self.experience_repo.commit()

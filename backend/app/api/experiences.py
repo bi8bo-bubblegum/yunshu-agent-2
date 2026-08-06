@@ -42,3 +42,11 @@ async def submit_experience(exp_id: str, body: SubmitRequest, svc: ExperienceSer
 async def list_experiences(svc: ExperienceService = Depends(get_exp_service), user: User = Depends(get_current_user)):
     rows = await svc.list_visible(user.id, user.department_id)
     return [{"id": e.id, "title": e.title, "scope": e.scope, "status": e.status, "summary": e.summary} for e in rows]
+
+
+@router.delete("/{exp_id}")
+async def delete_experience(exp_id: str, svc: ExperienceService = Depends(get_exp_service),
+                            user: User = Depends(get_current_user)):
+    """删除经验（作者本人或 admin），用于清理重复/无效经验。"""
+    await svc.delete(user.id, exp_id, user.role_code)
+    return {"ok": True}
