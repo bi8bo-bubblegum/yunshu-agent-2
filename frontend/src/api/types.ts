@@ -44,6 +44,20 @@ export interface ExperienceItem {
   summary: string
 }
 
+export interface ExperienceDetail {
+  id: string
+  title: string
+  summary: string
+  content: string
+  tags: string[]
+  scope: string
+  status: string
+  event_time: string | null
+  result_metrics: Record<string, unknown> | null
+  owner_id: string
+  created_at: string | null
+}
+
 export interface ApprovalItem {
   id: string
   category: string

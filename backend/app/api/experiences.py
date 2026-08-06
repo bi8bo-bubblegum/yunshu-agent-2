@@ -50,3 +50,23 @@ async def delete_experience(exp_id: str, svc: ExperienceService = Depends(get_ex
     """删除经验（作者本人或 admin），用于清理重复/无效经验。"""
     await svc.delete(user.id, exp_id, user.role_code)
     return {"ok": True}
+
+
+@router.get("/{exp_id}")
+async def get_experience(exp_id: str, svc: ExperienceService = Depends(get_exp_service),
+                         user: User = Depends(get_current_user)):
+    """经验详情：返回全部内容字段，按可见范围校验（个人/部门/公司）。"""
+    e = await svc.get_detail(user.id, exp_id, user.department_id)
+    return {
+        "id": e.id,
+        "title": e.title,
+        "summary": e.summary,
+        "content": e.content,
+        "tags": e.tags,
+        "scope": e.scope,
+        "status": e.status,
+        "event_time": e.event_time.isoformat() if e.event_time else None,
+        "result_metrics": e.result_metrics,
+        "owner_id": e.owner_id,
+        "created_at": e.created_at,
+    }

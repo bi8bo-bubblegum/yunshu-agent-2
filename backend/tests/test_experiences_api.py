@@ -64,3 +64,38 @@ async def test_delete_experience(monkeypatch):
             "title": "admin删", "summary": "s", "content": "c",
         }, headers=h_owner)).json()["id"]
         assert (await c.delete(f"/api/experiences/{exp2}", headers=h_boss)).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_experience_detail_visibility(monkeypatch):
+    async def fake_embed(texts):
+        return [[0.1] * 1536] * len(texts)
+    monkeypatch.setattr("app.services.experience_service.embed_texts", fake_embed)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        await c.post("/api/auth/register", json={"username": "d_owner", "password": "x123456", "display_name": "O"})
+        await c.post("/api/auth/register", json={"username": "d_other", "password": "x123456", "display_name": "X"})
+        r = await c.post("/api/auth/login", json={"username": "d_owner", "password": "x123456"})
+        h_owner = {"Authorization": f"Bearer {r.json()['access_token']}"}
+        r = await c.post("/api/auth/login", json={"username": "d_other", "password": "x123456"})
+        h_other = {"Authorization": f"Bearer {r.json()['access_token']}"}
+
+        exp = (await c.post("/api/experiences", json={
+            "title": "详情经验", "summary": "摘要", "content": "完整内容",
+            "tags": ["营销"], "event_time": "2025-10-01", "result_metrics": {"gmv": 320},
+        }, headers=h_owner)).json()
+        exp_id = exp["id"]
+
+        # 本人可见详情，含全部内容字段
+        r = await c.get(f"/api/experiences/{exp_id}", headers=h_owner)
+        assert r.status_code == 200
+        detail = r.json()
+        assert detail["content"] == "完整内容"
+        assert detail["tags"] == ["营销"]
+        assert detail["event_time"] == "2025-10-01"
+        assert detail["result_metrics"] == {"gmv": 320}
+
+        # 他人（个人层经验）不可见 → 404
+        assert (await c.get(f"/api/experiences/{exp_id}", headers=h_other)).status_code == 404
+        # 不存在 → 404
+        assert (await c.get("/api/experiences/no-such-id", headers=h_owner)).status_code == 404

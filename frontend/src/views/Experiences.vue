@@ -2,11 +2,14 @@
 import { ref, onMounted } from 'vue'
 import client from '../api/client'
 import { toast } from '../api/toast'
-import type { ExperienceItem } from '../api/types'
+import { fmtDateTime } from '../api/format'
+import type { ExperienceDetail, ExperienceItem } from '../api/types'
+import Md from '../components/Md.vue'
 
 const items = ref<ExperienceItem[]>([])
 const showCreate = ref(false)
 const form = ref({ title: '', summary: '', content: '', tags: '' })
+const detailTarget = ref<ExperienceDetail | null>(null)
 
 onMounted(load)
 
@@ -56,8 +59,18 @@ async function removeItem(e: ExperienceItem) {
   }
 }
 
+async function openDetail(e: ExperienceItem) {
+  try {
+    const { data } = await client.get<ExperienceDetail>(`/experiences/${e.id}`)
+    detailTarget.value = data
+  } catch (err: any) {
+    toast(err.response?.data?.detail || '加载详情失败', 'error')
+  }
+}
+
 const scopeTag: Record<string, string> = { personal: 'tag-gray', dept: 'tag-cyan', company: 'tag-purple' }
 const statusTag: Record<string, string> = { draft: 'tag-gray', pending: 'tag-orange', approved: 'tag-green', rejected: 'tag-red' }
+const scopeLabel: Record<string, string> = { personal: '个人', dept: '部门', company: '公司' }
 </script>
 
 <template>
@@ -94,6 +107,7 @@ const statusTag: Record<string, string> = { draft: 'tag-gray', pending: 'tag-ora
               <td><span class="tag" :class="statusTag[e.status] ?? 'tag-gray'">{{ e.status }}</span></td>
               <td class="muted text-sm" style="max-width:280px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ e.summary }}</td>
               <td style="text-align:right">
+                <button class="btn btn-sm" @click="openDetail(e)">查看</button>
                 <span v-if="e.scope === 'personal' && e.status === 'draft'" class="row" style="justify-content:flex-end">
                   <button class="btn btn-sm" @click="submit(e.id, e.title, 'dept')">晋升部门</button>
                   <button class="btn btn-sm" @click="submit(e.id, e.title, 'company')">晋升公司</button>
@@ -107,6 +121,35 @@ const statusTag: Record<string, string> = { draft: 'tag-gray', pending: 'tag-ora
             </tr>
           </tbody>
         </table>
+      </div>
+    </div>
+
+    <!-- 详情弹窗 -->
+    <div v-if="detailTarget" class="modal-mask">
+      <div class="modal" style="width:640px">
+        <div class="modal-title">
+          <span>{{ detailTarget.title }}</span>
+          <span class="tag" :class="scopeTag[detailTarget.scope] ?? 'tag-gray'">{{ scopeLabel[detailTarget.scope] ?? detailTarget.scope }}</span>
+          <span class="tag" :class="statusTag[detailTarget.status] ?? 'tag-gray'">{{ detailTarget.status }}</span>
+        </div>
+        <div class="modal-body col">
+          <div class="row" style="flex-wrap:wrap;gap:6px">
+            <span v-for="t in detailTarget.tags" :key="t" class="tag tag-cyan">{{ t }}</span>
+            <span class="muted text-sm">事件时间：{{ detailTarget.event_time ?? '—' }}</span>
+            <span class="muted text-sm">沉淀时间：{{ fmtDateTime(detailTarget.created_at) }}</span>
+          </div>
+          <p class="text-muted" style="margin:4px 0 0">{{ detailTarget.summary }}</p>
+          <div class="card" style="background:var(--video-bg);padding:12px">
+            <Md :content="detailTarget.content || '（无详细内容）'" />
+          </div>
+          <div v-if="detailTarget.result_metrics" class="card" style="background:var(--video-bg);padding:12px">
+            <p class="text-muted text-sm" style="margin:0 0 6px">效果复盘</p>
+            <pre class="mono" style="margin:0;font-size:12px">{{ JSON.stringify(detailTarget.result_metrics, null, 2) }}</pre>
+          </div>
+        </div>
+        <div class="modal-foot">
+          <button class="btn btn-primary" @click="detailTarget = null">关闭</button>
+        </div>
       </div>
     </div>
   </div>

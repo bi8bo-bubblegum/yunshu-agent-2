@@ -1,11 +1,20 @@
 # backend/app/services/experience_service.py
 from datetime import date
+from uuid import UUID
 
 from fastapi import HTTPException
 from app.models.experience import Experience
 from app.repositories.experience_repo import ExperienceRepository
 from app.services.approval_service import ApprovalService
 from app.services.embedding import embed_texts
+
+
+def _valid_uuid(value: str) -> bool:
+    try:
+        UUID(str(value))
+    except ValueError:
+        return False
+    return True
 
 class ExperienceService:
     def __init__(self, db):
@@ -46,6 +55,8 @@ class ExperienceService:
 
     async def delete(self, user_id: str, exp_id: str, role_code: str | None = None) -> None:
         """删除经验：仅作者本人或 admin 可删（含已晋升到部门/公司层级的本人经验）。"""
+        if not _valid_uuid(exp_id):
+            raise HTTPException(404, "经验不存在")
         exp = await self.experience_repo.get(exp_id)
         if not exp:
             raise HTTPException(404, "经验不存在")
@@ -53,3 +64,19 @@ class ExperienceService:
             raise HTTPException(403, "无权删除该经验")
         await self.experience_repo.delete(exp)
         await self.experience_repo.commit()
+
+    async def get_detail(self, user_id: str, exp_id: str, department_id: str | None) -> Experience:
+        """查看经验详情：个人=本人、部门=同部门、公司=全员可见，其余返回 404。"""
+        if not _valid_uuid(exp_id):
+            raise HTTPException(404, "经验不存在")
+        exp = await self.experience_repo.get(exp_id)
+        if not exp:
+            raise HTTPException(404, "经验不存在")
+        visible = (
+            exp.owner_id == user_id
+            or exp.scope == "company"
+            or (exp.scope == "dept" and exp.department_id == department_id)
+        )
+        if not visible:
+            raise HTTPException(404, "经验不存在")
+        return exp
