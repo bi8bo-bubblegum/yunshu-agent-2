@@ -14,6 +14,7 @@ const input = ref('')
 const streaming = ref(false)
 const listRef = ref<HTMLElement>()
 const router = useRouter()
+const pendingApproval = ref<{ conversationId: string; approvalId: string } | null>(null)
 
 onMounted(loadConvs)
 
@@ -58,6 +59,7 @@ async function selectConv(id: string) {
   try {
     const { data } = await client.get<Message[]>(`/conversations/${id}/messages`)
     messages.value = data
+    if (data[data.length - 1]?.role === 'assistant') pendingApproval.value = null
     maybePollPending()
   } catch { /* ignore */ }
 }
@@ -88,7 +90,10 @@ function maybePollPending() {
     try {
       const { data } = await client.get<Message[]>(`/conversations/${currentId.value}/messages`)
       messages.value = data
-      if (data[data.length - 1]?.role === 'assistant') stopPoll()
+      if (data[data.length - 1]?.role === 'assistant') {
+        pendingApproval.value = null
+        stopPoll()
+      }
     } catch { /* ignore */ }
     if (tries >= 30) stopPoll()  // 最多轮询约 90 秒
   }, 3000)
@@ -151,8 +156,11 @@ async function send() {
       else if (e.event === 'confirm_required') {
         const p = (e.payload ?? {}) as Record<string, unknown>
         const critical = Boolean(p.approval_id)
-        if (critical && ai.content === '') {
-          ai.content = '⏳ 该操作已提交审批中心，审批通过后将自动显示回复'
+        if (critical) {
+          // 移除临时的空回复气泡，改由“待审批”状态气泡展示
+          const idx = messages.value.indexOf(ai)
+          if (idx >= 0) messages.value.splice(idx, 1)
+          pendingApproval.value = { conversationId: currentId.value, approvalId: String(p.approval_id ?? '') }
         }
         confirmState.value = {
           visible: true,
@@ -171,7 +179,8 @@ async function send() {
     if (err.name !== 'AbortError') toast('连接中断', 'error')
   } finally {
     streaming.value = false
-    if (ai.content === '') ai.content = '（无响应）'
+    if (ai.content === '' && !pendingApproval.value) ai.content = '（无响应）'
+    maybePollPending()
   }
 }
 
@@ -265,6 +274,14 @@ const activeConv = computed(() => convs.value.find(c => c.id === currentId.value
             <pre v-else>{{ m.content }}</pre>
           </div>
         </div>
+        <div v-if="pendingApproval && pendingApproval.conversationId === currentId" class="msg assistant">
+          <div class="avatar">云</div>
+          <div class="bubble pending-bubble">
+            <span class="spinner"></span>
+            <span>等待管理员审批（{{ pendingApproval.approvalId.slice(0, 8) }}）…</span>
+            <button class="btn btn-sm btn-primary" @click="router.push('/approvals')">去审批中心</button>
+          </div>
+        </div>
       </div>
 
       <div class="input-bar" v-if="currentId">
@@ -337,6 +354,7 @@ const activeConv = computed(() => convs.value.find(c => c.id === currentId.value
 .bubble { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 10px 14px; }
 .msg.user .bubble { background: rgba(254, 44, 85, .14); border-color: rgba(254, 44, 85, .35); }
 .bubble pre { margin: 0; white-space: pre-wrap; word-break: break-word; font-family: var(--font-sans); font-size: 13.5px; line-height: 1.65; }
+.pending-bubble { display: flex; align-items: center; gap: 10px; color: var(--muted-foreground); font-size: 13px; }
 .typing { display: flex; gap: 4px; padding: 6px 2px; }
 .typing span { width: 7px; height: 7px; border-radius: 50%; background: var(--muted-foreground); animation: blink 1.2s infinite; }
 .typing span:nth-child(2) { animation-delay: .2s; }
