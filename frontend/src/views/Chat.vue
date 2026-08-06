@@ -204,6 +204,15 @@ async function decide(approved: boolean) {
     if (data?.ok === false && data.payload) {
       const p = data.payload as Record<string, unknown>
       const critical = Boolean(p.approval_id)
+      if (critical) {
+        // 移除临时空回复气泡，置为待审批状态并开始轮询
+        const ai2 = messages.value[messages.value.length - 1]
+        if (ai2 && ai2.role === 'assistant' && ai2.content === '') {
+          messages.value.splice(messages.value.length - 1, 1)
+        }
+        pendingApproval.value = { conversationId: convId, approvalId: String(p.approval_id ?? '') }
+        maybePollPending()
+      }
       confirmState.value = {
         visible: true,
         conversationId: convId,
