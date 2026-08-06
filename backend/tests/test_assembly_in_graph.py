@@ -41,7 +41,7 @@ async def test_chat_with_memory(monkeypatch):
     monkeypatch.setattr("app.memory.assembly.pref_mem.build_context", _pref)
     monkeypatch.setattr("app.memory.assembly.exp_mem.build_experience_context", _exp)
     monkeypatch.setattr("app.memory.assembly.knowledge.retrieve_knowledge", _kb)
-    monkeypatch.setattr("app.services.chat_service.extract_and_save", _extract)
+    monkeypatch.setattr("app.services.chat_service.maybe_extract_batch", _extract)
     monkeypatch.setattr("app.services.chat_service.distill_experience", _distill)
     monkeypatch.setattr("app.services.chat_service.generate_title", _title)
 

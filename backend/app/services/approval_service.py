@@ -126,13 +126,13 @@ class ApprovalService:
         collector.emit(trace.id, "route", {"routes": trace.supervisor_routes})
         # 与 ChatService.stream_chat 完成路径对齐：偏好提取 / 经验提炼 / 摘要滚动 / 自动标题
         try:
-            from app.services.preference_svc import extract_and_save
+            from app.services.preference_svc import maybe_extract_batch
             from app.services.experience_svc import distill_experience, save_personal_experience
             from app.services.summary import generate_title, maybe_roll_summary
             all_msgs = await message_repo.list_by_conversation(trace.conversation_id)
             user_msg = next((m.content for m in reversed(all_msgs) if m.role == "user"), "")
             dialog = f"用户：{user_msg}\n助手：{text}"
-            await extract_and_save(self.db, trace.user_id, dialog)
+            await maybe_extract_batch(self.db, trace.user_id, trace.conversation_id)
             exp = await distill_experience(dialog, trace.user_id, trace.id)
             if exp:
                 await save_personal_experience(self.db, exp)

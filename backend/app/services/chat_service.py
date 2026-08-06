@@ -15,7 +15,7 @@ from app.repositories.conversation_repo import ConversationRepository, MessageRe
 from app.repositories.trace_repo import TraceRepository
 from app.repositories.user_repo import UserRepository
 from app.services.experience_svc import distill_experience, save_personal_experience
-from app.services.preference_svc import extract_and_save
+from app.services.preference_svc import maybe_extract_batch
 from app.services.summary import generate_title, maybe_roll_summary
 from app.traces.collector import collector
 from app.traces.handlers import StreamEventHandler, TraceCallbackHandler
@@ -145,7 +145,7 @@ class ChatService:
         # 偏好提取 / 经验提炼 / 摘要滚动：失败仅降级，不影响 SSE 正常收尾
         try:
             dialog = f"用户：{message}\n助手：{text}"
-            await extract_and_save(self.db, user_id, dialog)
+            await maybe_extract_batch(self.db, user_id, conv_id)
             exp = await distill_experience(dialog, user_id, trace.id)
             if exp:
                 await save_personal_experience(self.db, exp)
@@ -203,7 +203,7 @@ class ChatService:
             all_msgs = await self.message_repo.list_by_conversation(conv_id)
             user_msg = next((m.content for m in reversed(all_msgs) if m.role == "user"), "")
             dialog = f"用户：{user_msg}\n助手：{text}"
-            await extract_and_save(self.db, user_id, dialog)
+            await maybe_extract_batch(self.db, user_id, conv_id)
             exp = await distill_experience(dialog, user_id, trace.id if trace else "")
             if exp:
                 await save_personal_experience(self.db, exp)
