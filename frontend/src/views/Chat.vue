@@ -20,7 +20,11 @@ onMounted(loadConvs)
 // keep-alive 下从其他页面切回时刷新消息并滚动到底部
 // （审批中心处理完 critical 后回复可能已落库；流式进行中则保留现场）
 onActivated(async () => {
-  if (currentId.value && !streaming.value && messages.value.length) await selectConv(currentId.value)
+  if (!streaming.value) await loadConvs()
+  if (currentId.value && !streaming.value && messages.value.length) {
+    await selectConv(currentId.value)
+    maybePollPending()
+  }
   await nextTick()
   listRef.value?.scrollTo({ top: listRef.value.scrollHeight })
 })
@@ -47,13 +51,47 @@ async function newConv() {
 }
 
 async function selectConv(id: string) {
+  stopPoll()
   currentId.value = id
   messages.value = []
   steps.value = []
   try {
     const { data } = await client.get<Message[]>(`/conversations/${id}/messages`)
     messages.value = data
+    maybePollPending()
   } catch { /* ignore */ }
+}
+
+// ---- 等待审批/生成中的回复自动刷新 ----
+let pollTimer: number | undefined
+const waitingReply = ref(false)
+
+function stopPoll() {
+  waitingReply.value = false
+  if (pollTimer) {
+    clearInterval(pollTimer)
+    pollTimer = undefined
+  }
+}
+
+function maybePollPending() {
+  stopPoll()
+  if (streaming.value || !currentId.value) return
+  const last = messages.value[messages.value.length - 1]
+  if (!last || last.role !== 'user') return
+  // 最后一条是用户消息说明回复尚未生成（如 critical 审批恢复中），轮询等待
+  waitingReply.value = true
+  let tries = 0
+  pollTimer = window.setInterval(async () => {
+    tries++
+    if (streaming.value || !currentId.value) return stopPoll()
+    try {
+      const { data } = await client.get<Message[]>(`/conversations/${currentId.value}/messages`)
+      messages.value = data
+      if (data[data.length - 1]?.role === 'assistant') stopPoll()
+    } catch { /* ignore */ }
+    if (tries >= 30) stopPoll()  // 最多轮询约 90 秒
+  }, 3000)
 }
 
 async function removeConv(c: Conversation) {
@@ -112,13 +150,17 @@ async function send() {
       }
       else if (e.event === 'confirm_required') {
         const p = (e.payload ?? {}) as Record<string, unknown>
+        const critical = Boolean(p.approval_id)
+        if (critical && ai.content === '') {
+          ai.content = '⏳ 该操作已提交审批中心，审批通过后将自动显示回复'
+        }
         confirmState.value = {
           visible: true,
           conversationId: currentId.value,
           tool: String(p.tool ?? '未知工具'),
           args: p.args ?? {},
           reason: String(p.reason ?? '高风险操作需要确认'),
-          critical: Boolean(p.approval_id),
+          critical,
           approvalId: String(p.approval_id ?? ''),
         }
       } else if (e.event === 'error') {
@@ -229,7 +271,7 @@ const activeConv = computed(() => convs.value.find(c => c.id === currentId.value
         <textarea class="textarea" v-model="input" rows="2" placeholder="输入消息，Enter 发送 / Shift+Enter 换行"
                   :disabled="streaming" @keydown.enter.exact.prevent="send" />
         <div class="row-between mt-8">
-          <span class="text-muted text-sm">{{ streaming ? 'Agent 思考中…' : activeConv ? '会话已就绪' : '' }}</span>
+          <span class="text-muted text-sm">{{ streaming ? 'Agent 思考中…' : waitingReply ? '⏳ 等待审批/回复中…' : activeConv ? '会话已就绪' : '' }}</span>
           <button class="btn btn-primary" :disabled="!input.trim() || streaming || !currentId" @click="send">
             <span v-if="streaming" class="spinner"></span>发送
           </button>
