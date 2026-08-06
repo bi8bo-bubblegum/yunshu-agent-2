@@ -1,0 +1,131 @@
+"""回归：流式聊天 + high/critical 多级 interrupt 全链路。
+
+用 FakeLLM 强制触发 create(high) → publish(critical) 工具链，验证：
+SSE confirm_required → resume → 审批中心 decide → 图恢复 → 回复落库。
+"""
+import json
+
+import pytest
+from httpx import AsyncClient, ASGITransport
+from langchain_core.messages import AIMessage
+from sqlalchemy import update
+
+from app.main import app
+from app.models.org import User
+
+
+class SequencedLLM:
+    """按调用顺序返回：create 工具调用 → publish 工具调用 → 最终方案。"""
+
+    def __init__(self):
+        self.calls = 0
+
+    def bind_tools(self, tools):
+        return self
+
+    async def ainvoke(self, messages):
+        self.calls += 1
+        if self.calls == 1:
+            return AIMessage(content="", tool_calls=[{
+                "name": "create_marketing_campaign",
+                "args": {"name": "国庆大促", "budget": 50000, "channel": "全渠道",
+                         "start_date": "2024-10-01", "end_date": "2024-10-07"},
+                "id": "c1", "type": "tool_call",
+            }])
+        if self.calls == 2:
+            return AIMessage(content="", tool_calls=[{
+                "name": "publish_campaign",
+                "args": {"campaign_id": "C50000", "channels": ["全渠道"]},
+                "id": "c2", "type": "tool_call",
+            }])
+        return AIMessage(content="最终方案已生成")
+
+
+async def _stubs(monkeypatch):
+    async def fake_route(message, agents):
+        return {"agent": "marketing", "reason": "r", "confidence": 0.9}
+    async def _ctx(db, cid, **k):
+        return ""
+    async def _pref(db, uid):
+        return ""
+    async def _exp(db, uid, dept, q, **k):
+        return ""
+    async def _kb(db, q, **k):
+        return ""
+    async def _extract(db, uid, text):
+        return None
+    async def _distill(text, uid, tid):
+        return None
+    async def _save_exp(db, exp):
+        return None
+    async def _roll(db, cid, **k):
+        return None
+    monkeypatch.setattr("app.agents.graph.route_decision", fake_route)
+    monkeypatch.setattr("app.memory.assembly.short_term.build_context", _ctx)
+    monkeypatch.setattr("app.memory.assembly.pref_mem.build_context", _pref)
+    monkeypatch.setattr("app.memory.assembly.exp_mem.build_experience_context", _exp)
+    monkeypatch.setattr("app.memory.assembly.knowledge.retrieve_knowledge", _kb)
+    monkeypatch.setattr("app.services.chat_service.extract_and_save", _extract)
+    monkeypatch.setattr("app.services.chat_service.distill_experience", _distill)
+    # 审批恢复路径在函数内按模块导入，需按源模块 stub
+    monkeypatch.setattr("app.services.preference_svc.extract_and_save", _extract)
+    monkeypatch.setattr("app.services.experience_svc.distill_experience", _distill)
+    monkeypatch.setattr("app.services.experience_svc.save_personal_experience", _save_exp)
+    monkeypatch.setattr("app.services.summary.maybe_roll_summary", _roll)
+
+
+@pytest.mark.asyncio
+async def test_critical_approval_flow(db_session, monkeypatch):
+    await _stubs(monkeypatch)
+    seq = SequencedLLM()
+    monkeypatch.setattr("app.agents.marketing.agent.ModelFactory.get_llm", lambda k: seq)
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        await c.post("/api/auth/register", json={"username": "flow_user", "password": "x123456", "display_name": "U"})
+        await c.post("/api/auth/register", json={"username": "flow_admin", "password": "x123456", "display_name": "A"})
+        r = await c.post("/api/auth/login", json={"username": "flow_user", "password": "x123456"})
+        h_user = {"Authorization": f"Bearer {r.json()['access_token']}"}
+        r = await c.post("/api/auth/login", json={"username": "flow_admin", "password": "x123456"})
+        h_admin = {"Authorization": f"Bearer {r.json()['access_token']}"}
+
+        # 提权 admin
+        await db_session.execute(update(User).where(User.username == "flow_admin").values(role_code="admin"))
+        await db_session.commit()
+
+        conv_id = (await c.post("/api/conversations", json={}, headers=h_user)).json()["id"]
+
+        # 1. SSE 流：应收到 confirm_required（create，high）
+        events = []
+        async with c.stream("POST", "/api/chat/completions",
+                            json={"conversation_id": conv_id, "message": "策划并发布国庆活动"},
+                            headers=h_user) as resp:
+            assert resp.status_code == 200
+            async for line in resp.aiter_lines():
+                if line.startswith("data: "):
+                    events.append(json.loads(line[6:]))
+        ev_names = [e["event"] for e in events]
+        assert "confirm_required" in ev_names, ev_names
+        assert "error" not in ev_names, events
+
+        # 2. resume：high 确认后应继续走到 critical，返回 ok=False + approval_id
+        r = await c.post("/api/chat/resume", json={"conversation_id": conv_id, "approved": True}, headers=h_user)
+        assert r.status_code == 200
+        body = r.json()
+        assert body.get("ok") is False, body
+        approval_id = body["payload"]["approval_id"]
+        assert approval_id
+
+        # 3. 管理员审批 critical → 图恢复完成 → 回复落库
+        r = await c.post(f"/api/approvals/{approval_id}/decide",
+                         json={"approve": True, "comment": "ok"}, headers=h_admin)
+        assert r.status_code == 200, r.text
+
+        msgs = (await c.get(f"/api/conversations/{conv_id}/messages", headers=h_user)).json()
+        assistant = [m for m in msgs if m["role"] == "assistant"]
+        assert assistant, msgs
+        assert assistant[-1]["content"] == "最终方案已生成"
+
+        traces = (await c.get("/api/traces", headers=h_user)).json()
+        trace = next(t for t in traces if t["conversation_id"] == conv_id)
+        assert trace["status"] == "completed", trace
