@@ -73,6 +73,9 @@ class ConfigService:
         return await self.binding_repo.list_by_agent(agent_code)
 
     async def add_agent_binding(self, agent_code: str, mcp_server_name: str) -> AgentMcpBinding:
+        # 同一 Agent 重复绑定同一 MCP 服务直接拒绝（绑定会在重启后重复加载工具）
+        if await self.binding_repo.get_by(agent_code=agent_code, mcp_server_name=mcp_server_name):
+            raise HTTPException(409, f"MCP 服务「{mcp_server_name}」已绑定到该 Agent")
         row = AgentMcpBinding(agent_code=agent_code, mcp_server_name=mcp_server_name)
         await self.binding_repo.add(row)
         await self.binding_repo.commit()
