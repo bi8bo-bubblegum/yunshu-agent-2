@@ -56,6 +56,8 @@ async def _stubs(monkeypatch):
         return None
     async def _distill(text, uid, tid):
         return None
+    async def _title(msg):
+        return "测试标题"
     async def _save_exp(db, exp):
         return None
     async def _roll(db, cid, **k):
@@ -67,11 +69,13 @@ async def _stubs(monkeypatch):
     monkeypatch.setattr("app.memory.assembly.knowledge.retrieve_knowledge", _kb)
     monkeypatch.setattr("app.services.chat_service.extract_and_save", _extract)
     monkeypatch.setattr("app.services.chat_service.distill_experience", _distill)
+    monkeypatch.setattr("app.services.chat_service.generate_title", _title)
     # 审批恢复路径在函数内按模块导入，需按源模块 stub
     monkeypatch.setattr("app.services.preference_svc.extract_and_save", _extract)
     monkeypatch.setattr("app.services.experience_svc.distill_experience", _distill)
     monkeypatch.setattr("app.services.experience_svc.save_personal_experience", _save_exp)
     monkeypatch.setattr("app.services.summary.maybe_roll_summary", _roll)
+    monkeypatch.setattr("app.services.summary.generate_title", _title)
 
 
 @pytest.mark.asyncio

@@ -41,12 +41,15 @@ async def test_chat_sse_streams(monkeypatch):
         return None
     async def _distill(text, uid, tid):
         return None
+    async def _title(msg):
+        return "测试标题"
     monkeypatch.setattr("app.memory.assembly.short_term.build_context", _ctx)
     monkeypatch.setattr("app.memory.assembly.pref_mem.build_context", _pref)
     monkeypatch.setattr("app.memory.assembly.exp_mem.build_experience_context", _exp)
     monkeypatch.setattr("app.memory.assembly.knowledge.retrieve_knowledge", _kb)
     monkeypatch.setattr("app.services.chat_service.extract_and_save", _extract)
     monkeypatch.setattr("app.services.chat_service.distill_experience", _distill)
+    monkeypatch.setattr("app.services.chat_service.generate_title", _title)
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:

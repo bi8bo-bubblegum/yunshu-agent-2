@@ -1,4 +1,5 @@
 # backend/app/services/approval_service.py
+import logging
 from datetime import datetime, timezone
 from fastapi import HTTPException
 from app.models.org import User
@@ -7,6 +8,8 @@ from app.repositories.trace_repo import ApprovalRepository, TraceRepository
 from app.repositories.experience_repo import ExperienceRepository
 from app.repositories.user_repo import UserRepository
 from app.traces.handlers import TraceCallbackHandler
+
+logger = logging.getLogger(__name__)
 
 
 class ApprovalService:
@@ -121,18 +124,26 @@ class ApprovalService:
             await trace_repo.commit()
         from app.traces.collector import collector
         collector.emit(trace.id, "route", {"routes": trace.supervisor_routes})
-        # 与 ChatService.stream_chat 完成路径对齐：偏好提取 / 经验提炼 / 摘要滚动
-        from app.services.preference_svc import extract_and_save
-        from app.services.experience_svc import distill_experience, save_personal_experience
-        from app.services.summary import maybe_roll_summary
-        all_msgs = await message_repo.list_by_conversation(trace.conversation_id)
-        user_msg = next((m.content for m in reversed(all_msgs) if m.role == "user"), "")
-        dialog = f"用户：{user_msg}\n助手：{text}"
-        await extract_and_save(self.db, trace.user_id, dialog)
-        exp = await distill_experience(dialog, trace.user_id, trace.id)
-        if exp:
-            await save_personal_experience(self.db, exp)
-        await maybe_roll_summary(self.db, trace.conversation_id)
+        # 与 ChatService.stream_chat 完成路径对齐：偏好提取 / 经验提炼 / 摘要滚动 / 自动标题
+        try:
+            from app.services.preference_svc import extract_and_save
+            from app.services.experience_svc import distill_experience, save_personal_experience
+            from app.services.summary import generate_title, maybe_roll_summary
+            all_msgs = await message_repo.list_by_conversation(trace.conversation_id)
+            user_msg = next((m.content for m in reversed(all_msgs) if m.role == "user"), "")
+            dialog = f"用户：{user_msg}\n助手：{text}"
+            await extract_and_save(self.db, trace.user_id, dialog)
+            exp = await distill_experience(dialog, trace.user_id, trace.id)
+            if exp:
+                await save_personal_experience(self.db, exp)
+            await maybe_roll_summary(self.db, trace.conversation_id)
+            if conv and conv.title in ("新对话", "", None) and user_msg:
+                new_title = await generate_title(user_msg)
+                if new_title and new_title != "新对话":
+                    conv.title = new_title
+                    await trace_repo.commit()
+        except Exception as e:
+            logger.warning("审批恢复后记忆沉淀处理失败（已降级）: %s", e)
 
     async def _promote_experience(self, experience_id: str, to_scope: str):
         """经验层级晋升。"""

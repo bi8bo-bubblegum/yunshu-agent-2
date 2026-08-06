@@ -151,10 +151,10 @@ async def main() -> int:
         check("user 部门生效", r.json().get("department_id") == dept_id, r.text[:200])
 
         # ---------- 2. 会话 ----------
-        r = await client.post("/api/conversations", json={"title": "E2E国庆营销"}, headers=h_user)
+        r = await client.post("/api/conversations", json={}, headers=h_user)
         conv = r.json() if r.status_code == 200 else {}
         conv_id = conv.get("id")
-        check("创建会话", bool(conv_id), r.text[:200])
+        check("创建会话（默认标题）", bool(conv_id) and conv.get("title") == "新对话", r.text[:200])
         r = await client.get("/api/conversations", headers=h_user)
         check("会话列表", r.status_code == 200 and any(c.get("id") == conv_id for c in r.json()), "")
 
@@ -193,6 +193,12 @@ async def main() -> int:
         roles = [m.get("role") for m in msgs]
         check("消息落库（user+assistant）", r.status_code == 200 and "user" in roles and "assistant" in roles,
               str(roles)[:200])
+
+        # 首次发送后自动生成会话标题
+        r = await client.get("/api/conversations", headers=h_user)
+        cur = next((c for c in r.json() if c.get("id") == conv_id), None)
+        check("首条消息后自动生成会话标题", bool(cur and cur.get("title") not in ("新对话", "", None)),
+              str(cur)[:150])
 
         r = await client.get("/api/traces", headers=h_user)
         traces = r.json() if r.status_code == 200 else []

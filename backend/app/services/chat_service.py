@@ -16,7 +16,7 @@ from app.repositories.trace_repo import TraceRepository
 from app.repositories.user_repo import UserRepository
 from app.services.experience_svc import distill_experience, save_personal_experience
 from app.services.preference_svc import extract_and_save
-from app.services.summary import maybe_roll_summary
+from app.services.summary import generate_title, maybe_roll_summary
 from app.traces.collector import collector
 from app.traces.handlers import StreamEventHandler, TraceCallbackHandler
 
@@ -150,6 +150,12 @@ class ChatService:
             if exp:
                 await save_personal_experience(self.db, exp)
             await maybe_roll_summary(self.db, conv_id)
+            # 首次发送（标题仍为默认值）时由 LLM 提炼会话标题
+            if conv.title in ("新对话", "", None):
+                new_title = await generate_title(message)
+                if new_title and new_title != "新对话":
+                    conv.title = new_title
+                    await self.conversation_repo.commit()
         except Exception as e:
             logger.warning("记忆沉淀后处理失败（已降级）: %s", e)
         yield json.dumps({"event": "answer", "content": text}, ensure_ascii=False)
@@ -192,4 +198,21 @@ class ChatService:
             conv.current_trace_id = trace.id
             await self.trace_repo.commit()
             collector.emit(trace.id, "route", {"routes": trace.supervisor_routes})
+        # 与 stream_chat 完成路径对齐：偏好提取 / 经验提炼 / 摘要滚动 / 自动标题
+        try:
+            all_msgs = await self.message_repo.list_by_conversation(conv_id)
+            user_msg = next((m.content for m in reversed(all_msgs) if m.role == "user"), "")
+            dialog = f"用户：{user_msg}\n助手：{text}"
+            await extract_and_save(self.db, user_id, dialog)
+            exp = await distill_experience(dialog, user_id, trace.id if trace else "")
+            if exp:
+                await save_personal_experience(self.db, exp)
+            await maybe_roll_summary(self.db, conv_id)
+            if conv.title in ("新对话", "", None) and user_msg:
+                new_title = await generate_title(user_msg)
+                if new_title and new_title != "新对话":
+                    conv.title = new_title
+                    await self.trace_repo.commit()
+        except Exception as e:
+            logger.warning("resume 后记忆沉淀处理失败（已降级）: %s", e)
         return {"ok": True, "content": text}

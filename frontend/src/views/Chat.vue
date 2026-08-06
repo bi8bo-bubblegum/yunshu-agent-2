@@ -205,6 +205,7 @@ async function send() {
         toast(String(e.content ?? '请求失败'), 'error')
       }
     }, abortCtrl.signal)
+    await loadConvs()  // 首次发送后标题可能已被后端自动生成，刷新会话列表
   } catch (err: any) {
     if (err.name !== 'AbortError') toast('连接中断', 'error')
   } finally {

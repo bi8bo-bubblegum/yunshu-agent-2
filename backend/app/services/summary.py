@@ -11,6 +11,22 @@ logger = logging.getLogger(__name__)
 class SummaryOutput(BaseModel):
     summary: str = Field(description="简洁的中文摘要，保留关键决策、数字与结论")
 
+
+class TitleOutput(BaseModel):
+    title: str = Field(description="简洁的中文会话标题，10~20 字，概括消息核心意图")
+
+
+async def generate_title(message: str) -> str:
+    """根据用户消息生成简洁会话标题（首次发送时调用）。"""
+    llm = ModelFactory.get_llm().with_structured_output(TitleOutput)
+    result = await llm.ainvoke(
+        "根据用户消息为会话生成一个简洁的中文标题（10~20 字），"
+        "概括消息的核心意图，不要包含引号、标点或多余修饰。\n消息："
+        + message[:500]
+    )
+    return (result.title or "").strip()[:30] or "新对话"
+
+
 async def summarize_text(messages_text: str) -> str:
     llm = ModelFactory.get_llm().with_structured_output(SummaryOutput)
     result = await llm.ainvoke(
