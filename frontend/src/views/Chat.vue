@@ -46,6 +46,23 @@ async function selectConv(id: string) {
   } catch { /* ignore */ }
 }
 
+async function removeConv(c: Conversation) {
+  if (!confirm(`确认删除会话「${c.title || '新会话'}」？删除后不可恢复`)) return
+  try {
+    await client.delete(`/conversations/${c.id}`)
+    toast('会话已删除', 'success')
+    const idx = convs.value.findIndex(x => x.id === c.id)
+    if (idx >= 0) convs.value.splice(idx, 1)
+    if (currentId.value === c.id) {
+      currentId.value = ''
+      messages.value = []
+      if (convs.value.length) selectConv(convs.value[0].id)
+    }
+  } catch (err: any) {
+    toast(err.response?.data?.detail || '删除失败', 'error')
+  }
+}
+
 // ---- 发送 / SSE ----
 let abortCtrl: AbortController | null = null
 
@@ -119,6 +136,7 @@ const activeConv = computed(() => convs.value.find(c => c.id === currentId.value
       <div class="conv-list">
         <div v-for="c in convs" :key="c.id" class="conv-item"
              :data-active="c.id === currentId" @click="selectConv(c.id)">
+          <button class="conv-del" title="删除会话" @click.stop="removeConv(c)">✕</button>
           <div class="conv-title">{{ c.title || '新会话' }}</div>
           <div class="conv-meta">{{ c.created_at?.slice(0, 16) }}</div>
         </div>
@@ -184,11 +202,13 @@ const activeConv = computed(() => convs.value.find(c => c.id === currentId.value
 .chat-page { display: flex; height: 100%; }
 .conv-panel { width: 240px; flex-shrink: 0; padding: 14px; border-right: 1px solid var(--border); display: flex; flex-direction: column; gap: 12px; background: var(--video-bg); }
 .conv-list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
-.conv-item { padding: 10px 12px; border-radius: var(--radius-md); cursor: pointer; transition: background .18s; }
+.conv-item { position: relative; padding: 10px 12px; border-radius: var(--radius-md); cursor: pointer; transition: background .18s; }
 .conv-item:hover { background: var(--card); }
 .conv-item[data-active="true"] { background: var(--card-elevated); }
 .conv-title { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .conv-meta { font-size: 11px; color: var(--muted-foreground); margin-top: 2px; }
+.conv-del { position: absolute; top: 8px; right: 8px; width: 18px; height: 18px; line-height: 16px; padding: 0; border: none; border-radius: 4px; background: transparent; color: var(--muted-foreground); opacity: .35; font-size: 11px; cursor: pointer; transition: opacity .15s, background-color .15s; }
+.conv-del:hover { opacity: 1; background: var(--card); color: var(--foreground); }
 
 .msg-panel { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .msg-list { flex: 1; min-height: 0; overflow-y: auto; padding: 20px 24px; display: flex; flex-direction: column; gap: 16px; }

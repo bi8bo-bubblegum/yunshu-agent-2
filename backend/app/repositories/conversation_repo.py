@@ -1,4 +1,4 @@
-from sqlalchemy import select, func
+from sqlalchemy import delete, select, func
 from app.models.chat import Conversation, Message
 from app.repositories.base import BaseRepository
 
@@ -11,6 +11,9 @@ class ConversationRepository(BaseRepository[Conversation]):
 
 class MessageRepository(BaseRepository[Message]):
     model = Message
+
+    async def delete_by_conversation(self, conversation_id: str) -> None:
+        await self.db.execute(delete(Message).where(Message.conversation_id == conversation_id))
 
     async def list_by_conversation(self, conversation_id: str) -> list[Message]:
         stmt = select(Message).where(Message.conversation_id == conversation_id).order_by(Message.seq)

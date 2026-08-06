@@ -22,3 +22,9 @@ async def list_conversations(svc: ConversationService = Depends(get_conv_service
 @router.get("/{conv_id}/messages", response_model=list[MessageOut])
 async def list_messages(conv_id: str, svc: ConversationService = Depends(get_conv_service), user: User = Depends(get_current_user)):
     return await svc.list_messages(user.id, conv_id)
+
+@router.delete("/{conv_id}")
+async def delete_conversation(conv_id: str, svc: ConversationService = Depends(get_conv_service), user: User = Depends(get_current_user)):
+    """删除会话及其消息（他人会话返回 404，不泄露存在性）。"""
+    await svc.delete(user.id, conv_id)
+    return {"ok": True}

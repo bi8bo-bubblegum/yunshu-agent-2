@@ -21,3 +21,12 @@ class ConversationService:
         if not conv or conv.user_id != user_id:
             raise HTTPException(status_code=404, detail="会话不存在")
         return await self.message_repo.list_by_conversation(conversation_id)
+
+    async def delete(self, user_id: str, conversation_id: str) -> None:
+        """删除会话及其消息。执行留痕/审批单属审计数据，保留不删。"""
+        conv = await self.conversation_repo.get(conversation_id)
+        if not conv or conv.user_id != user_id:
+            raise HTTPException(status_code=404, detail="会话不存在")
+        await self.message_repo.delete_by_conversation(conversation_id)
+        await self.conversation_repo.delete(conv)
+        await self.conversation_repo.commit()
