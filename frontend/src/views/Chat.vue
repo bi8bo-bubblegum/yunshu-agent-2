@@ -7,6 +7,7 @@ import client from '../api/client'
 import { toast } from '../api/toast'
 import { fmtDateTime } from '../api/format'
 import type { Conversation, Message } from '../api/types'
+import Md from '../components/Md.vue'
 
 const convs = ref<Conversation[]>([])
 const currentId = ref('')
@@ -304,6 +305,7 @@ const activeConv = computed(() => convs.value.find(c => c.id === currentId.value
           <div class="avatar">{{ m.role === 'user' ? '我' : '云' }}</div>
           <div class="bubble">
             <div v-if="m.role === 'assistant' && m.content === '' && streaming && i === messages.length - 1" class="typing"><span></span><span></span><span></span></div>
+            <Md v-else-if="m.role === 'assistant'" :content="m.content" />
             <pre v-else>{{ m.content }}</pre>
           </div>
         </div>
