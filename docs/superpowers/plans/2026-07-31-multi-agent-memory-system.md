@@ -910,7 +910,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 
-app = FastAPI(title="云书 Agent")
+app = FastAPI(title="云枢 Agent")
 app.add_middleware(CORSMiddleware, allow_origins=settings.FRONTEND_ORIGINS.split(","), allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 # 业务路由随各任务逐步 include_router（auth 路由在任务 7.5 注册）
 ```
@@ -4527,7 +4527,7 @@ async def lifespan(app: FastAPI):
     yield
     task.cancel()
 
-app = FastAPI(title="云书 Agent", lifespan=lifespan)
+app = FastAPI(title="云枢 Agent", lifespan=lifespan)
 ```
 
 运行：`cd backend && pytest tests/test_traces.py -v`

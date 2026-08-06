@@ -69,7 +69,7 @@ function logout() {
       <a class="brand-block" @click="router.push('/chat')">
         <span class="brand-mark">云</span>
         <span class="brand-text">
-          <span class="brand-name">云书 Agent</span>
+          <span class="brand-name">云枢 Agent</span>
           <span class="brand-sub">Multi-Agent Platform</span>
         </span>
       </a>
@@ -105,7 +105,7 @@ function logout() {
       <header class="app-topbar">
         <div class="topbar-title">
           <p class="topbar-kicker">WORKSPACE</p>
-          <h1 class="topbar-heading">{{ titleMap[route.path] || '云书 Agent' }}</h1>
+          <h1 class="topbar-heading">{{ titleMap[route.path] || '云枢 Agent' }}</h1>
         </div>
         <div class="topbar-actions">
           <button class="icon-btn" title="审批中心" @click="router.push('/approvals')">

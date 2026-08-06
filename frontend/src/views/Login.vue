@@ -48,7 +48,7 @@ async function submit() {
         <div class="brand-row">
           <span class="brand-logo">云</span>
           <div class="brand-title-group">
-            <span class="brand-name">云书 Agent</span>
+            <span class="brand-name">云枢 Agent</span>
             <span class="brand-en">Multi-Agent Platform</span>
           </div>
         </div>
@@ -56,7 +56,7 @@ async function submit() {
         <div class="story">
           <p class="kicker">Supervisor · Agent Orchestration</p>
           <h1 class="story-title">让每个决策，<br />都有 <em class="em-primary">记忆</em> 与 <em class="em-secondary">依据</em></h1>
-          <p class="story-desc">云书 Agent 以 Supervisor 统一调度专业 Agent，自动召回四层记忆并结合企业数据综合分析；高风险操作人工确认，全链路执行留痕、可回放。</p>
+          <p class="story-desc">云枢 Agent 以 Supervisor 统一调度专业 Agent，自动召回四层记忆并结合企业数据综合分析；高风险操作人工确认，全链路执行留痕、可回放。</p>
 
           <ul class="caps">
             <li class="cap">
@@ -97,7 +97,7 @@ async function submit() {
     <section class="auth-panel">
       <div class="auth-inner">
         <p class="kicker">Sign In</p>
-        <h2 class="auth-title">{{ mode === 'login' ? '登录云书 Agent' : '创建账户' }}</h2>
+        <h2 class="auth-title">{{ mode === 'login' ? '登录云枢 Agent' : '创建账户' }}</h2>
         <p class="auth-sub">{{ mode === 'login' ? '账号由企业管理员开通，支持 SSO 单点登录' : '注册后即可使用企业多 Agent 协作平台' }}</p>
 
         <form class="auth-form" @submit.prevent="submit">

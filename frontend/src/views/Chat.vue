@@ -299,7 +299,7 @@ const activeConv = computed(() => convs.value.find(c => c.id === currentId.value
         </div>
         <div v-else-if="!messages.length" class="empty">
           <span class="icon">🤖</span>
-          <p>向云书 Agent 描述你的任务</p>
+          <p>向云枢 Agent 描述你的任务</p>
           <p class="text-muted text-sm">示例：帮我策划一个国庆营销方案</p>
         </div>
         <div v-for="(m, i) in messages" :key="m.id" class="msg" :class="m.role">
