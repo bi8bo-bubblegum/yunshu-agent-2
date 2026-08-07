@@ -3,6 +3,7 @@ import logging
 
 from pydantic import BaseModel, Field
 from app.llm.factory import ModelFactory
+from app.llm.date_context import current_date_context
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +60,8 @@ async def route_decision(message: str, agents: list[str], model_key: str = "defa
         f"5. 上一轮 agent 只完成部分诉求，或需要其他 agent 补充分析 → 选择对应 agent 继续；\n"
         f"6. 若上一轮 agent 的回复是在向用户提问或请求补充信息（如缺少必要参数），"
         f"说明需要用户输入，应返回 done，不要反复派发同一个 agent。\n"
+        f"\n"
+        f"{current_date_context()}\n"
         f"\n"
         f"消息：{message}"
     )

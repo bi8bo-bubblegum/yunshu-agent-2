@@ -19,3 +19,4 @@ async def test_assembly_sections(monkeypatch):
     monkeypatch.setattr("app.memory.assembly.knowledge.retrieve_knowledge", _kb)
     ctx = await assemble_memory(None, user_id="u1", conversation_id="c1", department_id="d1", query="国庆营销")
     assert "短期" in ctx and "偏好" in ctx and "经验" in ctx and "知识" in ctx
+    assert "当前日期：" in ctx
