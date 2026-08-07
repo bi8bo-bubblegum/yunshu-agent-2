@@ -46,7 +46,9 @@ async function decide(approve: boolean) {
 }
 
 const categoryLabel: Record<string, string> = { tool_call: '工具调用', experience_promotion: '经验晋升' }
+const riskLabel: Record<string, string> = { critical: '高危', high: '较高', medium: '中危' }
 const riskTag: Record<string, string> = { critical: 'tag-red', high: 'tag-orange', medium: 'tag-blue' }
+const statusLabel: Record<string, string> = { pending: '待审批', approved: '已通过', rejected: '已驳回' }
 const statusTag: Record<string, string> = { pending: 'tag-orange', approved: 'tag-green', rejected: 'tag-red' }
 
 function fmtArgs(ctx: Record<string, unknown> | null): string {
@@ -63,7 +65,7 @@ function fmtArgs(ctx: Record<string, unknown> | null): string {
       <div class="row">
         <button v-for="s in ['pending', 'approved', 'rejected']" :key="s" class="btn btn-sm"
                 :class="{ 'btn-primary': status === s }" @click="status = s; load()">
-          {{ { pending: '待审批', approved: '已通过', rejected: '已驳回' }[s] }}
+          {{ statusLabel[s] }}
         </button>
       </div>
       <span class="text-muted text-sm">共 {{ items.length }} 条</span>
@@ -81,13 +83,13 @@ function fmtArgs(ctx: Record<string, unknown> | null): string {
               <td><span class="tag tag-blue">{{ categoryLabel[a.category] ?? a.category }}</span></td>
               <td style="max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ a.title }}</td>
               <td>
-                <span v-if="a.risk" class="tag" :class="riskTag[a.risk] ?? 'tag-gray'">{{ a.risk }}</span>
+                <span v-if="a.risk" class="tag" :class="riskTag[a.risk] ?? 'tag-gray'">{{ riskLabel[a.risk] ?? a.risk }}</span>
                 <span v-else class="tag tag-gray">—</span>
               </td>
               <td class="muted text-sm mono" style="max-width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ fmtArgs(a.context) }}</td>
               <td class="muted text-sm">{{ a.requester_id?.slice(0, 8) }}</td>
               <td class="muted text-sm">{{ fmtDateTime(a.submitted_at) }}</td>
-              <td><span class="tag" :class="statusTag[a.status] ?? 'tag-gray'">{{ a.status }}</span></td>
+              <td><span class="tag" :class="statusTag[a.status] ?? 'tag-gray'">{{ statusLabel[a.status] ?? a.status }}</span></td>
               <td style="text-align:right">
                 <button v-if="a.status === 'pending'" class="btn btn-sm btn-primary" @click="openDecide(a)">审批</button>
                 <span v-else class="muted text-sm">{{ a.comment || '—' }}</span>
