@@ -2,13 +2,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.repositories.conversation_repo import ConversationRepository, MessageRepository
 
 async def build_context(db: AsyncSession, conversation_id: str, recent_rounds: int = 10) -> str:
-    conv_repo = ConversationRepository(db)
-    msg_repo = MessageRepository(db)
-    conv = await conv_repo.get(conversation_id)
-    if not conv:
+    """短期记忆：只返回窗口外的滚动摘要。
+
+    最近 N 轮原文已由主图通过 state.messages 以真实消息注入 agent，
+    这里不再重复输出原文，避免同一内容喂两遍；滚动摘要覆盖窗口外压缩历史。
+    """
+    conv = await ConversationRepository(db).get(conversation_id)
+    if not conv or not conv.summary:
         return ""
-    msgs = await msg_repo.list_recent(conversation_id, recent_rounds * 2)
-    msgs.reverse()
-    lines = [f"{m.role}: {m.content}" for m in msgs]
-    prefix = f"[历史摘要] {conv.summary}\n" if conv.summary else ""
-    return prefix + "\n".join(lines)
+    return f"【历史摘要】\n{conv.summary}"
