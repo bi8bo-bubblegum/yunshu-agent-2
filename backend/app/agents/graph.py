@@ -3,7 +3,6 @@ import asyncio
 
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-from langgraph._internal._constants import CONFIG_KEY_CHECKPOINTER
 from langchain_core.runnables import RunnableConfig
 from psycopg_pool import AsyncConnectionPool
 
@@ -59,9 +58,14 @@ def wrap_subgraph(subgraph, checkpointer):
     父图对同名 channel 再次应用 add reducer 会重复累积。
     包装后仅将子图真正新增的部分传回父图，避免消息与路由历史膨胀。
 
-    config 处理：给子图传入独立 thread_id + 显式 checkpointer，
-    - 独立 thread：子图不会读到父图 checkpoint（避免从父图历史恢复挂起）
-    - 显式 checkpointer：子图拥有持久化能力，子图内 interrupt（high/critical 工具）正常工作
+    checkpoint 管理：子图（compile(checkpointer=True) 的编译图）在固定
+    checkpoint_ns 下持久化历史，而 messages 是 add 追加通道——若子图
+    直接继承父图 thread_id 累积历史，会与父图每次传入的完整 messages
+    用 add 合并重复，导致消息逐轮膨胀、agent 复读用户消息。
+    因此子图每次在「父图当前 checkpoint id 派生的独立 sub-thread」上执行：
+    从空 checkpoint 全新开始（父图传入的完整 messages 即上下文），
+    不叠加子图历史。interrupt 挂起时父图与子图在同一 checkpoint 写快照，
+    resume 恢复同一 checkpoint → 派生相同 sub-thread → 子图从挂起点继续。
     非子图节点（普通 callable，如单元测试中的 lambda）原样使用。"""
     if not hasattr(subgraph, "ainvoke"):
         return subgraph
@@ -70,12 +74,16 @@ def wrap_subgraph(subgraph, checkpointer):
         input_msgs = list(state.get("messages", []))
         input_rounds = state.get("tool_rounds", 0)
         cfg = (config or {}).get("configurable", {}) or {}
-        parent_thread = cfg.get("thread_id", "default")
-        sub_config = {"configurable": {
-            **cfg,
-            "thread_id": f"{parent_thread}__sub",
-            CONFIG_KEY_CHECKPOINTER: checkpointer,
-        }}
+        # 父图当前 checkpoint id：LangGraph 任务 config 里 checkpoint_map
+        # 记录了 parent_ns → 当前 checkpoint id（根图 parent_ns 为 ''）。
+        parent_cp = ""
+        cmap = cfg.get("checkpoint_map") or {}
+        for v in cmap.values():
+            parent_cp = v
+        thread_id = cfg.get("thread_id", "")
+        # 派生独立 sub-thread：每次父图 checkpoint 变更 → 新 sub-thread，
+        # 子图从空 checkpoint 全新开始，不累积历史。
+        sub_config = {"configurable": {**cfg, "thread_id": f"{thread_id}__{parent_cp}"}}
         result = await subgraph.ainvoke(state, config=sub_config)
         out: dict = {}
         msgs = result.get("messages", [])

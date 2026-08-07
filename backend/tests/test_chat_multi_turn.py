@@ -6,8 +6,13 @@
 - 复读用户消息（assistant 把 user 的话原样输出）；
 - 重复上一轮的完整回复，不回答本轮问题。
 
-本测试跑两轮真实对话，断言 DB 消息序列干净、第二轮 assistant 正常回复，
-不复读用户消息、不重复第一轮回复。
+另有根因：子图（compile(checkpointer=True)）在固定 checkpoint_ns 下累积历史，
+与父图每次传入的完整 messages 用 add 合并重复。修复：wrap_subgraph 让子图每次在
+「父图当前 checkpoint id 派生的独立 sub-thread」上从空 checkpoint 全新开始。
+
+本文件两个测试：
+- 多轮场景（每轮 marketing×1）：第二轮必须正常回复，不复读用户消息、不重复第一轮回复；
+- 同轮多次路由场景（marketing×2 → done）：同一轮内重复路由到同一 agent 时子图不膨胀。
 """
 import pytest
 from httpx import AsyncClient, ASGITransport
@@ -26,17 +31,16 @@ class FakeLLM:
         return AIMessage(content="营销方案已生成")
 
 
-async def _stubs(monkeypatch):
-    # 每轮 supervisor 两次路由（入口 + 出口判断），两轮共 4 次
-    routes = iter([
-        {"agent": "marketing", "reason": "营销策划", "confidence": 0.9},
-        {"agent": "done", "reason": "任务完成", "confidence": 0.95},
-        {"agent": "marketing", "reason": "营销策划", "confidence": 0.9},
-        {"agent": "done", "reason": "任务完成", "confidence": 0.95},
-    ])
+async def _stubs(monkeypatch, spec):
+    # 闭包持有路由状态，避免跨测试共享
+    idx = [0]
 
     async def fake_route(message, agents):
-        return next(routes)
+        agent = spec[idx[0] % len(spec)]
+        idx[0] += 1
+        return {"agent": agent, "reason": "测试路由", "confidence": 0.9}
+
+    monkeypatch.setattr("app.agents.graph.route_decision", fake_route)
 
     async def _ctx(db, cid, **k):
         return ""
@@ -50,7 +54,6 @@ async def _stubs(monkeypatch):
     async def _title(msg):
         return "测试标题"
 
-    monkeypatch.setattr("app.agents.graph.route_decision", fake_route)
     monkeypatch.setattr("app.memory.assembly.short_term.build_context", _ctx)
     monkeypatch.setattr("app.memory.assembly.pref_mem.build_context", _ctx)
     monkeypatch.setattr("app.memory.assembly.exp_mem.build_experience_context", _exp)
@@ -72,10 +75,18 @@ async def _stream(client, headers, conv_id, message):
             pass
 
 
+async def _final_messages(conv_id):
+    """读图最终状态的 messages（checkpoint 合并后的完整消息序列）。"""
+    from app.agents.graph import get_graph
+    graph = await get_graph()
+    snap = await graph.aget_state({"configurable": {"thread_id": conv_id}})
+    return (snap.values or {}).get("messages", []), snap.values
+
+
 @pytest.mark.asyncio
 async def test_multi_turn_no_history_duplication(monkeypatch):
-    """两轮对话：第二轮必须正常回复，不复读用户消息、不重复第一轮回复。"""
-    await _stubs(monkeypatch)
+    """两轮对话（每轮 marketing×1 → done）：第二轮必须正常回复，不复读用户消息。"""
+    await _stubs(monkeypatch, ["marketing", "done", "marketing", "done"])
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
@@ -95,3 +106,43 @@ async def test_multi_turn_no_history_duplication(monkeypatch):
         assert msgs[2]["content"] == "预算太高了"
         # bug 现象：assistant 复读用户消息 / 重复第一轮回复
         assert msgs[3]["content"] == "营销方案已生成"
+
+        # 图最终状态：期望 [H1, A1, H2, A3]，无重复块（旧 bug 下 "你好" 会重复、超 4 条）
+        cp_msgs, values = await _final_messages(conv_id)
+        roles = [m.type for m in cp_msgs]
+        contents = [str(getattr(m, "content", m))[:12] for m in cp_msgs]
+        assert roles == ["human", "ai", "human", "ai"], (roles, contents)
+        assert contents.count("你好") == 1, contents
+        assert values.get("agent_response") == "营销方案已生成", values.get("agent_response")
+
+
+@pytest.mark.asyncio
+async def test_same_round_multi_route_no_bloat(monkeypatch):
+    """同一轮内 supervisor 多次路由到同一 agent（marketing×2 → done）：子图不得膨胀。
+
+    修复前子图在固定 sub-thread 累积历史，第二次路由时 checkpoint 历史与父图传入
+    的完整 messages 用 add 合并重复（messages 超 3 条、出现重复块）。
+    """
+    await _stubs(monkeypatch, ["marketing", "marketing", "done"])
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        await c.post("/api/auth/register", json={"username": "mt_user2", "password": "x123456", "display_name": "M2"})
+        r = await c.post("/api/auth/login", json={"username": "mt_user2", "password": "x123456"})
+        h = {"Authorization": f"Bearer {r.json()['access_token']}"}
+        conv_id = (await c.post("/api/conversations", json={}, headers=h)).json()["id"]
+
+        await _stream(c, h, conv_id, "你好")
+
+        msgs = (await c.get(f"/api/conversations/{conv_id}/messages", headers=h)).json()
+        # 单轮 2 次 marketing：DB 只落库最终一条 assistant
+        assert [m["role"] for m in msgs] == ["user", "assistant"], msgs
+        assert msgs[1]["content"] == "营销方案已生成"
+
+        # 图最终状态：期望 [H1, A1, A2]，无重复块
+        cp_msgs, values = await _final_messages(conv_id)
+        roles = [m.type for m in cp_msgs]
+        contents = [str(getattr(m, "content", m))[:12] for m in cp_msgs]
+        assert roles == ["human", "ai", "ai"], (roles, contents)
+        assert contents.count("你好") == 1, contents
+        assert values.get("agent_response") == "营销方案已生成", values.get("agent_response")
