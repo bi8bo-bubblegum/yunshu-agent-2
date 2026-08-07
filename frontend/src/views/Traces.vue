@@ -2,13 +2,14 @@
 import { ref, onMounted } from 'vue'
 import client from '../api/client'
 import { toast } from '../api/toast'
-import { fmtTime } from '../api/format'
+import { fmtDateTime, fmtTime } from '../api/format'
 import type { TraceItem, TraceEventItem } from '../api/types'
 
 const traces = ref<TraceItem[]>([])
 const loading = ref(false)
 const selected = ref<TraceItem | null>(null)
 const events = ref<TraceEventItem[]>([])
+const detailTarget = ref<TraceEventItem | null>(null)
 
 onMounted(load)
 
@@ -34,12 +35,40 @@ async function openTrace(t: TraceItem) {
 }
 
 const statusTag: Record<string, string> = { running: 'tag-blue', completed: 'tag-green', interrupted: 'tag-orange', failed: 'tag-red' }
-const typeTag: Record<string, string> = { route: 'tag-blue', llm: 'tag-purple', tool: 'tag-orange', memory: 'tag-cyan', approval: 'tag-red' }
-const typeLabel: Record<string, string> = { route: '路由', llm: 'LLM', tool: '工具', memory: '记忆', approval: '审批' }
+// 后端 emit 的事件 type：route / llm_call / tool_call / memory / approval；兼容旧名 llm / tool
+const typeTag: Record<string, string> = { route: 'tag-blue', llm_call: 'tag-purple', tool_call: 'tag-orange', memory: 'tag-cyan', approval: 'tag-red', llm: 'tag-purple', tool: 'tag-orange' }
+const typeLabel: Record<string, string> = { route: '路由', llm_call: 'LLM', tool_call: '工具', memory: '记忆', approval: '审批', llm: 'LLM', tool: '工具' }
+const stageLabel: Record<string, string> = { start: '开始', end: '结束' }
+const fieldLabel: Record<string, string> = {
+  event: '阶段', agent: '目标智能体', reason: '路由理由', confidence: '置信度', routes: '路由序列',
+  name: '名称', args: '参数', output: '输出', prompt: '提示词',
+}
 
 function fmtPayload(p: Record<string, unknown>): string {
   const s = JSON.stringify(p)
   return s.length > 120 ? s.slice(0, 120) + '…' : s
+}
+
+// 详情弹窗结构化字段：长文本/多行值标记 long，用可滚动 pre 展示
+interface DetailField { label: string; value: string; long: boolean }
+
+function describePayload(p: Record<string, unknown>): DetailField[] {
+  const out: DetailField[] = []
+  const stage = typeof p.event === 'string' ? stageLabel[p.event] ?? p.event : ''
+  if (stage) out.push({ label: '阶段', value: stage, long: false })
+  for (const [k, v] of Object.entries(p)) {
+    if (k === 'event') continue
+    let value: string
+    if (Array.isArray(v)) value = v.map(String).join(' → ')
+    else if (v && typeof v === 'object') value = JSON.stringify(v, null, 2)
+    else value = String(v ?? '')
+    out.push({ label: fieldLabel[k] ?? k, value, long: value.length > 200 || value.includes('\n') })
+  }
+  return out
+}
+
+function openDetail(e: TraceEventItem) {
+  detailTarget.value = e
 }
 </script>
 
@@ -81,7 +110,7 @@ function fmtPayload(p: Record<string, unknown>): string {
         <div v-else class="timeline">
           <div v-for="(e, idx) in events" :key="`${e.created_at}-${idx}`" class="tl-item">
             <div class="tl-dot" :class="`dot-${e.type}`"></div>
-            <div class="tl-body">
+            <div class="tl-body" style="cursor:pointer" title="查看详情" @click="openDetail(e)">
               <div class="row-between">
                 <span class="tag" :class="typeTag[e.type] ?? 'tag-gray'">{{ typeLabel[e.type] ?? e.type }}</span>
                 <span class="muted mono text-sm">{{ fmtTime(e.created_at) }}</span>
@@ -90,6 +119,26 @@ function fmtPayload(p: Record<string, unknown>): string {
             </div>
           </div>
           <div v-if="!events.length" class="empty"><span class="icon">⏳</span>暂无事件（可能仍在执行）</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 事件详情弹窗 -->
+    <div v-if="detailTarget" class="modal-mask">
+      <div class="modal" style="width:720px">
+        <div class="modal-title" style="display:flex;align-items:center;gap:8px">
+          <span class="tag" :class="typeTag[detailTarget.type] ?? 'tag-gray'">{{ typeLabel[detailTarget.type] ?? detailTarget.type }}</span>
+          <span class="muted text-sm">{{ fmtDateTime(detailTarget.created_at) }}</span>
+        </div>
+        <div class="modal-body col">
+          <div v-for="(f, i) in describePayload(detailTarget.payload)" :key="i" class="detail-row">
+            <span class="detail-label">{{ f.label }}</span>
+            <pre v-if="f.long" class="mono detail-value detail-long">{{ f.value }}</pre>
+            <span v-else class="detail-value">{{ f.value }}</span>
+          </div>
+        </div>
+        <div class="modal-foot">
+          <button class="btn btn-primary" @click="detailTarget = null">关闭</button>
         </div>
       </div>
     </div>
@@ -118,5 +167,12 @@ function fmtPayload(p: Record<string, unknown>): string {
 .dot-memory { background: var(--secondary); }
 .dot-approval { background: var(--primary); }
 .tl-body { flex: 1; min-width: 0; background: var(--video-bg); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 10px 12px; }
+.tl-body:hover { border-color: var(--info); }
 .tl-payload { margin: 8px 0 0; font-size: 11.5px; color: var(--muted-foreground); white-space: pre-wrap; word-break: break-all; }
+/* 详情弹窗字段行 */
+.detail-row { display: flex; gap: 10px; padding: 6px 0; border-bottom: 1px dashed var(--border); }
+.detail-row:last-child { border-bottom: none; }
+.detail-label { flex-shrink: 0; width: 90px; color: var(--muted-foreground); text-align: right; font-size: 12px; padding-top: 2px; }
+.detail-value { flex: 1; min-width: 0; color: var(--foreground); white-space: pre-wrap; word-break: break-all; font-size: 12.5px; }
+.detail-long { max-height: 300px; overflow-y: auto; margin: 0; padding: 8px 10px; background: var(--video-bg); border: 1px solid var(--border); border-radius: var(--radius-md); }
 </style>
