@@ -43,14 +43,10 @@ class ChatService:
         流式过程事件：route（路由分发）/ tool_start / tool_end / token（agent 输出）。
         high/critical 风险工具 interrupt 时发 confirm_required 事件并挂起图（等 /chat/resume 或审批中心）。"""
         conv = await self._ensure_owned(conv_id, user_id)
-        # 历史轮次（本轮之前）：转成真实消息进入图，让 agent 看到完整对话而不失忆
-        recent = await self.message_repo.list_recent(conv_id, 20)
-        history_msgs = []
-        for m in reversed(recent):  # 旧 → 新
-            if m.role == "user":
-                history_msgs.append(HumanMessage(content=m.content))
-            elif m.role == "assistant":
-                history_msgs.append(AIMessage(content=m.content))
+        # 注意：不再从 DB 回灌历史消息进图。历史由 LangGraph checkpointer
+        # （thread_id=conversation_id）维护，messages channel 是 add 追加语义，
+        # 若同时注入 DB 历史会与 checkpoint 累积的历史重复合并，逐轮翻倍膨胀，
+        # 导致 agent 上下文错乱、复读用户消息。DB messages 表仅用于前端展示。
         # 创建本次对话的执行留痕
         trace = ExecutionTrace(id=str(uuid4()), user_id=user_id,
                                conversation_id=conv_id, status="running", supervisor_routes=[])
@@ -83,7 +79,9 @@ class ChatService:
         inputs = {
             "conversation_id": conv_id, "user_id": user_id,
             "user_message": message, "memory_context": mem,
-            "trace_id": trace.id, "messages": history_msgs + [HumanMessage(content=message)],
+            "trace_id": trace.id,
+            # 只注入本轮用户消息，历史由 checkpointer 按 thread_id 累积恢复
+            "messages": [HumanMessage(content=message)],
         }
         agent_parts: list[str] = []
         stream_interrupts = None

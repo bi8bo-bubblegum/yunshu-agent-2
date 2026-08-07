@@ -103,9 +103,17 @@ def build_graph(registry: AgentRegistry, checkpointer=None):
         agents_with_done = registry.list() + ["done"]
         context = state.get("user_message", "")
         msgs = state.get("messages", [])
-        if msgs:
-            last_msg = msgs[-1].content if hasattr(msgs[-1], "content") else str(msgs[-1])
-            context += f"\n\n上一轮 agent 输出：{last_msg}"
+        # 取最后一条有实质内容的 assistant 文本输出作为"上一轮 agent 输出"。
+        # 不能直接用 msgs[-1]：它可能是工具调用消息（content 为空）、工具结果、
+        # 或用户消息，用这些做路由上下文会让 supervisor 误判、复读用户输入。
+        for m in reversed(msgs):
+            c = m.content if hasattr(m, "content") else ""
+            if isinstance(c, list):
+                c = "".join(str(b.get("text", "")) for b in c
+                            if isinstance(b, dict) and b.get("type") == "text")
+            if getattr(m, "type", "") == "ai" and c:
+                context += f"\n\n上一轮 agent 输出：{c}"
+                break
         decision = await route_decision(context, agents_with_done)
         # 每次路由决策即时留痕（interrupt 挂起时也能看到完整路由轨迹）
         trace_id = state.get("trace_id")
