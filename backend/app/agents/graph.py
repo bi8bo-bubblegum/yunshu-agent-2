@@ -143,10 +143,19 @@ def build_graph(registry: AgentRegistry, checkpointer=None):
 
     async def done_node(state: AgentState) -> dict:
         msgs = state.get("messages", [])
-        # 取最近一条有实质内容的 agent 输出（最后一条可能是空 content 的工具调用消息）
+        # 只取最近一条有实质内容的 assistant 文本输出。
+        # 必须过滤消息类型：用户消息（HumanMessage）与工具结果（ToolMessage）的
+        # content 非空，若不加类型判断会被误当作最终回复，导致 agent 复读用户
+        # 消息 / 复读工具结果（真实事故：route_history 满时 router 强制 done、
+        # 本轮 agent 未执行，messages 最后一条恰好是用户消息）。
         text = ""
         for m in reversed(msgs):
-            c = m.content if hasattr(m, "content") else str(m)
+            if getattr(m, "type", "") != "ai":
+                continue
+            c = m.content if hasattr(m, "content") else ""
+            if isinstance(c, list):
+                c = "".join(str(b.get("text", "")) for b in c
+                            if isinstance(b, dict) and b.get("type") == "text")
             if c:
                 text = c
                 break

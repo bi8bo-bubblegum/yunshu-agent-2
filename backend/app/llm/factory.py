@@ -2,11 +2,13 @@ from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 
 from app.core.config import settings
 
+# best-2-openai 网关不支持 response_format（结构化输出），导致 with_structured_output
+# 每次解析失败 → 路由走关键词兜底 → 永不 done、多轮错乱。best-1 实测结构化输出正常。
 MODEL_MAP = {
-    "default": "best-2-openai",
-    "marketing": "best-2-openai",
-    "sales_analysis": "best-2-openai",
-    "scheduling": "best-2-openai"
+    "default": "best-1",
+    "marketing": "best-1",
+    "sales_analysis": "best-1",
+    "scheduling": "best-1"
 }
 
 class ModelFactory:
