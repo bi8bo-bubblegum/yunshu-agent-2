@@ -36,7 +36,10 @@ class ConfigService:
         server = await self.mcp_repo.get_by(name=name)
         if not server:
             raise HTTPException(404, "MCP 服务不存在")
-        config = server.config or {}
+        # 必须先拷贝再原地修改：server.config 是 JSONB，若直接复用其引用，
+        # 原地加 tool_risks 会污染原对象，赋值后新旧内容相等，SQLAlchemy
+        # 判定无变更而不发 UPDATE（此前风险配置一直写不进库）
+        config = dict(server.config or {})
         config["tool_risks"] = tool_risks
         server.config = config
         await self.mcp_repo.commit()
@@ -53,7 +56,8 @@ class ConfigService:
         if not server:
             raise HTTPException(404, "MCP 服务不存在")
         server.auth_type = auth_type
-        config = server.config or {}
+        # 与 update_tool_risks 同理：先拷贝再原地修改，避免 JSONB 原地变更不被 SQLAlchemy 捕获
+        config = dict(server.config or {})
         if api_key:
             config["api_key"] = api_key
         elif auth_type == "none":
