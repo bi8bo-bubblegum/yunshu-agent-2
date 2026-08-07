@@ -71,6 +71,7 @@ async function openDetail(e: ExperienceItem) {
 const scopeTag: Record<string, string> = { personal: 'tag-gray', dept: 'tag-cyan', company: 'tag-purple' }
 const statusTag: Record<string, string> = { draft: 'tag-gray', pending: 'tag-orange', approved: 'tag-green', rejected: 'tag-red' }
 const scopeLabel: Record<string, string> = { personal: '个人', dept: '部门', company: '公司' }
+const statusLabel: Record<string, string> = { draft: '草稿', pending: '审批中', approved: '已通过', rejected: '已驳回' }
 </script>
 
 <template>
@@ -103,8 +104,8 @@ const scopeLabel: Record<string, string> = { personal: '个人', dept: '部门',
           <tbody>
             <tr v-for="e in items" :key="e.id">
               <td style="max-width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ e.title }}</td>
-              <td><span class="tag" :class="scopeTag[e.scope] ?? 'tag-gray'">{{ e.scope }}</span></td>
-              <td><span class="tag" :class="statusTag[e.status] ?? 'tag-gray'">{{ e.status }}</span></td>
+              <td><span class="tag" :class="scopeTag[e.scope] ?? 'tag-gray'">{{ scopeLabel[e.scope] ?? e.scope }}</span></td>
+              <td><span class="tag" :class="statusTag[e.status] ?? 'tag-gray'">{{ statusLabel[e.status] ?? e.status }}</span></td>
               <td class="muted text-sm" style="max-width:280px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ e.summary }}</td>
               <td style="text-align:right;white-space:nowrap">
                 <div class="row" style="justify-content:flex-end;gap:6px">
@@ -114,7 +115,7 @@ const scopeLabel: Record<string, string> = { personal: '个人', dept: '部门',
                   <button class="btn btn-sm" @click="submit(e.id, e.title, 'dept')">晋升部门</button>
                   <button class="btn btn-sm" @click="submit(e.id, e.title, 'company')">晋升公司</button>
                   </template>
-                  <span v-else class="muted text-sm">{{ e.status === 'pending' ? '审批中' : e.status }}</span>
+                  <span v-else class="muted text-sm">{{ statusLabel[e.status] ?? e.status }}</span>
                 </div>
               </td>
             </tr>
@@ -132,7 +133,7 @@ const scopeLabel: Record<string, string> = { personal: '个人', dept: '部门',
         <div class="modal-title">
           <span>{{ detailTarget.title }}</span>
           <span class="tag" :class="scopeTag[detailTarget.scope] ?? 'tag-gray'">{{ scopeLabel[detailTarget.scope] ?? detailTarget.scope }}</span>
-          <span class="tag" :class="statusTag[detailTarget.status] ?? 'tag-gray'">{{ detailTarget.status }}</span>
+          <span class="tag" :class="statusTag[detailTarget.status] ?? 'tag-gray'">{{ statusLabel[detailTarget.status] ?? detailTarget.status }}</span>
         </div>
         <div class="modal-body col">
           <div class="row" style="flex-wrap:wrap;gap:6px">
