@@ -97,9 +97,14 @@ function fmtPayload(p: Record<string, unknown>): string {
 </template>
 
 <style scoped>
-.page-wrap { padding: 20px; }
-.page-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
-@media (max-width: 1100px) { .page-grid { grid-template-columns: 1fr; } }
+.page-wrap { padding: 20px; height: calc(100vh - 56px); box-sizing: border-box; display: flex; flex-direction: column; }
+.page-grid { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+/* 留痕列表与事件时间线各自独立滚动，互不影响 */
+.page-grid > .card { min-height: 0; overflow-y: auto; }
+@media (max-width: 1100px) {
+  .page-grid { grid-template-columns: 1fr; overflow-y: auto; }
+  .page-grid > .card { overflow-y: visible; }
+}
 .row-active td { background: rgba(37, 244, 238, .05); }
 .route-chip { display: inline-block; margin: 1px 2px; padding: 1px 7px; border-radius: 999px; background: var(--card-elevated); border: 1px solid var(--border); font-size: 11px; color: var(--muted-foreground); }
 .timeline { display: flex; flex-direction: column; }
