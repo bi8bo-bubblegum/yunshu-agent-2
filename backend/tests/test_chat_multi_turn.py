@@ -16,19 +16,25 @@
 """
 import pytest
 from httpx import AsyncClient, ASGITransport
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, HumanMessage
 
 from app.main import app
 
 
 class FakeLLM:
-    """marketing agent 主 LLM：始终直接给出文本回复，不触发工具调用。"""
+    """marketing agent 主 LLM：按「最后一条用户消息」返回确定性回复。
+
+    这样每轮输入不同 → 输出不同，可精确验证：第二轮回复不复读第一轮内容、
+    第一轮已落库的 assistant 消息不被后续轮次改写。"""
 
     def bind_tools(self, tools):
         return self
 
     async def ainvoke(self, messages):
-        return AIMessage(content="营销方案已生成")
+        for m in reversed(messages):
+            if isinstance(m, HumanMessage):
+                return AIMessage(content=f"回复:{m.content}")
+        return AIMessage(content="回复:（无用户消息）")
 
 
 async def _stubs(monkeypatch, spec):
@@ -101,19 +107,22 @@ async def test_multi_turn_no_history_duplication(monkeypatch):
         msgs = (await c.get(f"/api/conversations/{conv_id}/messages", headers=h)).json()
         # 序列必须干净：user → assistant → user → assistant，无多余重复
         assert [m["role"] for m in msgs] == ["user", "assistant", "user", "assistant"], msgs
+        # 用户流程复现：提问「你好」→ 回复「回复:你好」；再提问「预算太高了」
+        # → 上一条回复必须保持不变（仍是「回复:你好」），本轮回复新内容「回复:预算太高了」
         assert msgs[0]["content"] == "你好"
-        assert msgs[1]["content"] == "营销方案已生成"
+        assert msgs[1]["content"] == "回复:你好"   # 上一条回复：未因第二轮被改写
         assert msgs[2]["content"] == "预算太高了"
-        # bug 现象：assistant 复读用户消息 / 重复第一轮回复
-        assert msgs[3]["content"] == "营销方案已生成"
+        # bug 现象：assistant 复读用户消息 / 重复第一轮回复 / 本轮回复与上轮相同
+        assert msgs[3]["content"] == "回复:预算太高了"
+        assert msgs[3]["content"] != msgs[1]["content"]  # 本轮不复读上一轮内容
 
-        # 图最终状态：期望 [H1, A1, H2, A3]，无重复块（旧 bug 下 "你好" 会重复、超 4 条）
+        # 图最终状态：期望 [H1, A1, H2, A2]，无重复块（旧 bug 下 "你好" 会重复、超 4 条）
         cp_msgs, values = await _final_messages(conv_id)
         roles = [m.type for m in cp_msgs]
         contents = [str(getattr(m, "content", m))[:12] for m in cp_msgs]
         assert roles == ["human", "ai", "human", "ai"], (roles, contents)
         assert contents.count("你好") == 1, contents
-        assert values.get("agent_response") == "营销方案已生成", values.get("agent_response")
+        assert values.get("agent_response") == "回复:预算太高了", values.get("agent_response")
 
 
 @pytest.mark.asyncio
@@ -137,12 +146,13 @@ async def test_same_round_multi_route_no_bloat(monkeypatch):
         msgs = (await c.get(f"/api/conversations/{conv_id}/messages", headers=h)).json()
         # 单轮 2 次 marketing：DB 只落库最终一条 assistant
         assert [m["role"] for m in msgs] == ["user", "assistant"], msgs
-        assert msgs[1]["content"] == "营销方案已生成"
+        assert msgs[1]["content"] == "回复:你好"
 
-        # 图最终状态：期望 [H1, A1, A2]，无重复块
+        # 图最终状态：期望 [H1, A1, A2]，无重复块（两轮调用都基于同一条用户消息）
         cp_msgs, values = await _final_messages(conv_id)
         roles = [m.type for m in cp_msgs]
         contents = [str(getattr(m, "content", m))[:12] for m in cp_msgs]
         assert roles == ["human", "ai", "ai"], (roles, contents)
         assert contents.count("你好") == 1, contents
-        assert values.get("agent_response") == "营销方案已生成", values.get("agent_response")
+        assert contents.count("回复:你好") == 2, contents  # 两次路由各产出一条，不膨胀
+        assert values.get("agent_response") == "回复:你好", values.get("agent_response")

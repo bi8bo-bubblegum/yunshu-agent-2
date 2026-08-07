@@ -138,6 +138,18 @@ function renderStreamText() {
   if (sb) sb.content = streamBuf.value
 }
 
+// 流式结束后用 DB 真实消息替换本地缓冲气泡（stream-buf），保证：
+// 1. 刷新页面/切换会话后消息与服务端一致；
+// 2. 不留 id='stream-buf' 残留，避免下一次发送时重复 id 覆盖上一条回复。
+async function refreshFromDb() {
+  try {
+    const { data } = await client.get<Message[]>(`/conversations/${currentId.value}/messages`)
+    messages.value = data
+    await nextTick()
+    listRef.value?.scrollTo({ top: listRef.value.scrollHeight })
+  } catch { /* 忽略 */ }
+}
+
 function streamLine(text: string) {
   streamBuf.value = streamBuf.value === '⏳ 正在思考…' ? text : `${streamBuf.value}\n${text}`
   renderStreamText()
@@ -151,6 +163,11 @@ async function send() {
   streamConv.value = currentId.value
   streamBuf.value = '⏳ 正在思考…'
   answerStarted = false
+  // 清理残留的流式缓冲气泡：若上一轮异常中断未做 DB 刷新，列表里可能还留着
+  // 旧的 id='stream-buf'，与本次新 push 的重复，导致 renderStreamText 更新错
+  // 对象（上一条回复被本轮回复覆盖修改）。这里统一移除旧的，只保留一条 stream-buf。
+  const stale = messages.value.findIndex(m => m.id === 'stream-buf')
+  if (stale >= 0) messages.value.splice(stale, 1)
   messages.value.push({ id: `u-${Date.now()}`, role: 'user', content: text })
   messages.value.push({ id: 'stream-buf', role: 'assistant', content: streamBuf.value })
   streaming.value = true
@@ -214,6 +231,7 @@ async function send() {
   } catch (err: any) {
     if (err.name !== 'AbortError') toast('连接中断', 'error')
   } finally {
+    const targetId = streamConv.value
     streaming.value = false
     streamActive.value = false
     streamConv.value = ''
@@ -223,6 +241,12 @@ async function send() {
       streamBuf.value = sb.content
     }
     maybePollPending()
+    // 流式正常产生回复后，用 DB 真实消息替换本地缓冲气泡（stream-buf）。
+    // 若残留 stream-buf，下一次发送会因重复 id 覆盖修改上一条回复。
+    // 审批挂起（critical/high）时后端回复尚未落库，保留现场等 decide 后刷新。
+    if (currentId.value && currentId.value === targetId && !pendingApproval.value && answerStarted) {
+      refreshFromDb()
+    }
   }
 }
 
