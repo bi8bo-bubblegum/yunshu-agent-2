@@ -93,7 +93,12 @@ const roleTag: Record<string, string> = { admin: 'tag-red', dept_owner: 'tag-ora
 </template>
 
 <style scoped>
-.page-wrap { padding: 20px; }
-.page-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
-@media (max-width: 1100px) { .page-grid { grid-template-columns: 1fr; } }
+.page-wrap { padding: 20px; height: calc(100vh - 56px); box-sizing: border-box; display: flex; flex-direction: column; }
+.page-grid { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+/* 部门与用户各自独立滚动，互不影响 */
+.page-grid > .card { min-height: 0; overflow-y: auto; }
+@media (max-width: 1100px) {
+  .page-grid { grid-template-columns: 1fr; overflow-y: auto; }
+  .page-grid > .card { overflow-y: visible; }
+}
 </style>

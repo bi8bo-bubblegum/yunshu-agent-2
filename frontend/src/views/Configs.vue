@@ -285,9 +285,14 @@ async function removeBinding(id: string) {
 </template>
 
 <style scoped>
-.page-wrap { padding: 20px; }
-.page-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
-@media (max-width: 1100px) { .page-grid { grid-template-columns: 1fr; } }
+.page-wrap { padding: 20px; height: calc(100vh - 56px); box-sizing: border-box; display: flex; flex-direction: column; }
+.page-grid { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+/* MCP 服务与 Agent 绑定各自独立滚动，互不影响 */
+.page-grid > .card { min-height: 0; overflow-y: auto; }
+@media (max-width: 1100px) {
+  .page-grid { grid-template-columns: 1fr; overflow-y: auto; }
+  .page-grid > .card { overflow-y: visible; }
+}
 .risk-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border); }
 .risk-row:last-child { border-bottom: none; }
 </style>
