@@ -1,7 +1,7 @@
 # backend/app/agents/sales_analysis/agent.py
 from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolNode
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import SystemMessage
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.llm.factory import ModelFactory
@@ -28,6 +28,8 @@ SYSTEM_PROMPT = (
     "## 注意事项\n"
     "- 数字保留整数或两位小数并注明单位；环比使用百分比；\n"
     "- 禁止臆造未查询到的数据；数据不足时明确说明缺口，并给出补数建议；\n"
+    "- 当用户变更查询条件（指标/时间范围等）时，必须重新调用 query_sales_data 获取最新数据，"
+    "禁止沿用上一轮对话中的旧结果；\n"
     "- 回答使用中文，善用小标题、列表与简单表格；\n"
     "- 只调用经营分析相关工具，不要调用其他 agent 的工具。"
 )
@@ -49,7 +51,6 @@ async def build_sales_agent(db: AsyncSession, enable_checkpointer: bool = False)
         llm = ModelFactory.get_llm(AGENT_CODE).bind_tools(tools)
         msgs = [
             SystemMessage(SYSTEM_PROMPT + "\n" + state.get("memory_context", "")),
-            HumanMessage(state.get("user_message", "")),
         ] + state.get("messages", [])
         resp = await llm.ainvoke(msgs)
         return {"messages": [resp], "tool_rounds": 1}

@@ -1,7 +1,7 @@
 # backend/app/agents/marketing/agent.py
 from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolNode
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import SystemMessage
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.llm.factory import ModelFactory
@@ -31,6 +31,8 @@ SYSTEM_PROMPT = (
     "- 金额一律使用人民币元；日期一律使用 YYYY-MM-DD 格式；\n"
     "- 必须结合记忆上下文与企业数据作答，禁止凭空编造数据；若数据不足，明确说明"
     "「当前缺少 XX 数据，建议补充」；\n"
+    "- 当用户变更活动条件（预算/渠道/日期等）时，必须重新调用相应查询/创建工具，"
+    "禁止沿用上一轮对话中的旧数据；\n"
     "- 回答使用中文，结构清晰，使用小标题与列表；\n"
     "- 只调用与营销相关的工具，不要调用其他 agent 的工具。"
 )
@@ -55,7 +57,6 @@ async def build_marketing_agent(db: AsyncSession, enable_checkpointer: bool = Fa
         llm = ModelFactory.get_llm(AGENT_CODE).bind_tools(tools)
         msgs = [
             SystemMessage(SYSTEM_PROMPT + "\n" + state.get("memory_context", "")),
-            HumanMessage(state.get("user_message", "")),
         ] + state.get("messages", [])
         resp = await llm.ainvoke(msgs)
         return {"messages": [resp], "tool_rounds": 1}

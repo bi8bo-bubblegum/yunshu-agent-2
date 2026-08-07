@@ -5,7 +5,7 @@ import logging
 from uuid import uuid4
 
 from fastapi import HTTPException
-from langchain_core.messages import AIMessage, AIMessageChunk
+from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.graph import get_graph
@@ -43,6 +43,14 @@ class ChatService:
         流式过程事件：route（路由分发）/ tool_start / tool_end / token（agent 输出）。
         high/critical 风险工具 interrupt 时发 confirm_required 事件并挂起图（等 /chat/resume 或审批中心）。"""
         conv = await self._ensure_owned(conv_id, user_id)
+        # 历史轮次（本轮之前）：转成真实消息进入图，让 agent 看到完整对话而不失忆
+        recent = await self.message_repo.list_recent(conv_id, 20)
+        history_msgs = []
+        for m in reversed(recent):  # 旧 → 新
+            if m.role == "user":
+                history_msgs.append(HumanMessage(content=m.content))
+            elif m.role == "assistant":
+                history_msgs.append(AIMessage(content=m.content))
         # 创建本次对话的执行留痕
         trace = ExecutionTrace(id=str(uuid4()), user_id=user_id,
                                conversation_id=conv_id, status="running", supervisor_routes=[])
@@ -75,7 +83,7 @@ class ChatService:
         inputs = {
             "conversation_id": conv_id, "user_id": user_id,
             "user_message": message, "memory_context": mem,
-            "trace_id": trace.id, "messages": [],
+            "trace_id": trace.id, "messages": history_msgs + [HumanMessage(content=message)],
         }
         agent_parts: list[str] = []
         stream_interrupts = None

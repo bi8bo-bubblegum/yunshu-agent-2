@@ -1,7 +1,7 @@
 # backend/app/agents/scheduling/agent.py
 from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolNode
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import SystemMessage
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.llm.factory import ModelFactory
@@ -27,6 +27,8 @@ SYSTEM_PROMPT = (
     "## 注意事项\n"
     "- 时间使用 HH:mm-HH:mm 格式，日期使用 YYYY-MM-DD 格式；\n"
     "- 调整必须基于查询到的真实排班，禁止凭空指定人员或时段；数据不足时明确说明；\n"
+    "- 当用户提供新的查询条件（部门/日期变化）时，必须重新调用 query_schedule 获取最新数据，"
+    "禁止沿用上一轮对话中的旧查询结果；\n"
     "- 回答使用中文，结构清晰；\n"
     "- 只调用调度相关工具，不要调用其他 agent 的工具。"
 )
@@ -48,7 +50,6 @@ async def build_scheduling_agent(db: AsyncSession, enable_checkpointer: bool = F
         llm = ModelFactory.get_llm(AGENT_CODE).bind_tools(tools)
         msgs = [
             SystemMessage(SYSTEM_PROMPT + "\n" + state.get("memory_context", "")),
-            HumanMessage(state.get("user_message", "")),
         ] + state.get("messages", [])
         resp = await llm.ainvoke(msgs)
         return {"messages": [resp], "tool_rounds": 1}
