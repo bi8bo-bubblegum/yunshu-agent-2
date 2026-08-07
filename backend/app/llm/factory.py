@@ -3,10 +3,10 @@ from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from app.core.config import settings
 
 MODEL_MAP = {
-    "default": "best-1",
-    "marketing": "best-1",
-    "sales_analysis": "best-1",
-    "scheduling": "best-1"
+    "default": "best-2",
+    "marketing": "best-2",
+    "sales_analysis": "best-2",
+    "scheduling": "best-2"
 }
 
 class ModelFactory:
