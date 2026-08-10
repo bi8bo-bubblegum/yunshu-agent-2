@@ -3,7 +3,9 @@
 用 FakeLLM 强制触发 create(high) → publish(critical) 工具链，验证：
 SSE confirm_required → resume → 审批中心 decide → 图恢复 → 回复落库。
 """
+import asyncio
 import json
+import time
 
 import pytest
 from httpx import AsyncClient, ASGITransport
@@ -12,6 +14,18 @@ from sqlalchemy import update
 
 from app.main import app
 from app.models.org import User
+
+
+async def _wait_assistant(c, conv_id, h, timeout=5.0):
+    """轮询等待后台图恢复落库 assistant 消息（decide 改后台任务后不再同步等）。"""
+    t0 = time.monotonic()
+    while time.monotonic() - t0 < timeout:
+        msgs = (await c.get(f"/api/conversations/{conv_id}/messages", headers=h)).json()
+        assistant = [m for m in msgs if m["role"] == "assistant"]
+        if assistant:
+            return assistant
+        await asyncio.sleep(0.1)
+    return []
 
 
 class SequencedLLM:
@@ -119,18 +133,24 @@ async def test_critical_approval_flow(db_session, monkeypatch):
         approval_id = body["payload"]["approval_id"]
         assert approval_id
 
-        # 3. 管理员审批 critical → 图恢复完成 → 回复落库
+        # 3. 管理员审批 critical → decide 立即返回，图恢复在后台执行后落库
         r = await c.post(f"/api/approvals/{approval_id}/decide",
                          json={"approve": True, "comment": "ok"}, headers=h_admin)
         assert r.status_code == 200, r.text
 
-        msgs = (await c.get(f"/api/conversations/{conv_id}/messages", headers=h_user)).json()
-        assistant = [m for m in msgs if m["role"] == "assistant"]
-        assert assistant, msgs
+        # 后台图恢复完成前 decide 已返回（前端即时反馈），轮询等待回复落库
+        assistant = await _wait_assistant(c, conv_id, h_user)
+        assert assistant, "后台恢复应落库 assistant"
         assert assistant[-1]["content"] == "最终方案已生成"
 
-        traces = (await c.get("/api/traces", headers=h_user)).json()
-        trace = next(t for t in traces if t["conversation_id"] == conv_id)
+        # trace 终态同样由后台任务更新，轮询等待
+        t0 = time.monotonic()
+        while time.monotonic() - t0 < 5.0:
+            traces = (await c.get("/api/traces", headers=h_user)).json()
+            trace = next(t for t in traces if t["conversation_id"] == conv_id)
+            if trace["status"] == "completed":
+                break
+            await asyncio.sleep(0.1)
         assert trace["status"] == "completed", trace
 
 
@@ -166,14 +186,13 @@ async def test_critical_rejection_still_replies(db_session, monkeypatch):
         r = await c.post("/api/chat/resume", json={"conversation_id": conv_id, "approved": True}, headers=h_user)
         approval_id = r.json()["payload"]["approval_id"]
 
-        # 驳回
+        # 驳回：decide 立即返回，图恢复在后台执行后落库，轮询等待
         r = await c.post(f"/api/approvals/{approval_id}/decide",
                          json={"approve": False, "comment": "暂不发布"}, headers=h_admin)
         assert r.status_code == 200, r.text
 
-        msgs = (await c.get(f"/api/conversations/{conv_id}/messages", headers=h_user)).json()
-        assistant = [m for m in msgs if m["role"] == "assistant"]
-        assert assistant, msgs
+        assistant = await _wait_assistant(c, conv_id, h_user)
+        assert assistant, "后台恢复应落库 assistant"
         assert assistant[-1]["content"] == "最终方案已生成"
 
         # 审批单状态应为 rejected

@@ -1,11 +1,14 @@
 # backend/tests/test_approvals_api.py
+import asyncio
+import time
+
 import pytest
 from httpx import AsyncClient, ASGITransport
 from sqlalchemy import select
 from app.main import app
 from app.models.experience import Experience
 from app.models.org import User
-from app.models.trace import Approval
+from app.models.trace import Approval, ExecutionTrace
 
 
 async def _register(transport, username, display_name="X"):
@@ -98,6 +101,49 @@ async def test_member_cannot_see_others_approvals(db_session):
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         r = await c.get("/api/approvals?status=pending", headers=h)
         assert r.json() == []
+
+
+@pytest.mark.asyncio
+async def test_decide_tool_call_returns_immediately(db_session, monkeypatch):
+    """critical 审批通过：decide 立即返回（图恢复改后台任务，不再阻塞请求）。
+
+    真实事故：decide 同步 await 恢复图执行（graph.ainvoke 含 LLM，最长 90s）→
+    请求长时间不返回，前端「无反应」；而审批单状态已 commit 为 approved，
+    用户再次点击即抛 404「审批单不存在或已处理」。修复后 decide 立即返回 ok，
+    图恢复在后台独立 session 执行。"""
+    from app.services import approval_service
+
+    trace = ExecutionTrace(id="11111111-1111-1111-1111-111111111111", user_id="u1",
+                           conversation_id="22222222-2222-2222-2222-222222222222",
+                           status="interrupted")
+    db_session.add(trace)
+    db_session.add(Approval(category="tool_call", risk="critical", mode="sync",
+                            ref_type="trace", ref_id=str(trace.id), title="发布活动",
+                            status="pending", requester_id="u1", approver_role="admin"))
+    await db_session.commit()
+    ap_id = (await db_session.scalars(
+        select(Approval).where(Approval.ref_id == str(trace.id)))).first().id
+
+    # fake 图恢复：睡 1s。若 decide 仍同步 await，请求会明显变慢
+    async def slow_impl(db, approval_id, approved, trace_id):
+        await asyncio.sleep(1.0)
+
+    monkeypatch.setattr(approval_service, "_resume_graph_impl", slow_impl)
+
+    transport = ASGITransport(app=app)
+    h = await _register(transport, "admin2")
+    await _set_role(db_session, "admin2", "admin")
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        t0 = time.monotonic()
+        r = await c.post(f"/api/approvals/{ap_id}/decide", json={"approve": True}, headers=h)
+        dt = time.monotonic() - t0
+        assert r.status_code == 200
+        assert dt < 0.5, f"decide 应立即返回（后台恢复），实际耗时 {dt:.2f}s"
+    # 审批单状态已持久化（第二次点击应 404，但前端已收到反馈不会再点）
+    ap = await db_session.get(Approval, ap_id)
+    assert ap.status == "approved"
+    # 等后台恢复任务自然结束，避免 pytest 事件循环残留 pending task
+    await asyncio.sleep(1.2)
 
 
 @pytest.mark.asyncio
