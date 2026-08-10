@@ -9,6 +9,7 @@ from langchain_core.messages import HumanMessage
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.graph import get_graph
+from app.core.database import SessionLocal
 from app.memory.assembly import assemble_memory
 from app.models.chat import Conversation, Message
 from app.models.trace import ExecutionTrace
@@ -22,6 +23,34 @@ from app.traces.collector import collector
 from app.traces.handlers import StreamEventHandler, TraceCallbackHandler
 
 logger = logging.getLogger(__name__)
+
+# 后台记忆沉淀任务管理：持有引用防 GC（与 summary._bg_title_tasks 同模式）
+_bg_mem_tasks: set[asyncio.Task] = set()
+
+
+def schedule_memory_postprocess(user_id: str, conv_id: str, dialog: str, trace_id: str) -> None:
+    """异步调度记忆沉淀（偏好提取 / 经验提炼 / 摘要滚动），不阻塞 SSE 关键路径。
+
+    这三段后处理各含 LLM 调用（偏好分析、经验提炼+embed、滚动摘要），网关慢时
+    单个最多挂到 timeout（120s）。旧实现把它们放在 yield answer/done 之前串行
+    await，SSE 流迟迟不结束，前端一直显示「Agent 思考中…」转圈（真实事故：
+    主图 1.9s 完成但收尾占 13.7s）。移出后 answer/done 立即返回，收尾在后台
+    用独立 session 完成（请求结束后依赖注入的 db 已关闭，不能复用 self.db）。
+    失败仅降级记录，不影响聊天主流程。"""
+    async def _run():
+        try:
+            async with SessionLocal() as db:
+                await maybe_extract_batch(db, user_id, conv_id)
+                exp = await distill_experience(dialog, user_id, trace_id)
+                if exp:
+                    await save_personal_experience(db, exp)
+                await maybe_roll_summary(db, conv_id)
+        except Exception as e:
+            logger.warning("后台记忆沉淀失败（已降级）: %s", e)
+
+    task = asyncio.create_task(_run())
+    _bg_mem_tasks.add(task)
+    task.add_done_callback(_bg_mem_tasks.discard)
 
 
 class ChatService:
@@ -179,16 +208,11 @@ class ChatService:
         conv.current_trace_id = trace.id
         await self.trace_repo.commit()
         collector.emit(trace.id, "route", {"routes": trace.supervisor_routes})
-        # 偏好提取 / 经验提炼 / 摘要滚动：失败仅降级，不影响 SSE 正常收尾
-        try:
-            dialog = f"用户：{message}\n助手：{text}"
-            await maybe_extract_batch(self.db, user_id, conv_id)
-            exp = await distill_experience(dialog, user_id, trace.id)
-            if exp:
-                await save_personal_experience(self.db, exp)
-            await maybe_roll_summary(self.db, conv_id)
-        except Exception as e:
-            logger.warning("记忆沉淀后处理失败（已降级）: %s", e)
+        # 记忆沉淀（偏好/经验/摘要）移出 SSE 关键路径：这三段各含 LLM 调用，
+        # 网关慢时串行 await 会让 answer/done 迟迟不发出，前端一直转圈。
+        # 改为后台任务（独立 session），answer/done 立即返回。
+        dialog = f"用户：{message}\n助手：{text}"
+        schedule_memory_postprocess(user_id, conv_id, dialog, trace.id)
         # answer 携带完整最终文本（前端在无 token 流式时兜底填充，已流式时跳过避免重复）
         yield json.dumps({"event": "answer", "content": text}, ensure_ascii=False)
         # done 事件携带标题，前端收到后只 patch 会话列表对应项，不影响消息区
@@ -254,18 +278,12 @@ class ChatService:
             conv.current_trace_id = trace.id
             await self.trace_repo.commit()
             collector.emit(trace.id, "route", {"routes": trace.supervisor_routes})
-        # 偏好提取 / 经验提炼 / 摘要滚动：失败仅降级，不影响 SSE 正常收尾
-        try:
-            all_msgs = await self.message_repo.list_by_conversation(conv_id)
-            user_msg = next((m.content for m in reversed(all_msgs) if m.role == "user"), "")
-            dialog = f"用户：{user_msg}\n助手：{text}"
-            await maybe_extract_batch(self.db, user_id, conv_id)
-            exp = await distill_experience(dialog, user_id, trace.id if trace else "")
-            if exp:
-                await save_personal_experience(self.db, exp)
-            await maybe_roll_summary(self.db, conv_id)
-        except Exception as e:
-            logger.warning("resume 后记忆沉淀处理失败（已降级）: %s", e)
+        # 记忆沉淀（偏好/经验/摘要）异步化：各含 LLM 调用，阻塞会让恢复响应迟迟不返回。
+        # 改为后台任务（独立 session），response 立即返回。
+        all_msgs = await self.message_repo.list_by_conversation(conv_id)
+        user_msg = next((m.content for m in reversed(all_msgs) if m.role == "user"), "")
+        dialog = f"用户：{user_msg}\n助手：{text}"
+        schedule_memory_postprocess(user_id, conv_id, dialog, trace.id if trace else "")
         # 标题生成兜底：stream_chat 被中断时其后台标题任务可能已取消，
         # 在 resume 中重试以确保最终一定能生成标题
         schedule_title_generation(conv_id, user_msg if user_msg else (text[:500]))

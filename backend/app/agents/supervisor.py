@@ -57,6 +57,12 @@ def _infer_agent(message: str, agents: list[str]) -> str | None:
     return None
 
 
+def fallback_decision(message: str, agents: list[str]) -> dict:
+    """路由降级兜底：LLM 超时/不可用时按关键词推断目标 agent，避免路由环节挂起。"""
+    agent = _infer_agent(message, agents)
+    return {"agent": agent or "done", "reason": "路由降级（LLM 超时），按关键词兜底", "confidence": 0.1}
+
+
 def _fuzzy_match(agent: str, agents: list[str]) -> str | None:
     """LLM 返回了候选列表之外的代码时，做近似匹配（如 schedule → scheduling）。"""
     a = (agent or "").lower().replace("-", "_").replace(" ", "_")

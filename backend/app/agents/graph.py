@@ -1,5 +1,6 @@
 # backend/app/agents/graph.py —— 主图：Supervisor 多轮循环 + checkpointer 持久化
 import asyncio
+import logging
 
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
@@ -9,7 +10,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from app.agents.state import AgentState
 from app.agents.registry import AgentRegistry
-from app.agents.supervisor import route_decision
+from app.agents.supervisor import route_decision, fallback_decision
 from app.agents.marketing.agent import build_marketing_agent
 from app.agents.sales_analysis.agent import build_sales_agent
 from app.agents.scheduling.agent import build_scheduling_agent
@@ -23,9 +24,12 @@ from app.traces.collector import collector
 # 模块加载时注册内置工具到 facade 单例
 register_builtin_tools(facade)
 
+logger = logging.getLogger(__name__)
+
 MAX_ROUTES = 4  # 循环上限，防死循环
 MAX_MESSAGES = 100   # 图内消息超过该长度触发裁剪（必须晚于滚动摘要生成轮次，见 done_node 注释）
 RETAIN_MESSAGES = 60  # 裁剪后保留的消息条数（窗口内完整消息 + 滚动摘要兜底窗口外）
+ROUTE_TIMEOUT = 15.0  # 路由决策 LLM 限时：网关挂起时快速降级关键词兜底，避免 SSE 在 route 前长时间无事件
 
 
 def _trim_messages(msgs: list[BaseMessage], max_len: int = MAX_MESSAGES,
@@ -144,7 +148,14 @@ def build_graph(registry: AgentRegistry, checkpointer=None):
                 break
         if prev_text:
             context += f"\n\n上一轮 agent 输出：{prev_text}"
-        decision = await route_decision(context, agents_with_done)
+        # 路由决策限时：LLM 网关挂起时快速降级关键词兜底，不让 route 事件迟迟不来
+        #（真实事故：start 0.7s 到达后 route 80s+ 无事件，前端一直转圈）
+        try:
+            decision = await asyncio.wait_for(
+                route_decision(context, agents_with_done), timeout=ROUTE_TIMEOUT)
+        except asyncio.TimeoutError:
+            logger.warning("路由决策超时(%ss)，降级关键词兜底", ROUTE_TIMEOUT)
+            decision = fallback_decision(context, agents_with_done)
         # 每次路由决策即时留痕（interrupt 挂起时也能看到完整路由轨迹）
         trace_id = state.get("trace_id")
         if trace_id:
