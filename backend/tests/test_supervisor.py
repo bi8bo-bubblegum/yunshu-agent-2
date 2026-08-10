@@ -7,14 +7,26 @@ def test_route_schema_fields():
 
 @pytest.mark.asyncio
 async def test_route_decision_parses(monkeypatch):
+    """系统指令放 SystemMessage、用户内容放 HumanMessage，不得混成一条 user 消息。"""
+    captured = {}
+
     class FakeLLM:
         def with_structured_output(self, schema):
             return self
         async def ainvoke(self, prompt):
+            captured["prompt"] = prompt
             return RouteDecision(agent="marketing", reason="营销策划", confidence=0.9)
     monkeypatch.setattr("app.agents.supervisor.ModelFactory.get_llm", lambda k: FakeLLM())
     decision = await route_decision("策划国庆营销方案", ["marketing", "sales_analysis", "scheduling", "done"])
     assert decision["agent"] == "marketing"
+    # 消息结构：SystemMessage 承载角色/候选/原则，HumanMessage 只承载用户真实输入
+    msgs = captured["prompt"]
+    assert len(msgs) == 2
+    assert msgs[0].type == "system"
+    assert "候选 agent" in msgs[0].content and "判断原则" in msgs[0].content
+    assert msgs[0].content.count("营销策划 / 活动管理类 → marketing") == 1
+    assert msgs[1].type == "human"
+    assert msgs[1].content == "策划国庆营销方案"
 
 @pytest.mark.asyncio
 async def test_route_decision_done(monkeypatch):

@@ -2,6 +2,7 @@
 import logging
 
 from pydantic import BaseModel, Field
+from langchain_core.messages import SystemMessage, HumanMessage
 from app.llm.factory import ModelFactory
 from app.llm.date_context import current_date_context
 
@@ -20,6 +21,30 @@ AGENT_KEYWORDS = {
     "sales_analysis": ["销售", "经营", "营收", "订单", "客户", "指标", "数据", "分析", "报表", "sales", "revenue", "order"],
     "scheduling": ["排班", "班次", "调度", "排期", "值班", "工时", "schedule", "shift"],
 }
+
+
+# 路由系统指令：角色设定、候选列表、判断原则、当前日期全部放 SystemMessage，
+# 用户真实输入（本轮消息 + 上一轮 agent 输出）单独放 HumanMessage。
+# 与子 agent（marketing/sales_analysis/scheduling）的 SystemMessage + memory 模式对齐，
+# 避免「路由规则」和「待路由内容」混在一条 user 消息里，模型可更准确区分指令与内容。
+SYSTEM_ROUTER_PROMPT = (
+    "你是多智能体系统的意图路由器。请根据用户消息与上一轮 agent 的输出，"
+    "从候选列表中选出唯一一个最合适的 agent 继续执行；"
+    "仅当任务已经完成、无需再调用任何 agent 时才返回 done。\n"
+    "\n"
+    "候选 agent：{agents}\n"
+    "\n"
+    "## 判断原则\n"
+    "1. 营销策划 / 活动管理类 → marketing；\n"
+    "2. 经营分析 / 销售数据 / 指标查询类 → sales_analysis；\n"
+    "3. 排班 / 调度 / 资源排期类 → scheduling；\n"
+    "4. 上一轮 agent 已完整回答用户诉求且无后续协作需求 → done；\n"
+    "5. 上一轮 agent 只完成部分诉求，或需要其他 agent 补充分析 → 选择对应 agent 继续；\n"
+    "6. 若上一轮 agent 的回复是在向用户提问或请求补充信息（如缺少必要参数），"
+    "说明需要用户输入，应返回 done，不要反复派发同一个 agent。\n"
+    "\n"
+    "{date}"
+)
 
 
 def _infer_agent(message: str, agents: list[str]) -> str | None:
@@ -45,26 +70,7 @@ async def route_decision(message: str, agents: list[str], model_key: str = "defa
     """LLM 判断目标 agent，可选列表包含所有注册的 agent + done。
     agent 完成后再次调用此函数决定是否需要其他 agent 协作或结束。"""
     llm = ModelFactory.get_llm(model_key).with_structured_output(RouteDecision)
-    prompt = (
-        f"你是多智能体系统的意图路由器。请根据用户消息与上一轮 agent 的输出，"
-        f"从候选列表中选出唯一一个最合适的 agent 继续执行；"
-        f"仅当任务已经完成、无需再调用任何 agent 时才返回 done。\n"
-        f"\n"
-        f"候选 agent：{agents}\n"
-        f"\n"
-        f"## 判断原则\n"
-        f"1. 营销策划 / 活动管理类 → marketing；\n"
-        f"2. 经营分析 / 销售数据 / 指标查询类 → sales_analysis；\n"
-        f"3. 排班 / 调度 / 资源排期类 → scheduling；\n"
-        f"4. 上一轮 agent 已完整回答用户诉求且无后续协作需求 → done；\n"
-        f"5. 上一轮 agent 只完成部分诉求，或需要其他 agent 补充分析 → 选择对应 agent 继续；\n"
-        f"6. 若上一轮 agent 的回复是在向用户提问或请求补充信息（如缺少必要参数），"
-        f"说明需要用户输入，应返回 done，不要反复派发同一个 agent。\n"
-        f"\n"
-        f"{current_date_context()}\n"
-        f"\n"
-        f"消息：{message}"
-    )
+    system = SYSTEM_ROUTER_PROMPT.format(agents=agents, date=current_date_context())
     data = None
     # 结构化输出偶发解析失败：重试一次（强调取值约束），仍失败再走关键词兜底
     for attempt, hint in enumerate((
@@ -72,7 +78,10 @@ async def route_decision(message: str, agents: list[str], model_key: str = "defa
         "\n注意：agent 字段必须严格等于候选列表中的一个代码（如 scheduling），不要返回列表之外的值或解释性文字。",
     )):
         try:
-            result = await llm.ainvoke(prompt + hint)
+            result = await llm.ainvoke([
+                SystemMessage(content=system + hint),
+                HumanMessage(content=message),
+            ])
             data = result.model_dump()
             break
         except Exception as e:
