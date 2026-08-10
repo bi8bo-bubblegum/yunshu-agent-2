@@ -5,7 +5,7 @@ import logging
 from uuid import uuid4
 
 from fastapi import HTTPException
-from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
+from langchain_core.messages import HumanMessage
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.graph import get_graph
@@ -70,10 +70,15 @@ class ChatService:
         dep_id = user.department_id if user and user.department_id else None
         mem = await assemble_memory(self.db, user_id, conv_id, dep_id, message)
         graph = await get_graph()
-        # 请求级事件队列：回调与图节点把过程事件放入队列，SSE 生成器实时转发
+        # 请求级事件队列：回调与图节点把过程事件放入队列，SSE 生成器实时转发。
+        # 重要：图在后台 task 运行——LangGraph 父图 stream_mode="messages" 不穿透
+        # 编译子图内部，子图内 LLM token 由 agent_node 经注入的 sse_queue 直接推送；
+        # 主循环只从 queue 实时读取，避免「astream 无事件产出时队列堆积、
+        # 子图结束后一次性刷出」导致的非流式观感。
         queue: asyncio.Queue = asyncio.Queue(maxsize=500)
         config = {
-            "configurable": {"thread_id": conv_id, "trace_id": trace.id, "requester_id": user_id},
+            "configurable": {"thread_id": conv_id, "trace_id": trace.id,
+                             "requester_id": user_id, "sse_queue": queue},
             "callbacks": [StreamEventHandler(queue, trace.id), TraceCallbackHandler(trace.id)],
         }
         inputs = {
@@ -83,57 +88,46 @@ class ChatService:
             # 只注入本轮用户消息，历史由 checkpointer 按 thread_id 累积恢复
             "messages": [HumanMessage(content=message)],
         }
-        agent_parts: list[str] = []
-        stream_interrupts = None
-
-        async def _drain_queue():
-            while True:
-                try:
-                    evt = queue.get_nowait()
-                except asyncio.QueueEmpty:
-                    break
-                yield json.dumps(evt, ensure_ascii=False)
-
         # 本轮开始前的 agent_outputs 长度：agent_outputs 是跨轮累积的 add 通道，
         # 本轮结束后取 [l0:] 即本轮各 agent 产出段落（分段落库，方案 B）。
         pre_snap = await graph.aget_state(config)
         l0 = len((pre_snap.values or {}).get("agent_outputs", [])) if pre_snap else 0
 
-        # 双流模式：messages 实时吐 agent token，updates 提供路由决策节点状态
-        async for item in graph.astream(inputs, config, stream_mode=["messages", "updates"]):
-            async for evt in _drain_queue():
-                yield evt
-            if not isinstance(item, tuple):
-                continue
-            mode, chunk = item
-            if mode == "updates":
-                # langgraph 1.x：interrupt 以 updates 顶层 __interrupt__ 块出现
-                if isinstance(chunk, dict) and "__interrupt__" in chunk:
-                    stream_interrupts = chunk["__interrupt__"]
-                    continue
-                sv = chunk.get("supervisor") if isinstance(chunk, dict) else None
-                if sv and sv.get("pending_agent"):
-                    yield json.dumps({"event": "route", "agent": sv["pending_agent"]}, ensure_ascii=False)
-                continue
-            if mode != "messages":
-                continue
-            msg, meta = chunk
-            node = (meta or {}).get("langgraph_node") or ""
-            # 只转发 agent 的输出 token；supervisor 路由文本/工具结果消息不直接展示
-            if node not in ("supervisor", "tools") and isinstance(msg, (AIMessage, AIMessageChunk)):
-                content = msg.content
-                if isinstance(content, list):
-                    text = "".join(
-                        b.get("text", "") if isinstance(b, dict) and b.get("type") == "text" else ""
-                        for b in content
-                    )
-                else:
-                    text = content or ""
-                if text:
-                    agent_parts.append(text)
-                    yield json.dumps({"event": "token", "content": text}, ensure_ascii=False)
-        async for evt in _drain_queue():
-            yield evt
+        stream_interrupts_holder: dict = {}
+
+        async def _run_graph():
+            """后台执行图：路由/中断事件入队；agent 输出 token 由 agent_node 直接推送。"""
+            try:
+                async for item in graph.astream(inputs, config, stream_mode=["messages", "updates"]):
+                    if not isinstance(item, tuple):
+                        continue
+                    mode, chunk = item
+                    if mode == "updates":
+                        # langgraph 1.x：interrupt 以 updates 顶层 __interrupt__ 块出现
+                        if isinstance(chunk, dict) and "__interrupt__" in chunk:
+                            stream_interrupts_holder["v"] = chunk["__interrupt__"]
+                            continue
+                        sv = chunk.get("supervisor") if isinstance(chunk, dict) else None
+                        if sv and sv.get("pending_agent"):
+                            queue.put_nowait({"event": "route", "agent": sv["pending_agent"]})
+                        continue
+                    # messages 模式不转发：子图内部不穿透（agent_node 已直接推送 token），
+                    # supervisor 路由文本不需要展示，避免与 agent_node 推送重复。
+            except Exception as e:
+                logger.warning("图执行异常: %s", e)
+            finally:
+                await queue.put(None)  # 哨兵：图执行结束，主循环退出
+
+        graph_task = asyncio.create_task(_run_graph())
+        # 主循环：实时转发队列事件，直到哨兵（图结束）。queue 本身保证实时性，
+        # 子图执行期间 token / tool 事件随时可读，不再等 astream 产出。
+        while True:
+            evt = await queue.get()
+            if evt is None:
+                break
+            yield json.dumps(evt, ensure_ascii=False)
+        await graph_task
+        stream_interrupts = stream_interrupts_holder.get("v")
 
         # 取最终状态：interrupt 挂起 / agent_response 终文
         snap = await graph.aget_state(config)
@@ -153,7 +147,7 @@ class ChatService:
             await self.trace_repo.commit()
             yield json.dumps({"event": "confirm_required", "payload": payload}, ensure_ascii=False)
             return
-        text = values.get("agent_response", "") or "".join(agent_parts)
+        text = values.get("agent_response", "")
         # 助手消息落库（分段落库）：本轮各 agent 产出各存一条 assistant（metadata 标记 agent/段位），
         # 最后一段为 final（完整最终文本，用 agent_response 覆盖保证）。单 agent 退化为 1 条，
         # 与旧行为完全一致；多 agent（如 marketing→sales）时中间产出不再丢失（方案 B）。

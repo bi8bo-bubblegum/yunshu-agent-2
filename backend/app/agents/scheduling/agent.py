@@ -1,6 +1,7 @@
 # backend/app/agents/scheduling/agent.py
 from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolNode
+from langchain_core.runnables import RunnableConfig
 from langchain_core.messages import SystemMessage
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -47,14 +48,37 @@ async def build_scheduling_agent(db: AsyncSession, enable_checkpointer: bool = F
     mcp_server_names = await load_mcp_tools_by_agent(db, AGENT_CODE)
     tools = await load_tools(db, TOOL_NAMES, mcp_server_names)
 
-    async def agent_node(state: AgentState) -> dict:
+    async def agent_node(state: AgentState, config: RunnableConfig = None) -> dict:
         llm = ModelFactory.get_llm(AGENT_CODE).bind_tools(tools)
         # 只喂本轮上下文窗口（最近一条用户消息之后），历史由 memory 装配兜底，
         # 避免把会话全部历史 + 工具往返全量重发给 LLM（token 平方级浪费）
         msgs = [
             SystemMessage(SYSTEM_PROMPT + "\n" + state.get("memory_context", "")),
         ] + round_window(state.get("messages", []))
-        resp = await llm.ainvoke(msgs)
+        # 流式生成：LangGraph 父图 stream_mode="messages" 不穿透编译子图内部，
+        # 子图内 LLM token 只能由本节点主动推送。llm.astream 逐 chunk 产出，
+        # 文本经 config 注入的 SSE 队列实时转发给前端；同时合并 chunks 得到
+        # 完整 AIMessage（含 tool_calls），供 ReAct 循环判断下一步。
+        # LLM 无 astream（如测试 mock）时降级为 ainvoke 一次性生成。
+        sse_queue = ((config or {}).get("configurable") or {}).get("sse_queue")
+        if hasattr(llm, "astream"):
+            chunks: list = []
+            async for chunk in llm.astream(msgs):
+                chunks.append(chunk)
+                c = chunk.content
+                if isinstance(c, list):
+                    c = "".join(str(b.get("text", "")) for b in c
+                                if isinstance(b, dict) and b.get("type") == "text")
+                if c and sse_queue is not None:
+                    try:
+                        sse_queue.put_nowait({"event": "token", "content": c})
+                    except Exception:
+                        pass
+            resp = chunks[0]
+            for c in chunks[1:]:
+                resp = resp + c
+        else:
+            resp = await llm.ainvoke(msgs)
         out = {"messages": [resp], "tool_rounds": 1}
         # 快照本轮 agent 产出（agent 编码 + 文本）到 agent_outputs，供分段落库。
         # 仅当有实质文本（非工具调用）时快照；工具调用消息 content 为空，跳过。
