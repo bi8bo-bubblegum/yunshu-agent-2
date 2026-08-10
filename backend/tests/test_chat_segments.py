@@ -129,3 +129,49 @@ async def test_single_agent_no_step(monkeypatch):
         # 单 agent 只有一个 final 段落（无 step），metadata 标记 final
         assert msgs[1]["metadata"]["segment"] == "final"
         assert msgs[1]["metadata"]["agent"] == "marketing"
+
+
+@pytest.mark.asyncio
+async def test_no_new_output_no_duplicate_segments(monkeypatch):
+    """多轮对话中某轮无新增产出（如 supervisor 直接 done）时，不得重复落库历史段落。
+
+    曾真实事故：l0 == len(agent_outputs) 时 segments 走了 else 分支取全部历史，
+    导致前面轮次的 step 段落被重复落库，前端刷新后中间消息重复/错乱。
+    修复后 l0 >= len(outputs) 视为「本轮无新增」，segments 为空，只落最终答案一条。
+    """
+    await _stubs(monkeypatch, ["marketing", "done", "done"])
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        await c.post("/api/auth/register", json={"username": "seg_user3", "password": "x123456", "display_name": "S3"})
+        r = await c.post("/api/auth/login", json={"username": "seg_user3", "password": "x123456"})
+        h = {"Authorization": f"Bearer {r.json()['access_token']}"}
+        conv_id = (await c.post("/api/conversations", json={}, headers=h)).json()["id"]
+
+        # 第一轮：marketing 产出段落（step）→ done（final）
+        async with c.stream("POST", "/api/chat/completions",
+                            json={"conversation_id": conv_id, "message": "做一个营销方案"},
+                            headers=h) as resp:
+            assert resp.status_code == 200
+            async for _ in resp.aiter_lines():
+                pass
+        # 第二轮：supervisor 直接 done（无 agent 执行，agent_outputs 无新增）
+        async with c.stream("POST", "/api/chat/completions",
+                            json={"conversation_id": conv_id, "message": "好的"},
+                            headers=h) as resp:
+            assert resp.status_code == 200
+            async for _ in resp.aiter_lines():
+                pass
+
+        msgs = (await c.get(f"/api/conversations/{conv_id}/messages", headers=h)).json()
+        # 第一轮：user + marketing(final)（单 agent 无 step）；第二轮：user + 一条 final
+        roles = [m["role"] for m in msgs]
+        assert roles == ["user", "assistant", "user", "assistant"], roles
+        # 关键：两轮各只有 1 条 assistant，第二轮没有重放第一轮的 agent_outputs。
+        # 若 l0 == len(outputs) 仍走 else 取全部历史，第二轮会多出重复段落。
+        # 第一轮带 agent 快照 metadata；第二轮无新增产出，落普通 assistant（metadata=None）。
+        segments = [m["metadata"] for m in msgs if m["role"] == "assistant"]
+        assert segments == [
+            {"agent": "marketing", "segment": "final"},
+            None,
+        ], segments

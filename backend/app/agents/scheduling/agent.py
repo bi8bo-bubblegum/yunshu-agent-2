@@ -81,12 +81,14 @@ async def build_scheduling_agent(db: AsyncSession, enable_checkpointer: bool = F
             resp = await llm.ainvoke(msgs)
         out = {"messages": [resp], "tool_rounds": 1}
         # 快照本轮 agent 产出（agent 编码 + 文本）到 agent_outputs，供分段落库。
-        # 仅当有实质文本（非工具调用）时快照；工具调用消息 content 为空，跳过。
+        # 仅当是「最终输出」时快照：带 tool_calls 的中间 LLM 输出（可能只是空行
+        # 或过渡文本，如 '\n\n'）不是本轮 agent 的实质产出，若快照会生成空内容
+        # 的 step 段落，刷新后表现为「中间消息丢失」。
         c = resp.content if hasattr(resp, "content") else ""
         if isinstance(c, list):
             c = "".join(str(b.get("text", "")) for b in c
                         if isinstance(b, dict) and b.get("type") == "text")
-        if c:
+        if not getattr(resp, "tool_calls", None) and c.strip():
             out["agent_outputs"] = [{"agent": AGENT_CODE, "content": c}]
         return out
 

@@ -117,7 +117,9 @@ class ApprovalService:
             return
         text = result.get("agent_response", "")
         outputs = result.get("agent_outputs", []) or []
-        segments = outputs[al0:] if al0 is not None and al0 < len(outputs) else outputs
+        # 只取审批恢复新增的段落 [al0:]；al0 == len(outputs)（恢复后无新增产出）时为空，
+        # 避免把历史 agent_outputs 重复落库（与 stream_chat 一致，防止 step 段落重复）。
+        segments = outputs[al0:] if al0 is not None and al0 < len(outputs) else []
         if segments:
             last_i = len(segments) - 1
             for i, seg in enumerate(segments):

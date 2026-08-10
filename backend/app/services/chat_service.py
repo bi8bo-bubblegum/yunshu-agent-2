@@ -152,7 +152,10 @@ class ChatService:
         # 最后一段为 final（完整最终文本，用 agent_response 覆盖保证）。单 agent 退化为 1 条，
         # 与旧行为完全一致；多 agent（如 marketing→sales）时中间产出不再丢失（方案 B）。
         outputs = values.get("agent_outputs", []) or []
-        segments = outputs[l0:] if l0 is not None and l0 < len(outputs) else outputs
+        # 只取本轮新增的段落 [l0:]。l0 == len(outputs)（本轮无新增，如 supervisor 直接 done、
+        # 或 agent 未产出快照）时 segments 为空，避免把全部历史 agent_outputs 重复落库
+        # （真实事故：无产出轮次把前面所有 step 段落重放一遍，前端刷新后中间消息重复/错乱）。
+        segments = outputs[l0:] if l0 is not None and l0 < len(outputs) else []
         if segments:
             last_i = len(segments) - 1
             for i, seg in enumerate(segments):
@@ -220,7 +223,9 @@ class ChatService:
         text = result.get("agent_response", "")
         # 分段落库（与 stream_chat 一致，方案 B）：interrupt 前已执行的段落 + 恢复后段落
         outputs = result.get("agent_outputs", []) or []
-        segments = outputs[rl0:] if rl0 is not None and rl0 < len(outputs) else outputs
+        # 只取恢复执行新增的段落 [rl0:]；rl0 == len(outputs)（恢复后无新增产出）时为空，
+        # 避免把历史 agent_outputs 重复落库（与 stream_chat 一致，防止 step 段落重复）。
+        segments = outputs[rl0:] if rl0 is not None and rl0 < len(outputs) else []
         if segments:
             last_i = len(segments) - 1
             for i, seg in enumerate(segments):
