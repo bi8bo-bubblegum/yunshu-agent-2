@@ -133,6 +133,39 @@ function agentName(code: string) {
   return ({ marketing: '营销助手', sales_analysis: '经营分析', scheduling: '调度优化', done: '完成' } as Record<string, string>)[code] || code || '未知'
 }
 
+// ---- 多 agent 分段落库渲染（方案 B）----
+// 展开/收起的执行过程折叠：key = final 段落的消息 id
+const expandedSteps = ref<Set<string>>(new Set())
+
+type RenderItem =
+  | { kind: 'user'; m: Message }
+  | { kind: 'assistant'; steps: Message[]; final: Message }
+
+// 把「step 段落」（中间 agent 产出）归入其后紧跟的「final 段落」（最终答案）：
+// 同一轮的 agent 中间产出折叠展示，气泡默认只显示最终答案（方案 B）。
+const displayMessages = computed<RenderItem[]>(() => {
+  const out: RenderItem[] = []
+  let pendingSteps: Message[] = []
+  for (const m of messages.value) {
+    if (m.role === 'user') {
+      out.push({ kind: 'user', m })
+    } else if (m.metadata?.segment === 'step') {
+      pendingSteps.push(m)
+    } else {
+      out.push({ kind: 'assistant', steps: pendingSteps, final: m })
+      pendingSteps = []
+    }
+  }
+  return out
+})
+
+function toggleSteps(id: string) {
+  const s = new Set(expandedSteps.value)
+  if (s.has(id)) s.delete(id)
+  else s.add(id)
+  expandedSteps.value = s
+}
+
 function renderStreamText() {
   const sb = messages.value.find(m => m.id === 'stream-buf')
   if (sb) sb.content = streamBuf.value
@@ -331,14 +364,29 @@ const activeConv = computed(() => convs.value.find(c => c.id === currentId.value
           <p>向云枢 Agent 描述你的任务</p>
           <p class="text-muted text-sm">示例：帮我策划一个国庆营销方案</p>
         </div>
-        <div v-for="(m, i) in messages" :key="m.id" class="msg" :class="m.role">
-          <div class="avatar">{{ m.role === 'user' ? '我' : '云' }}</div>
-          <div class="bubble">
-            <div v-if="m.role === 'assistant' && m.content === '' && streaming && i === messages.length - 1" class="typing"><span></span><span></span><span></span></div>
-            <Md v-else-if="m.role === 'assistant'" :content="m.content" />
-            <pre v-else>{{ m.content }}</pre>
+        <template v-for="(item, i) in displayMessages" :key="item.kind === 'user' ? item.m.id : item.final.id">
+          <div v-if="item.kind === 'user'" class="msg user">
+            <div class="avatar">我</div>
+            <div class="bubble"><pre>{{ item.m.content }}</pre></div>
           </div>
-        </div>
+          <div v-else class="msg assistant">
+            <div class="avatar">云</div>
+            <div class="bubble">
+              <div v-if="item.final.content === '' && streaming && i === displayMessages.length - 1" class="typing"><span></span><span></span><span></span></div>
+              <Md v-else :content="item.final.content" />
+              <div v-if="item.steps.length" class="steps-toggle" @click="toggleSteps(item.final.id)">
+                <span class="steps-arrow">{{ expandedSteps.has(item.final.id) ? '▾' : '▸' }}</span>
+                <span>查看执行过程（{{ item.steps.length }} 步）</span>
+              </div>
+              <div v-if="item.steps.length && expandedSteps.has(item.final.id)" class="steps-panel">
+                <div v-for="(s, si) in item.steps" :key="s.id" class="step-block" :class="{ 'step-first': si === 0 }">
+                  <div class="step-agent">🛠 {{ agentName(s.metadata?.agent ?? '') }}</div>
+                  <Md :content="s.content" />
+                </div>
+              </div>
+            </div>
+          </div>
+        </template>
         <div v-if="pendingApproval && pendingApproval.conversationId === currentId" class="msg assistant">
           <div class="avatar">云</div>
           <div class="bubble pending-bubble">
@@ -409,6 +457,14 @@ const activeConv = computed(() => convs.value.find(c => c.id === currentId.value
 .msg.user .bubble { background: rgba(254, 44, 85, .14); border-color: rgba(254, 44, 85, .35); }
 .bubble pre { margin: 0; white-space: pre-wrap; word-break: break-word; font-family: var(--font-sans); font-size: 13.5px; line-height: 1.65; }
 .pending-bubble { display: flex; align-items: center; gap: 10px; color: var(--muted-foreground); font-size: 13px; }
+/* 多 agent 分段落库（方案 B）：执行过程折叠 */
+.steps-toggle { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border); font-size: 12px; color: var(--muted-foreground); cursor: pointer; user-select: none; display: flex; align-items: center; gap: 4px; }
+.steps-toggle:hover { color: var(--foreground); }
+.steps-arrow { font-size: 10px; }
+.steps-panel { margin-top: 8px; border-left: 2px solid var(--border); padding-left: 10px; display: flex; flex-direction: column; gap: 10px; }
+.step-block { padding: 6px 8px; background: var(--video-bg); border-radius: var(--radius-md); }
+.step-block.step-first { margin-top: 8px; }
+.step-agent { font-size: 11px; color: var(--muted-foreground); margin-bottom: 4px; }
 .typing { display: flex; gap: 4px; padding: 6px 2px; }
 .typing span { width: 7px; height: 7px; border-radius: 50%; background: var(--muted-foreground); animation: blink 1.2s infinite; }
 .typing span:nth-child(2) { animation-delay: .2s; }

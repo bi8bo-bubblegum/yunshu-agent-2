@@ -87,6 +87,7 @@ def wrap_subgraph(subgraph, checkpointer):
     async def wrapped(state: AgentState, config: RunnableConfig) -> dict:
         input_msgs = list(state.get("messages", []))
         input_rounds = state.get("tool_rounds", 0)
+        input_outputs = list(state.get("agent_outputs", []))
         cfg = (config or {}).get("configurable", {}) or {}
         # 父图当前 checkpoint id：LangGraph 任务 config 里 checkpoint_map
         # 记录了 parent_ns → 当前 checkpoint id（根图 parent_ns 为 ''）。
@@ -106,6 +107,10 @@ def wrap_subgraph(subgraph, checkpointer):
         rounds = result.get("tool_rounds", 0) - input_rounds
         if rounds:
             out["tool_rounds"] = rounds
+        # 回传子图新增的 agent 产出快照（agent 编码 + 文本），供分段落库
+        outputs = result.get("agent_outputs", []) or []
+        if len(outputs) > len(input_outputs):
+            out["agent_outputs"] = outputs[len(input_outputs):]
         if "__interrupt__" in result:
             out["__interrupt__"] = result["__interrupt__"]
         return out
@@ -128,14 +133,17 @@ def build_graph(registry: AgentRegistry, checkpointer=None):
         # 取最后一条有实质内容的 assistant 文本输出作为"上一轮 agent 输出"。
         # 不能直接用 msgs[-1]：它可能是工具调用消息（content 为空）、工具结果、
         # 或用户消息，用这些做路由上下文会让 supervisor 误判、复读用户输入。
+        prev_text = ""
         for m in reversed(msgs):
             c = m.content if hasattr(m, "content") else ""
             if isinstance(c, list):
                 c = "".join(str(b.get("text", "")) for b in c
                             if isinstance(b, dict) and b.get("type") == "text")
             if getattr(m, "type", "") == "ai" and c:
-                context += f"\n\n上一轮 agent 输出：{c}"
+                prev_text = c
                 break
+        if prev_text:
+            context += f"\n\n上一轮 agent 输出：{prev_text}"
         decision = await route_decision(context, agents_with_done)
         # 每次路由决策即时留痕（interrupt 挂起时也能看到完整路由轨迹）
         trace_id = state.get("trace_id")

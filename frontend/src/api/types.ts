@@ -20,6 +20,8 @@ export interface Message {
   role: 'user' | 'assistant'
   content: string
   created_at?: string
+  // 分段落库元数据：{agent: 编码, segment: 'final' | 'step'}；历史/单 agent 消息为 undefined
+  metadata?: { agent?: string; segment?: 'final' | 'step' } | null
 }
 
 export interface DocumentItem {

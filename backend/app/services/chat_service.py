@@ -94,6 +94,11 @@ class ChatService:
                     break
                 yield json.dumps(evt, ensure_ascii=False)
 
+        # 本轮开始前的 agent_outputs 长度：agent_outputs 是跨轮累积的 add 通道，
+        # 本轮结束后取 [l0:] 即本轮各 agent 产出段落（分段落库，方案 B）。
+        pre_snap = await graph.aget_state(config)
+        l0 = len((pre_snap.values or {}).get("agent_outputs", [])) if pre_snap else 0
+
         # 双流模式：messages 实时吐 agent token，updates 提供路由决策节点状态
         async for item in graph.astream(inputs, config, stream_mode=["messages", "updates"]):
             async for evt in _drain_queue():
@@ -149,9 +154,28 @@ class ChatService:
             yield json.dumps({"event": "confirm_required", "payload": payload}, ensure_ascii=False)
             return
         text = values.get("agent_response", "") or "".join(agent_parts)
-        # 助手消息落库
-        await self.message_repo.add(Message(conversation_id=conv_id, role="assistant", content=text))
-        await self.message_repo.commit()
+        # 助手消息落库（分段落库）：本轮各 agent 产出各存一条 assistant（metadata 标记 agent/段位），
+        # 最后一段为 final（完整最终文本，用 agent_response 覆盖保证）。单 agent 退化为 1 条，
+        # 与旧行为完全一致；多 agent（如 marketing→sales）时中间产出不再丢失（方案 B）。
+        outputs = values.get("agent_outputs", []) or []
+        segments = outputs[l0:] if l0 is not None and l0 < len(outputs) else outputs
+        if segments:
+            last_i = len(segments) - 1
+            for i, seg in enumerate(segments):
+                content = seg.get("content") or ""
+                if not content:
+                    continue
+                if i == last_i:
+                    content = text  # 最终段用 agent_response（完整文本）覆盖
+                await self.message_repo.add(Message(
+                    conversation_id=conv_id, role="assistant", content=content,
+                    metadata_={"agent": seg.get("agent", ""),
+                               "segment": "final" if i == last_i else "step"},
+                ))
+            await self.message_repo.commit()
+        else:
+            await self.message_repo.add(Message(conversation_id=conv_id, role="assistant", content=text))
+            await self.message_repo.commit()
         # 更新 trace 终态 + 路由历史
         trace.status = "completed"
         trace.supervisor_routes = values.get("route_history", [])
@@ -183,13 +207,16 @@ class ChatService:
         trace = await self.trace_repo.get(conv.current_trace_id) if conv.current_trace_id else None
         from langgraph.types import Command
         graph = await get_graph()
-        result = await graph.ainvoke(Command(resume=approved),
-                                     config={"configurable": {
-                                         "thread_id": conv_id,
-                                         "trace_id": trace.id if trace else "",
-                                         "requester_id": user_id,
-                                     },
-                                         "callbacks": [TraceCallbackHandler(trace.id if trace else "")]})
+        resume_config = {"configurable": {
+            "thread_id": conv_id,
+            "trace_id": trace.id if trace else "",
+            "requester_id": user_id,
+        },
+            "callbacks": [TraceCallbackHandler(trace.id if trace else "")]}
+        # 本轮开始前 agent_outputs 长度（interrupted 状态已含本轮 interrupt 前已执行的段落）
+        pre_snap = await graph.aget_state(resume_config)
+        rl0 = len((pre_snap.values or {}).get("agent_outputs", [])) if pre_snap else 0
+        result = await graph.ainvoke(Command(resume=approved), config=resume_config)
         interrupts = result.get("__interrupt__")
         if interrupts:
             # 图内还有后续 interrupt（多级确认），保持挂起
@@ -197,8 +224,26 @@ class ChatService:
             payload = getattr(first, "value", first)
             return {"ok": False, "message": "仍有待确认的操作", "payload": payload}
         text = result.get("agent_response", "")
-        await self.message_repo.add(Message(conversation_id=conv_id, role="assistant", content=text))
-        await self.message_repo.commit()
+        # 分段落库（与 stream_chat 一致，方案 B）：interrupt 前已执行的段落 + 恢复后段落
+        outputs = result.get("agent_outputs", []) or []
+        segments = outputs[rl0:] if rl0 is not None and rl0 < len(outputs) else outputs
+        if segments:
+            last_i = len(segments) - 1
+            for i, seg in enumerate(segments):
+                content = seg.get("content") or ""
+                if not content:
+                    continue
+                if i == last_i:
+                    content = text
+                await self.message_repo.add(Message(
+                    conversation_id=conv_id, role="assistant", content=content,
+                    metadata_={"agent": seg.get("agent", ""),
+                               "segment": "final" if i == last_i else "step"},
+                ))
+            await self.message_repo.commit()
+        else:
+            await self.message_repo.add(Message(conversation_id=conv_id, role="assistant", content=text))
+            await self.message_repo.commit()
         trace = await self.trace_repo.get(result.get("trace_id", ""))
         if not trace:
             from app.repositories.trace_repo import TraceRepository

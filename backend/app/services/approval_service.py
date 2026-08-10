@@ -105,6 +105,9 @@ class ApprovalService:
                                    "requester_id": trace.user_id},
                   "callbacks": [TraceCallbackHandler(trace.id)]}
         graph = await get_graph()
+        # 本轮开始前 agent_outputs 长度：审批恢复后按轮切分段落，与 stream_chat 分段落库一致
+        pre_snap = await graph.aget_state(config)
+        al0 = len((pre_snap.values or {}).get("agent_outputs", [])) if pre_snap else 0
         result = await graph.ainvoke(
             Command(resume={"approved": approved, "approval_id": approval_id}),
             config=config,
@@ -113,8 +116,24 @@ class ApprovalService:
         if result.get("__interrupt__"):
             return
         text = result.get("agent_response", "")
-        await message_repo.add(Message(conversation_id=trace.conversation_id,
-                                       role="assistant", content=text))
+        outputs = result.get("agent_outputs", []) or []
+        segments = outputs[al0:] if al0 is not None and al0 < len(outputs) else outputs
+        if segments:
+            last_i = len(segments) - 1
+            for i, seg in enumerate(segments):
+                content = seg.get("content") or ""
+                if not content:
+                    continue
+                if i == last_i:
+                    content = text
+                await message_repo.add(Message(
+                    conversation_id=trace.conversation_id, role="assistant", content=content,
+                    metadata_={"agent": seg.get("agent", ""),
+                               "segment": "final" if i == last_i else "step"},
+                ))
+        else:
+            await message_repo.add(Message(conversation_id=trace.conversation_id,
+                                           role="assistant", content=text))
         trace.status = "completed"
         trace.supervisor_routes = result.get("route_history", [])
         await trace_repo.commit()

@@ -17,6 +17,7 @@ class AgentState(TypedDict, total=False):
     messages: Annotated[list[BaseMessage], add_messages]  # 子图 ReAct 循环的工作消息
     tool_rounds: Annotated[int, add]             # 子图工具调用轮次计数（防死循环）
     agent_response: str
+    agent_outputs: Annotated[list[dict], add]  # 各轮 agent 产出的快照（agent 编码 + 文本），供最终分段落库
     route_history: Annotated[list[str], add]  # 已路由过的 agent，防死循环
     pending_agent: str           # supervisor 本次路由目标
     approval_result: dict | None  # 审批结果（critical 工具调用恢复时携带）

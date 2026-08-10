@@ -1,5 +1,5 @@
 # backend/app/schemas/chat.py
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from datetime import datetime
 
 class ConversationCreate(BaseModel):
@@ -17,4 +17,6 @@ class MessageOut(BaseModel):
     role: str
     content: str
     created_at: datetime
+    # 分段落库元数据：{agent: 编码, segment: "final"|"step"}，历史消息为 null
+    metadata: dict | None = Field(default=None, validation_alias="metadata_")
     model_config = {"from_attributes": True}

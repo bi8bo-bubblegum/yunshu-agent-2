@@ -18,8 +18,14 @@ class FakeLLM:
 @pytest.mark.asyncio
 async def test_messages_persisted_after_chat(db_session, monkeypatch):
     """聊天完成后 user + assistant 消息落库。"""
+    # 正常流程：marketing 执行一次 → done。若 fake_route 永不 done，MAX_ROUTES 会
+    # 强制截断导致 marketing 执行 3 次、分段落库落 3 条 assistant（新设计行为）。
+    decisions = iter([
+        {"agent": "marketing", "reason": "r", "confidence": 0.9},
+        {"agent": "done", "reason": "完成", "confidence": 0.95},
+    ])
     async def fake_route(message, agents):
-        return {"agent": "marketing", "reason": "r", "confidence": 0.9}
+        return next(decisions)
     monkeypatch.setattr("app.agents.graph.route_decision", fake_route)
     monkeypatch.setattr("app.agents.marketing.agent.ModelFactory.get_llm", lambda k: FakeLLM())
     async def _ctx(db, cid, **k):

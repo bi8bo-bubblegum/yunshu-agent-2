@@ -144,9 +144,12 @@ async def test_same_round_multi_route_no_bloat(monkeypatch):
         await _stream(c, h, conv_id, "你好")
 
         msgs = (await c.get(f"/api/conversations/{conv_id}/messages", headers=h)).json()
-        # 单轮 2 次 marketing：DB 只落库最终一条 assistant
-        assert [m["role"] for m in msgs] == ["user", "assistant"], msgs
+        # 单轮 2 次 marketing：分段落库落 2 条 assistant（step + final），中间产出不丢失
+        assert [m["role"] for m in msgs] == ["user", "assistant", "assistant"], msgs
         assert msgs[1]["content"] == "回复:你好"
+        assert msgs[1]["metadata"] == {"agent": "marketing", "segment": "step"}
+        assert msgs[2]["content"] == "回复:你好"  # final（最终答案，FakeLLM 固定内容）
+        assert msgs[2]["metadata"] == {"agent": "marketing", "segment": "final"}
 
         # 图最终状态：期望 [H1, A1, A2]，无重复块（两轮调用都基于同一条用户消息）
         cp_msgs, values = await _final_messages(conv_id)

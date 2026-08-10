@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.llm.factory import ModelFactory
 from app.tools.loader import load_tools, load_mcp_tools_by_agent
 from app.agents.state import AgentState
+from app.agents.window import round_window
 
 SYSTEM_PROMPT = (
     "你是一位资深经营分析专家。请结合【记忆上下文】中的偏好、经验、知识库与企业数据，"
@@ -49,11 +50,22 @@ async def build_sales_agent(db: AsyncSession, enable_checkpointer: bool = False)
 
     async def agent_node(state: AgentState) -> dict:
         llm = ModelFactory.get_llm(AGENT_CODE).bind_tools(tools)
+        # 只喂本轮上下文窗口（最近一条用户消息之后），历史由 memory 装配兜底，
+        # 避免把会话全部历史 + 工具往返全量重发给 LLM（token 平方级浪费）
         msgs = [
             SystemMessage(SYSTEM_PROMPT + "\n" + state.get("memory_context", "")),
-        ] + state.get("messages", [])
+        ] + round_window(state.get("messages", []))
         resp = await llm.ainvoke(msgs)
-        return {"messages": [resp], "tool_rounds": 1}
+        out = {"messages": [resp], "tool_rounds": 1}
+        # 快照本轮 agent 产出（agent 编码 + 文本）到 agent_outputs，供分段落库。
+        # 仅当有实质文本（非工具调用）时快照；工具调用消息 content 为空，跳过。
+        c = resp.content if hasattr(resp, "content") else ""
+        if isinstance(c, list):
+            c = "".join(str(b.get("text", "")) for b in c
+                        if isinstance(b, dict) and b.get("type") == "text")
+        if c:
+            out["agent_outputs"] = [{"agent": AGENT_CODE, "content": c}]
+        return out
 
     def should_continue(state: AgentState) -> str:
         last = state["messages"][-1]
