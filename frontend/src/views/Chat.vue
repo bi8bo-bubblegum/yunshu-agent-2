@@ -302,6 +302,12 @@ async function decide(approved: boolean) {
     // 恢复后图内还有后续中断：critical 进审批中心 / high 继续即时确认，需要重新弹窗
     if (data?.ok === false && data.payload) {
       const p = data.payload as Record<string, unknown>
+      // 后端整体超时兜底（resume 恢复执行超过限时）：不重弹确认框，提示用户稍后查看
+      if (p.timeout) {
+        toast('执行超时，结果可能不完整，请稍后刷新查看', 'error')
+        await selectConv(convId)
+        return
+      }
       const critical = Boolean(p.approval_id)
       if (critical) {
         // 移除临时空回复气泡，置为待审批状态并开始轮询

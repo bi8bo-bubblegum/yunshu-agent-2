@@ -9,6 +9,7 @@ from app.llm.factory import ModelFactory
 from app.tools.loader import load_tools, load_mcp_tools_by_agent
 from app.agents.state import AgentState
 from app.agents.window import round_window
+from app.agents.llm_stream import stream_llm
 
 SYSTEM_PROMPT = (
     "你是一位资深企业营销策划专家。请结合【记忆上下文】中的个人偏好、历史经验、知识库与企业数据，"
@@ -63,27 +64,14 @@ async def build_marketing_agent(db: AsyncSession, enable_checkpointer: bool = Fa
             SystemMessage(SYSTEM_PROMPT + "\n" + state.get("memory_context", "")),
         ] + round_window(state.get("messages", []))
         # 流式生成：LangGraph 父图 stream_mode="messages" 不穿透编译子图内部，
-        # 子图内 LLM token 只能由本节点主动推送。llm.astream 逐 chunk 产出，
-        # 文本经 config 注入的 SSE 队列实时转发给前端；同时合并 chunks 得到
-        # 完整 AIMessage（含 tool_calls），供 ReAct 循环判断下一步。
-        # LLM 无 astream（如测试 mock）时降级为 ainvoke 一次性生成。
+        # 子图内 LLM token 只能由本节点主动推送。stream_llm 逐 chunk 产出并把文本
+        # 经 config 注入的 SSE 队列实时转发给前端；同时合并 chunks 得到完整 AIMessage
+        # （含 tool_calls）供 ReAct 循环判断下一步。内置超时降级：网关在流中途挂起时
+        # 用已生成内容兜底，不无限阻塞（真实事故：resume 恢复后 agent 生成挂起，
+        # 前端永不返回）。LLM 无 astream（如测试 mock）时降级为 ainvoke 一次性生成。
         sse_queue = ((config or {}).get("configurable") or {}).get("sse_queue")
         if hasattr(llm, "astream"):
-            chunks: list = []
-            async for chunk in llm.astream(msgs):
-                chunks.append(chunk)
-                c = chunk.content
-                if isinstance(c, list):
-                    c = "".join(str(b.get("text", "")) for b in c
-                                if isinstance(b, dict) and b.get("type") == "text")
-                if c and sse_queue is not None:
-                    try:
-                        sse_queue.put_nowait({"event": "token", "content": c})
-                    except Exception:
-                        pass
-            resp = chunks[0]
-            for c in chunks[1:]:
-                resp = resp + c
+            resp = await stream_llm(llm, msgs, sse_queue)
         else:
             resp = await llm.ainvoke(msgs)
         out = {"messages": [resp], "tool_rounds": 1}

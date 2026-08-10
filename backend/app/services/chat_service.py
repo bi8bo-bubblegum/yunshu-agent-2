@@ -27,6 +27,11 @@ logger = logging.getLogger(__name__)
 # 后台记忆沉淀任务管理：持有引用防 GC（与 summary._bg_title_tasks 同模式）
 _bg_mem_tasks: set[asyncio.Task] = set()
 
+# resume/审批恢复执行整体限时。恢复图执行时 agent 内 LLM 已由 stream_llm 超时兜底（60s），
+# 但链路仍可能因多次工具往返/路由超时叠加变长，给恢复执行一个总闸：超时后返回提示
+# 而非无限等待（真实事故：resume 恢复后 agent 生成挂起 >170s，前端永不返回）。
+RESUME_TIMEOUT = 90.0
+
 
 def schedule_memory_postprocess(user_id: str, conv_id: str, dialog: str, trace_id: str) -> None:
     """异步调度记忆沉淀（偏好提取 / 经验提炼 / 摘要滚动），不阻塞 SSE 关键路径。
@@ -241,7 +246,17 @@ class ChatService:
         # 本轮开始前 agent_outputs 长度（interrupted 状态已含本轮 interrupt 前已执行的段落）
         pre_snap = await graph.aget_state(resume_config)
         rl0 = len((pre_snap.values or {}).get("agent_outputs", [])) if pre_snap else 0
-        result = await graph.ainvoke(Command(resume=approved), config=resume_config)
+        try:
+            result = await asyncio.wait_for(
+                graph.ainvoke(Command(resume=approved), config=resume_config),
+                timeout=RESUME_TIMEOUT)
+        except asyncio.TimeoutError:
+            # 恢复执行超时：返回提示让前端有响应，不无限等待。
+            # 图可能仍挂在 agent LLM（wait_for 已取消 invoke 及其子任务），
+            # 但由于 create 等工具纯函数幂等、checkpoint 在节点完成后才写盘，
+            # 下次 resume 从最近完成的 checkpoint 重放，不会重复执行副作用操作。
+            logger.warning("resume 恢复执行超时(%ss)，返回提示", RESUME_TIMEOUT)
+            return {"ok": False, "message": "执行超时，结果可能不完整，请稍后刷新查看", "payload": {"timeout": True}}
         interrupts = result.get("__interrupt__")
         if interrupts:
             # 图内还有后续 interrupt（多级确认），保持挂起

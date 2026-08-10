@@ -1,4 +1,5 @@
 # backend/app/services/approval_service.py
+import asyncio
 import logging
 from datetime import datetime, timezone
 from fastapi import HTTPException
@@ -10,6 +11,11 @@ from app.repositories.user_repo import UserRepository
 from app.traces.handlers import TraceCallbackHandler
 
 logger = logging.getLogger(__name__)
+
+# 审批恢复图执行整体限时：与 ChatService.resume 的 RESUME_TIMEOUT 对齐。
+# 恢复后 agent 内 LLM 已由 stream_llm(60s) 超时兜底，这里给整体执行一个总闸，
+# 防止审批接口因网关挂起无限等待（真实事故：resume 恢复后 agent 生成挂起 >170s）。
+RESUME_TIMEOUT = 90.0
 
 
 class ApprovalService:
@@ -108,10 +114,17 @@ class ApprovalService:
         # 本轮开始前 agent_outputs 长度：审批恢复后按轮切分段落，与 stream_chat 分段落库一致
         pre_snap = await graph.aget_state(config)
         al0 = len((pre_snap.values or {}).get("agent_outputs", [])) if pre_snap else 0
-        result = await graph.ainvoke(
-            Command(resume={"approved": approved, "approval_id": approval_id}),
-            config=config,
-        )
+        try:
+            result = await asyncio.wait_for(
+                graph.ainvoke(
+                    Command(resume={"approved": approved, "approval_id": approval_id}),
+                    config=config,
+                ),
+                timeout=RESUME_TIMEOUT,
+            )
+        except asyncio.TimeoutError:
+            logger.warning("审批恢复图执行超时(90s)，返回提示，图可能仍挂起")
+            return
         # 图内还有后续 interrupt（多级审批），保持挂起
         if result.get("__interrupt__"):
             return
