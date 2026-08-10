@@ -4,6 +4,7 @@ import asyncio
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langchain_core.runnables import RunnableConfig
+from langchain_core.messages import BaseMessage, RemoveMessage
 from psycopg_pool import AsyncConnectionPool
 
 from app.agents.state import AgentState
@@ -23,6 +24,19 @@ from app.traces.collector import collector
 register_builtin_tools(facade)
 
 MAX_ROUTES = 4  # 循环上限，防死循环
+MAX_MESSAGES = 100   # 图内消息超过该长度触发裁剪（必须晚于滚动摘要生成轮次，见 done_node 注释）
+RETAIN_MESSAGES = 60  # 裁剪后保留的消息条数（窗口内完整消息 + 滚动摘要兜底窗口外）
+
+
+def _trim_messages(msgs: list[BaseMessage], max_len: int = MAX_MESSAGES,
+                   retain: int = RETAIN_MESSAGES) -> list[RemoveMessage]:
+    """超长消息列表 → 删除窗口外消息的 RemoveMessage 列表；未超长返回空列表。
+
+    messages 通道已改为 add_messages（自动为无 id 消息分配 id），RemoveMessage
+    按 id 删除窗口外消息，checkpointer 持久化裁剪后的状态，下一轮只带窗口内消息。"""
+    if len(msgs) <= max_len:
+        return []
+    return [RemoveMessage(id=m.id) for m in msgs[: len(msgs) - retain] if m.id]
 
 _graph: object = None  # 懒初始化单例
 _build_lock: asyncio.Lock | None = None
@@ -159,8 +173,16 @@ def build_graph(registry: AgentRegistry, checkpointer=None):
             if c:
                 text = c
                 break
+        # 超长消息裁剪：messages 通道长期只增不减，长对话 token 无限膨胀。
+        # 裁剪依赖滚动摘要兜底窗口外内容：chat_service 收尾时 maybe_roll_summary
+        # 在 DB 消息满 20 条（约 10 轮）即生成 conv.summary，并经 memory 装配注入；
+        # 而 MAX_MESSAGES=100 对应至少 13~50 轮，裁剪必然发生在摘要已生成之后。
+        removals = _trim_messages(msgs)
         # 回退到 agent 节点直接写入的 agent_response（对齐文档 5236 行）
-        return {"agent_response": text or state.get("agent_response", "") or "已完成"}
+        out = {"agent_response": text or state.get("agent_response", "") or "已完成"}
+        if removals:
+            out["messages"] = removals  # add_messages 按 id 删除窗口外消息
+        return out
 
     g.add_node("supervisor", supervisor_node)
     for code in registry.list():
