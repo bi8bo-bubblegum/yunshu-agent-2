@@ -175,7 +175,7 @@ def build_graph(registry: AgentRegistry, checkpointer=None):
                 break
         # 超长消息裁剪：messages 通道长期只增不减，长对话 token 无限膨胀。
         # 裁剪依赖滚动摘要兜底窗口外内容：chat_service 收尾时 maybe_roll_summary
-        # 在 DB 消息满 20 条（约 10 轮）即生成 conv.summary，并经 memory 装配注入；
+        # 在 DB 消息满 24 条（约 12 轮）即生成 conv.summary，并经 memory 装配注入；
         # 而 MAX_MESSAGES=100 对应至少 13~50 轮，裁剪必然发生在摘要已生成之后。
         removals = _trim_messages(msgs)
         # 回退到 agent 节点直接写入的 agent_response（对齐文档 5236 行）

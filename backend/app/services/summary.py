@@ -95,14 +95,20 @@ async def summarize_text(messages_text: str) -> str:
     )
     return result.summary
 
-async def maybe_roll_summary(db: AsyncSession, conversation_id: str, force: bool = False, max_messages: int = 20) -> None:
+async def maybe_roll_summary(db: AsyncSession, conversation_id: str, force: bool = False, max_messages: int = 24) -> None:
+    """滚动摘要：会话消息数达 max_messages（24 条 ≈ 12 轮）后开始，此后每轮滚动刷新。
+
+    窗口与阈值对齐（24 条）：首次触发时正好覆盖已积累的全部消息，避免旧实现
+    「阈值 20 / 窗口 10」造成的覆盖空洞——最早一批消息永远进不了摘要，图内消息
+    裁剪后彻底丢失。12 轮开始也远早于图内裁剪（MAX_MESSAGES=100），摘要必然
+    先于裁剪生成，窗口外历史始终有摘要兜底。"""
     conv_repo = ConversationRepository(db)
     msg_repo = MessageRepository(db)
     conv = await conv_repo.get(conversation_id)
     count = await msg_repo.count(conversation_id=conversation_id)
     if not force and count < max_messages:
         return
-    recent = await msg_repo.list_recent(conversation_id, 10)
+    recent = await msg_repo.list_recent(conversation_id, max_messages)
     text = "\n".join(f"{m.role}: {m.content}" for m in reversed(recent))
     old_summary = f"已有摘要：{conv.summary}\n" if conv.summary else ""
     try:
