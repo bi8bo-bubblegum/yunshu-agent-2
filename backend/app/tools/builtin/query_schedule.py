@@ -1,3 +1,4 @@
+
 from pydantic import BaseModel, Field
 
 class QueryScheduleArgs(BaseModel):
@@ -5,10 +6,14 @@ class QueryScheduleArgs(BaseModel):
     date: str = Field(description="查询日期，格式 YYYY-MM-DD。必填。")
 
 DESCRIPTION = (
-    "查询指定部门在某天的排班情况，返回班次列表，每项含 shift_id（班次ID）、"
-    "employee（员工）、time（时间段）、role（班次类型）、department（部门）。"
-    "用于排班诊断与调度优化，进行任何排班调整前必须先查询真实排班。"
-    "注意：department 必填（如 仓储部/配送部/客服部），date 必填且格式为 YYYY-MM-DD。"
+    "查询指定部门在指定日期的排班情况，返回班次列表（shift_id、employee、time、role、department），"
+    "用于排班诊断与调度优化。\n"
+    "【何时调用】用户询问某部门某天的人员排班/班次情况，或准备调整排班前需要先查看当前排班时。\n"
+    "【何时不调用】用户询问销售/营销/订单等其他领域问题时；"
+    "用户未给出部门或日期时（department、date 均为必填）。\n"
+    "【调用示例】\n"
+    "- 「仓储部 2026-08-10 怎么排班的」→ department=仓储部, date=2026-08-10\n"
+    "- 「看看客服部今天的班次」→ department=客服部, date=当天日期（YYYY-MM-DD）"
 )
 
 def query_schedule(department: str, date: str) -> list[dict]:
