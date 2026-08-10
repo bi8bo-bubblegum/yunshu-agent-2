@@ -185,14 +185,18 @@ class ChatService:
         # 或 agent 未产出快照）时 segments 为空，避免把全部历史 agent_outputs 重复落库
         # （真实事故：无产出轮次把前面所有 step 段落重放一遍，前端刷新后中间消息重复/错乱）。
         segments = outputs[l0:] if l0 is not None and l0 < len(outputs) else []
+        # 过滤无实质内容的段落：LLM 输出空白/换行（如 '\n\n'）时不是有效产出，
+        # 落库会生成空白气泡（真实事故：scheduling 输出 '\n\n'，final 被覆盖成空白，
+        # 实质内容全在 step 段落里，前端外部气泡空白、内容全在「查看执行步骤」）。
+        segments = [s for s in segments if (s.get("content") or "").strip()]
         if segments:
             last_i = len(segments) - 1
             for i, seg in enumerate(segments):
                 content = seg.get("content") or ""
-                if not content:
-                    continue
                 if i == last_i:
-                    content = text  # 最终段用 agent_response（完整文本）覆盖
+                    # 最终段用 agent_response（权威完整文本）覆盖；agent_response 空白时
+                    # 保留段落自身内容，避免 final 被覆盖成空内容（真实事故）
+                    content = text or content
                 await self.message_repo.add(Message(
                     conversation_id=conv_id, role="assistant", content=content,
                     metadata_={"agent": seg.get("agent", ""),
@@ -250,14 +254,15 @@ class ChatService:
         # 只取恢复执行新增的段落 [rl0:]；rl0 == len(outputs)（恢复后无新增产出）时为空，
         # 避免把历史 agent_outputs 重复落库（与 stream_chat 一致，防止 step 段落重复）。
         segments = outputs[rl0:] if rl0 is not None and rl0 < len(outputs) else []
+        # 过滤无实质内容的段落：LLM 输出空白/换行时不是有效产出（与 stream_chat 一致）。
+        segments = [s for s in segments if (s.get("content") or "").strip()]
         if segments:
             last_i = len(segments) - 1
             for i, seg in enumerate(segments):
                 content = seg.get("content") or ""
-                if not content:
-                    continue
                 if i == last_i:
-                    content = text
+                    # 最终段用 agent_response 覆盖；agent_response 空白时保留段落自身内容
+                    content = text or content
                 await self.message_repo.add(Message(
                     conversation_id=conv_id, role="assistant", content=content,
                     metadata_={"agent": seg.get("agent", ""),

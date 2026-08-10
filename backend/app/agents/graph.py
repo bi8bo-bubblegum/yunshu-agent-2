@@ -137,13 +137,15 @@ def build_graph(registry: AgentRegistry, checkpointer=None):
         # 取最后一条有实质内容的 assistant 文本输出作为"上一轮 agent 输出"。
         # 不能直接用 msgs[-1]：它可能是工具调用消息（content 为空）、工具结果、
         # 或用户消息，用这些做路由上下文会让 supervisor 误判、复读用户输入。
+        # 必须过滤纯空白文本（如 '\n\n'）：ReAct 循环里 LLM 偶发输出空白过渡文本，
+        # 若被当作上一轮输出，supervisor 会基于空白文本路由、误判意图。
         prev_text = ""
         for m in reversed(msgs):
             c = m.content if hasattr(m, "content") else ""
             if isinstance(c, list):
                 c = "".join(str(b.get("text", "")) for b in c
                             if isinstance(b, dict) and b.get("type") == "text")
-            if getattr(m, "type", "") == "ai" and c:
+            if getattr(m, "type", "") == "ai" and c and c.strip():
                 prev_text = c
                 break
         if prev_text:
@@ -181,6 +183,10 @@ def build_graph(registry: AgentRegistry, checkpointer=None):
         # content 非空，若不加类型判断会被误当作最终回复，导致 agent 复读用户
         # 消息 / 复读工具结果（真实事故：route_history 满时 router 强制 done、
         # 本轮 agent 未执行，messages 最后一条恰好是用户消息）。
+        # 必须过滤纯空白文本：ReAct 循环里 LLM 偶发输出 '\n\n' 之类空白过渡文本，
+        # 若被当作最终回复，agent_response 为空白，落库 final 段被覆盖成空内容，
+        # 前端气泡空白（真实事故：marketing→scheduling 协作，scheduling 输出 '\n\n'，
+        # final 段被覆盖成空白，实质内容全在 step 段落里）。
         text = ""
         for m in reversed(msgs):
             if getattr(m, "type", "") != "ai":
@@ -189,7 +195,7 @@ def build_graph(registry: AgentRegistry, checkpointer=None):
             if isinstance(c, list):
                 c = "".join(str(b.get("text", "")) for b in c
                             if isinstance(b, dict) and b.get("type") == "text")
-            if c:
+            if c and c.strip():
                 text = c
                 break
         # 超长消息裁剪：messages 通道长期只增不减，长对话 token 无限膨胀。

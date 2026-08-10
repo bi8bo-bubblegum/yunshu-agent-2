@@ -120,14 +120,17 @@ class ApprovalService:
         # 只取审批恢复新增的段落 [al0:]；al0 == len(outputs)（恢复后无新增产出）时为空，
         # 避免把历史 agent_outputs 重复落库（与 stream_chat 一致，防止 step 段落重复）。
         segments = outputs[al0:] if al0 is not None and al0 < len(outputs) else []
+        # 过滤无实质内容的段落：LLM 输出空白/换行（如 '\n\n'）时不是有效产出，
+        # 落库会生成空白气泡（真实事故：scheduling 输出 '\n\n' 被当段落落库）。
+        segments = [s for s in segments if (s.get("content") or "").strip()]
         if segments:
             last_i = len(segments) - 1
             for i, seg in enumerate(segments):
                 content = seg.get("content") or ""
-                if not content:
-                    continue
                 if i == last_i:
-                    content = text
+                    # 最终段用 agent_response（权威完整文本）覆盖；agent_response 空白时
+                    # 保留段落自身内容，避免 final 被覆盖成空内容（真实事故）
+                    content = text or content
                 await message_repo.add(Message(
                     conversation_id=trace.conversation_id, role="assistant", content=content,
                     metadata_={"agent": seg.get("agent", ""),
