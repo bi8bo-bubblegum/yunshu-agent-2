@@ -29,16 +29,17 @@ async def test_route_decision_parses(monkeypatch):
     assert msgs[1].content == "策划国庆营销方案"
 
 @pytest.mark.asyncio
-async def test_route_decision_done(monkeypatch):
-    """验证 supervisor 可返回 done 终止循环。"""
+async def test_route_decision_lies_done_falls_back(monkeypatch):
+    """LLM 返回 done（不应被候选列表接受）时，fuzzy_match 失败后关键词兜底。"""
     class FakeLLM:
         def with_structured_output(self, schema):
             return self
         async def ainvoke(self, prompt):
             return RouteDecision(agent="done", reason="任务已完成", confidence=0.95)
     monkeypatch.setattr("app.agents.supervisor.ModelFactory.get_llm", lambda k: FakeLLM())
-    decision = await route_decision("已完成", ["marketing", "sales_analysis", "scheduling", "done"])
-    assert decision["agent"] == "done"
+    decision = await route_decision("帮我做个国庆营销方案", ["marketing", "sales_analysis", "scheduling"])
+    # LLM 返回 done，候选列表不含 done → _fuzzy_match 失败 → _infer_agent 兜底到 marketing
+    assert decision["agent"] == "marketing"
 
 
 class _FailingLLM:
@@ -80,8 +81,7 @@ async def test_route_decision_fuzzy_match(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_route_decision_invalid_code_no_keyword_done(monkeypatch):
-    """LLM 返回无效代码且消息无领域关键词时，兜底为 done。"""
+    """LLM 返回无效代码且消息无领域关键词时，关键词兜底仍返回 done。"""
     monkeypatch.setattr("app.agents.supervisor.ModelFactory.get_llm", lambda k: _InvalidCodeLLM("unknown_agent"))
-    decision = await route_decision("随便聊聊",
-                                    ["marketing", "sales_analysis", "scheduling", "done"])
+    decision = await route_decision("随便聊聊", ["marketing", "sales_analysis", "scheduling"])
     assert decision["agent"] == "done"

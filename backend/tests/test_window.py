@@ -1,14 +1,17 @@
 # backend/tests/test_window.py
-"""回归：子图 agent 只喂「最近 N 轮上下文窗口」（优化项 3 演进）。
+"""回归：子图 agent 的上下文窗口（最近 max_rounds=10 轮）。
 
 曾长期存在的问题：agent_node 把 messages 全量喂给 LLM——整个会话所有轮次的
 user/assistant 与每轮工具往返都重复重发。ReAct 多轮后一条消息塞了几十条
-tool message，token 按轮次平方级浪费，且历史内容与 memory 装配注入的
-滚动摘要/经验/知识重叠。
+tool message，token 按轮次平方级浪费。
 
-第一版修复只保留「最近一条用户消息之后」的窗口，导致多轮失忆：第 2 轮 agent
-看不到第 1 轮的方案与已查工具数据，被迫重复查询工具、前后不一致（真实事故）。
-演进为保留最近 max_rounds 轮（默认 2 轮），更早历史由 memory 装配兜底。
+修复演进：
+1. 第一版只保留「最近一条用户消息之后」→ 多轮失忆（真实事故：第 2 轮看不到第 1
+   轮方案，被迫重复查询工具）
+2. 演进为 max_rounds=2 → agent 能看到上一轮方案与查询结果，不会多轮失忆
+3. 提升为 max_rounds=10 → 保留最近 10 轮完整上下文，agent 能引用更早的对话
+4. 更早历史由 memory 装配（滚动摘要+经验+知识库）兜底
+5. 超出窗口范围的消息由图内 MAX_MESSAGES=100 的裁剪兜底，不会被无限累积
 """
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
@@ -16,8 +19,8 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from app.agents.window import round_window
 
 
-def test_round_window_keeps_recent_two_rounds():
-    """三轮历史：窗口保留最近 2 轮（从倒数第 2 条 human 起），更早的第 1 轮裁掉。"""
+def test_round_window_keeps_recent_rounds():
+    """三轮历史：默认 max_rounds=10，3 轮全在窗口内，全部保留。"""
     msgs = [
         HumanMessage(content="第一轮"),
         AIMessage(content="第一轮回复"),
@@ -28,13 +31,13 @@ def test_round_window_keeps_recent_two_rounds():
         AIMessage(content="第三轮回复"),
     ]
     win = round_window(msgs)
-    # 最近 2 条 human 是第二轮、第三轮，窗口从第二轮 human 起保留
-    assert win == msgs[3:]
-    assert [m.content for m in win] == ["第二轮", "第二轮回复", "第三轮", "第三轮回复"]
+    assert win == msgs
+    assert [m.content for m in win] == ["第一轮", "第一轮回复", "第一轮工具",
+                                         "第二轮", "第二轮回复", "第三轮", "第三轮回复"]
 
 
-def test_round_window_two_rounds_keeps_all():
-    """恰好 2 轮：全部保留（都在最近 2 轮窗口内）。"""
+def test_round_window_two_rounds_keeps_both():
+    """恰好 2 轮：窗口保留全部（两轮都在窗口内）。"""
     msgs = [
         HumanMessage(content="第一轮"),
         AIMessage(content="第一轮回复"),
@@ -63,8 +66,8 @@ def test_round_window_no_human_returns_all():
     assert round_window(msgs) == msgs
 
 
-def test_round_window_max_rounds_one_is_legacy():
-    """max_rounds=1 退化为旧行为：只保留最近一条 human 之后的窗口。"""
+def test_round_window_max_rounds_one_locks_old_behavior():
+    """max_rounds=1：锁定旧行为，只保留最近一条 human 之后的窗口。"""
     msgs = [
         HumanMessage(content="第一轮"),
         AIMessage(content="第一轮回复"),
@@ -72,3 +75,20 @@ def test_round_window_max_rounds_one_is_legacy():
         AIMessage(content="第二轮回复"),
     ]
     assert round_window(msgs, max_rounds=1) == msgs[2:]
+
+
+def test_round_window_default_keeps_all_under_10():
+    """默认 max_rounds=10：10 轮以内全保留。"""
+    msgs = [HumanMessage(content=f"第{i}轮") for i in range(1, 11)]
+    win = round_window(msgs)
+    assert win == msgs
+
+
+def test_round_window_truncates_beyond_10():
+    """超过 10 轮时裁掉最早的消息，只保留最近 10 轮。"""
+    msgs = [HumanMessage(content=f"第{i}轮") for i in range(1, 16)]  # 15 轮
+    win = round_window(msgs)
+    # 最近 10 轮 = 从第 6 轮起（16 - 10 = 6）
+    assert len(win) == 10
+    assert win[0].content == "第6轮"
+    assert win[-1].content == "第15轮"

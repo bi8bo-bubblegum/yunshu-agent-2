@@ -26,7 +26,7 @@ register_builtin_tools(facade)
 
 logger = logging.getLogger(__name__)
 
-MAX_ROUTES = 4  # 循环上限，防死循环
+MAX_ROUTES = 4  # 循环上限，防死循环（已废弃：agent→done 不再二次路由，每轮只调一次 supervisor）
 MAX_MESSAGES = 100   # 图内消息超过该长度触发裁剪（必须晚于滚动摘要生成轮次，见 done_node 注释）
 RETAIN_MESSAGES = 60  # 裁剪后保留的消息条数（窗口内完整消息 + 滚动摘要兜底窗口外）
 ROUTE_TIMEOUT = 15.0  # 路由决策 LLM 限时：网关挂起时快速降级关键词兜底，避免 SSE 在 route 前长时间无事件
@@ -131,7 +131,9 @@ def build_graph(registry: AgentRegistry, checkpointer=None):
     g = StateGraph(AgentState)
 
     async def supervisor_node(state: AgentState, config: RunnableConfig = None) -> dict:
-        agents_with_done = registry.list() + ["done"]
+        # 候选列表不含 done：supervisor 只负责意图路由到具体 agent，
+        # done 由 agent 执行完后的 done_node 处理，不让 supervisor 做 done 判断。
+        agents = registry.list()
         context = state.get("user_message", "")
         msgs = state.get("messages", [])
         # 取最后一条有实质内容的 assistant 文本输出作为"上一轮 agent 输出"。
@@ -154,17 +156,10 @@ def build_graph(registry: AgentRegistry, checkpointer=None):
         #（真实事故：start 0.7s 到达后 route 80s+ 无事件，前端一直转圈）
         try:
             decision = await asyncio.wait_for(
-                route_decision(context, agents_with_done), timeout=ROUTE_TIMEOUT)
+                route_decision(context, agents), timeout=ROUTE_TIMEOUT)
         except asyncio.TimeoutError:
             logger.warning("路由决策超时(%ss)，降级关键词兜底", ROUTE_TIMEOUT)
-            decision = fallback_decision(context, agents_with_done)
-        # 同 agent 连续路由守卫：LLM 结构化输出偶发自相矛盾（reason 说该 done
-        # 但 agent 填旧值），连续路由同一 agent 不会产生新工作（trace 实证 4 次
-        # marketing 输出完全一样），强制结束。不影响跨轮：新轮 history[-1] 是
-        # 上一轮的 done，与新决策的 agent 不同，不触发守卫。
-        history = state.get("route_history", [])
-        if history and decision["agent"] == history[-1] and decision["agent"] != "done":
-            decision = {"agent": "done", "reason": "同一 agent 连续路由，强制结束", "confidence": 1.0}
+            decision = fallback_decision(context, agents)
         # 每次路由决策即时留痕（interrupt 挂起时也能看到完整路由轨迹）
         trace_id = state.get("trace_id")
         if trace_id:
@@ -177,8 +172,6 @@ def build_graph(registry: AgentRegistry, checkpointer=None):
 
     def router(state: AgentState) -> str:
         agent = state.get("pending_agent", "done")
-        if len(state.get("route_history", [])) >= MAX_ROUTES:
-            return "done"
         if agent == "done":
             return "done"
         return agent if agent in registry.list() else "done"
