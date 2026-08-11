@@ -7,6 +7,9 @@ export type SSEEvent = {
   trace_id?: string
   tool?: string
   args?: Record<string, unknown>
+  run_id?: string
+  result?: unknown
+  error?: boolean
   reason?: string
   approval_id?: string
   stage?: string

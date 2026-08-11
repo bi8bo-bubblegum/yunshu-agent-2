@@ -15,13 +15,24 @@ export interface Conversation {
   current_trace_id?: string | null
 }
 
+// 结构化工具卡片元数据（role='tool' 消息）：tool/args/result/status 供前端渲染卡片
+export interface MessageMetadata {
+  agent?: string
+  segment?: 'final' | 'step'
+  kind?: 'tool'
+  tool?: string
+  args?: unknown
+  result?: unknown
+  status?: 'success' | 'error' | 'running'
+}
+
 export interface Message {
   id: string
-  role: 'user' | 'assistant'
+  role: 'user' | 'assistant' | 'tool'
   content: string
   created_at?: string
-  // 分段落库元数据：{agent: 编码, segment: 'final' | 'step'}；历史/单 agent 消息为 undefined
-  metadata?: { agent?: string; segment?: 'final' | 'step' } | null
+  // 分段落库元数据：{agent, segment} 助手消息；{kind:'tool', tool, args, result, status} 工具卡片
+  metadata?: MessageMetadata | null
 }
 
 export interface DocumentItem {

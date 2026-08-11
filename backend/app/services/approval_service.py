@@ -8,7 +8,9 @@ from app.models.trace import Approval
 from app.repositories.trace_repo import ApprovalRepository, TraceRepository
 from app.repositories.experience_repo import ExperienceRepository
 from app.repositories.user_repo import UserRepository
-from app.traces.handlers import TraceCallbackHandler
+from app.services.tool_cards import tool_message_rows
+from app.traces.handlers import (StreamEventHandler, TraceCallbackHandler,
+                                 acquire_resume_recorder, release_resume_recorder)
 from app.core.database import SessionLocal
 
 logger = logging.getLogger(__name__)
@@ -142,10 +144,14 @@ async def _resume_graph_impl(db, approval_id: str, approved: bool, trace_id: str
         return
     message_repo = MessageRepository(db)
     conv_repo = ConversationRepository(db)
+    # 审批路径无前端 SSE：补挂 StreamEventHandler(None) 只收集工具调用，终态后落库工具卡片。
+    # recorder 按 trace_id 跨 resume/审批共享（多级 interrupt 时中间工具卡片不丢失），终态后 release
+    resume_recorder = acquire_resume_recorder(trace.id)
     config = {"configurable": {"thread_id": trace.conversation_id,
                                "trace_id": trace.id,
                                "requester_id": trace.user_id},
-              "callbacks": [TraceCallbackHandler(trace.id)]}
+              "callbacks": [TraceCallbackHandler(trace.id),
+                            StreamEventHandler(None, trace.id, recorder=resume_recorder)]}
     graph = await get_graph()
     # 本轮开始前 agent_outputs 长度：审批恢复后按轮切分段落，与 stream_chat 分段落库一致
     pre_snap = await graph.aget_state(config)
@@ -165,6 +171,9 @@ async def _resume_graph_impl(db, approval_id: str, approved: bool, trace_id: str
     if result.get("__interrupt__"):
         return
     text = result.get("agent_response", "")
+    # 工具卡片落库：审批恢复期间的工具调用转成 tool 消息，随下方 trace_repo.commit() 同事务提交
+    for tm in tool_message_rows(trace.conversation_id, resume_recorder):
+        await message_repo.add(tm)
     outputs = result.get("agent_outputs", []) or []
     # 只取审批恢复新增的段落 [al0:]；al0 == len(outputs)（恢复后无新增产出）时为空，
     # 避免把历史 agent_outputs 重复落库（与 stream_chat 一致，防止 step 段落重复）。
@@ -191,6 +200,8 @@ async def _resume_graph_impl(db, approval_id: str, approved: bool, trace_id: str
     trace.status = "completed"
     trace.supervisor_routes = result.get("route_history", [])
     await trace_repo.commit()
+    # 终态落库完成，释放共享 recorder（多级 interrupt 场景下 create/publish 已全部收集）
+    release_resume_recorder(trace.id)
     conv = await conv_repo.get(trace.conversation_id)
     if conv:
         conv.current_trace_id = trace.id

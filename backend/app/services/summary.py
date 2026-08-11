@@ -109,6 +109,8 @@ async def maybe_roll_summary(db: AsyncSession, conversation_id: str, force: bool
     if not force and count < max_messages:
         return
     recent = await msg_repo.list_recent(conversation_id, max_messages)
+    # 过滤工具卡片消息（role="tool"，content 仅为工具名），避免卡片噪音污染滚动摘要
+    recent = [m for m in recent if m.role != "tool"]
     text = "\n".join(f"{m.role}: {m.content}" for m in reversed(recent))
     old_summary = f"已有摘要：{conv.summary}\n" if conv.summary else ""
     try:

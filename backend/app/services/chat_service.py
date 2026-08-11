@@ -19,8 +19,11 @@ from app.repositories.user_repo import UserRepository
 from app.services.experience_svc import distill_experience, save_personal_experience
 from app.services.preference_svc import maybe_extract_batch
 from app.services.summary import maybe_roll_summary, schedule_title_generation
+from app.services.tool_cards import tool_message_rows
 from app.traces.collector import collector
-from app.traces.handlers import StreamEventHandler, TraceCallbackHandler
+from app.traces.handlers import (StreamEventHandler, ToolCallRecorder,
+                                 TraceCallbackHandler, acquire_resume_recorder,
+                                 release_resume_recorder)
 
 logger = logging.getLogger(__name__)
 
@@ -110,10 +113,14 @@ class ChatService:
         # 主循环只从 queue 实时读取，避免「astream 无事件产出时队列堆积、
         # 子图结束后一次性刷出」导致的非流式观感。
         queue: asyncio.Queue = asyncio.Queue(maxsize=500)
+        # 结构化工具卡片收集器：本轮回调记录工具调用（start/end 按 run_id 配对），
+        # 图到达终态后由 tool_message_rows 转成 tool 消息一次性落库
+        tool_recorder = ToolCallRecorder()
         config = {
             "configurable": {"thread_id": conv_id, "trace_id": trace.id,
                              "requester_id": user_id, "sse_queue": queue},
-            "callbacks": [StreamEventHandler(queue, trace.id), TraceCallbackHandler(trace.id)],
+            "callbacks": [StreamEventHandler(queue, trace.id, recorder=tool_recorder),
+                          TraceCallbackHandler(trace.id)],
         }
         inputs = {
             "conversation_id": conv_id, "user_id": user_id,
@@ -182,6 +189,9 @@ class ChatService:
             yield json.dumps({"event": "confirm_required", "payload": payload}, ensure_ascii=False)
             return
         text = values.get("agent_response", "")
+        # 工具卡片落库：本轮回调收集的工具调用转成 tool 消息，随下方段落 commit 同事务提交
+        for tm in tool_message_rows(conv_id, tool_recorder):
+            await self.message_repo.add(tm)
         # 助手消息落库（分段落库）：本轮各 agent 产出各存一条 assistant（metadata 标记 agent/段位），
         # 最后一段为 final（完整最终文本，用 agent_response 覆盖保证）。单 agent 退化为 1 条，
         # 与旧行为完全一致；多 agent（如 marketing→sales）时中间产出不再丢失（方案 B）。
@@ -237,12 +247,16 @@ class ChatService:
         trace = await self.trace_repo.get(conv.current_trace_id) if conv.current_trace_id else None
         from langgraph.types import Command
         graph = await get_graph()
+        # 恢复路径无前端 SSE（前端靠轮询拿 DB 新消息）：补挂 StreamEventHandler(None) 只收集。
+        # recorder 按 trace_id 跨 resume/审批共享（多级 interrupt 时中间工具卡片不丢失），终态后 release
+        resume_recorder = acquire_resume_recorder(trace.id if trace else "")
         resume_config = {"configurable": {
             "thread_id": conv_id,
             "trace_id": trace.id if trace else "",
             "requester_id": user_id,
         },
-            "callbacks": [TraceCallbackHandler(trace.id if trace else "")]}
+            "callbacks": [TraceCallbackHandler(trace.id if trace else ""),
+                          StreamEventHandler(None, trace.id if trace else "", recorder=resume_recorder)]}
         # 本轮开始前 agent_outputs 长度（interrupted 状态已含本轮 interrupt 前已执行的段落）
         pre_snap = await graph.aget_state(resume_config)
         rl0 = len((pre_snap.values or {}).get("agent_outputs", [])) if pre_snap else 0
@@ -264,6 +278,9 @@ class ChatService:
             payload = getattr(first, "value", first)
             return {"ok": False, "message": "仍有待确认的操作", "payload": payload}
         text = result.get("agent_response", "")
+        # 工具卡片落库：resume 恢复执行期间的工具调用转成 tool 消息，随段落 commit 同事务提交
+        for tm in tool_message_rows(conv_id, resume_recorder):
+            await self.message_repo.add(tm)
         # 分段落库（与 stream_chat 一致，方案 B）：interrupt 前已执行的段落 + 恢复后段落
         outputs = result.get("agent_outputs", []) or []
         # 只取恢复执行新增的段落 [rl0:]；rl0 == len(outputs)（恢复后无新增产出）时为空，
@@ -287,6 +304,8 @@ class ChatService:
         else:
             await self.message_repo.add(Message(conversation_id=conv_id, role="assistant", content=text))
             await self.message_repo.commit()
+        # 终态落库完成，释放共享 recorder（多级 interrupt 场景下 create/publish 已全部收集）
+        release_resume_recorder(trace.id if trace else "")
         trace = await self.trace_repo.get(result.get("trace_id", ""))
         if not trace:
             from app.repositories.trace_repo import TraceRepository

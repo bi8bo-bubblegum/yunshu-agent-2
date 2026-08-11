@@ -140,23 +140,86 @@ function agentName(code: string) {
 // 展开/收起的执行过程折叠：key = final 段落的消息 id
 const expandedSteps = ref<Set<string>>(new Set())
 
+// ---- 结构化工具卡片 ----
+// 流式实时卡片：SSE tool_start/tool_end 按 run_id 配对更新；终态落库后由 DB tool 消息重建
+interface LiveToolCard {
+  run: string
+  tool: string
+  args: unknown
+  result?: unknown
+  status: 'running' | 'success' | 'error'
+}
+interface ToolCardData {
+  tool: string
+  args: unknown
+  result?: unknown
+  status: 'running' | 'success' | 'error'
+}
+const streamTools = ref<LiveToolCard[]>([])
+// 流式占位（stream-buf）气泡展示的实时卡片；落库后 displayMessages 用 DB tool 消息重建
+const liveToolCards = computed<ToolCardData[]>(() =>
+  streamTools.value.map(t => ({ tool: t.tool, args: t.args, result: t.result, status: t.status })),
+)
+const expandedTools = ref<Set<string>>(new Set())
+// 内置工具中文名/图标映射（未知工具兜底 🔧）
+const TOOL_NAMES: Record<string, string> = {
+  query_marketing_campaigns: '查询营销活动', create_marketing_campaign: '创建营销活动',
+  publish_campaign: '发布活动', query_sales_data: '查询销售数据', delete_order: '删除订单',
+  query_schedule: '查询排班', adjust_schedule: '调整排班', search_knowledge: '检索知识库',
+}
+const TOOL_ICONS: Record<string, string> = {
+  query_marketing_campaigns: '📢', create_marketing_campaign: '🛠️', publish_campaign: '🚀',
+  query_sales_data: '📊', delete_order: '🗑️', query_schedule: '📅', adjust_schedule: '🔁',
+  search_knowledge: '📚',
+}
+function toolName(t: string) { return TOOL_NAMES[t] ?? t }
+function toolIcon(t: string) { return TOOL_ICONS[t] ?? '🔧' }
+function statusLabel(s: string) { return s === 'running' ? '执行中' : s === 'error' ? '失败' : '成功' }
+function statusClass(s: string) { return s === 'running' ? 'tag-blue' : s === 'error' ? 'tag-red' : 'tag-green' }
+function toggleTool(key: string) {
+  const s = new Set(expandedTools.value)
+  if (s.has(key)) s.delete(key)
+  else s.add(key)
+  expandedTools.value = s
+}
+function fmtValue(v: unknown) {
+  if (v === null || v === undefined) return ''
+  if (typeof v === 'string') return v
+  try { return JSON.stringify(v, null, 2) } catch { return String(v) }
+}
+
 type RenderItem =
   | { kind: 'user'; m: Message }
-  | { kind: 'assistant'; steps: Message[]; final: Message }
+  | { kind: 'assistant'; steps: Message[]; final: Message; tools: ToolCardData[] }
 
-// 把「step 段落」（中间 agent 产出）归入其后紧跟的「final 段落」（最终答案）：
-// 同一轮的 agent 中间产出折叠展示，气泡默认只显示最终答案（方案 B）。
+// 把「step 段落」（中间 agent 产出）与「tool 卡片」归入其后紧跟的「final 段落」：
+// 同一轮的中间产出折叠展示，工具卡片与正文混排在助手气泡内（方案 B）。
 const displayMessages = computed<RenderItem[]>(() => {
   const out: RenderItem[] = []
   let pendingSteps: Message[] = []
+  let pendingTools: ToolCardData[] = []
   for (const m of messages.value) {
     if (m.role === 'user') {
       out.push({ kind: 'user', m })
     } else if (m.metadata?.segment === 'step') {
       pendingSteps.push(m)
-    } else {
-      out.push({ kind: 'assistant', steps: pendingSteps, final: m })
+    } else if (m.metadata?.kind === 'tool') {
+      // 工具卡片：归入其后紧跟的 final 段落；终态落库的 tool 消息 status 仅 success/error
+      pendingTools.push({
+        tool: m.metadata.tool ?? '未知工具',
+        args: m.metadata.args,
+        result: m.metadata.result,
+        status: m.metadata.status === 'error' ? 'error' : 'success',
+      })
+    } else if (m.id === 'stream-buf') {
+      // 流式占位气泡：合并实时 SSE 卡片（liveToolCards），流式结束后由 refreshFromDb 重建
+      out.push({ kind: 'assistant', steps: pendingSteps, final: m, tools: pendingTools.concat(liveToolCards.value) })
       pendingSteps = []
+      pendingTools = []
+    } else {
+      out.push({ kind: 'assistant', steps: pendingSteps, final: m, tools: pendingTools })
+      pendingSteps = []
+      pendingTools = []
     }
   }
   return out
@@ -199,6 +262,7 @@ async function send() {
   streamConv.value = currentId.value
   streamBuf.value = '⏳ 正在思考…'
   answerStarted = false
+  streamTools.value = []  // 上一轮的实时工具卡片（终态落库后由 DB 消息重建，不再残留）
   // 清理残留的流式缓冲气泡：若上一轮异常中断未做 DB 刷新，列表里可能还留着
   // 旧的 id='stream-buf'，与本次新 push 的重复，导致 renderStreamText 更新错
   // 对象（上一条回复被本轮回复覆盖修改）。这里统一移除旧的，只保留一条 stream-buf。
@@ -222,9 +286,31 @@ async function send() {
       else if (e.event === 'route') {
         streamLine(`🧭 已路由到 ${agentName(String(e.agent ?? ''))}`)
       } else if (e.event === 'tool_start') {
-        streamLine(`🔧 调用 ${String(e.tool ?? '')}`)
+        // 结构化工具卡片：清除"思考中"占位（有工具调用说明已产出实质动作），
+        // 推入实时卡片（running），tool_end 按 run_id 配对更新为 success/error
+        if (streamBuf.value === '⏳ 正在思考…') streamBuf.value = ''
+        streamTools.value.push({
+          run: String(e.run_id ?? ''),
+          tool: String(e.tool ?? '未知工具'),
+          args: e.args,
+          status: 'running',
+        })
+        renderStreamText()
       } else if (e.event === 'tool_end') {
-        streamLine(`✅ ${String(e.tool ?? '')} 完成`)
+        const run = String(e.run_id ?? '')
+        const idx = run
+          ? streamTools.value.findIndex(t => t.run === run)
+          : streamTools.value.length - 1
+        if (idx >= 0) {
+          streamTools.value[idx].status = e.error ? 'error' : 'success'
+          streamTools.value[idx].result = e.result
+        } else {
+          // 未找到（run_id 缺失且无 running）：补一条完成卡片
+          streamTools.value.push({
+            run, tool: String(e.tool ?? '未知工具'), args: undefined,
+            result: e.result, status: e.error ? 'error' : 'success',
+          })
+        }
       } else if (e.event === 'answer') {
         // token 已流式输出时，answer 是完整文本的冗余副本，跳过避免重复；
         // 仅在没有任何 token（非流式模型/异常）时用其填充
@@ -280,7 +366,9 @@ async function send() {
     // 流式正常产生回复后，用 DB 真实消息替换本地缓冲气泡（stream-buf）。
     // 若残留 stream-buf，下一次发送会因重复 id 覆盖修改上一条回复。
     // 审批挂起（critical/high）时后端回复尚未落库，保留现场等 decide 后刷新。
-    if (currentId.value && currentId.value === targetId && !pendingApproval.value && answerStarted) {
+    // 工具跑了但无 token 文本（如纯查询后未输出）也需刷新，让 DB 工具卡片替换实时卡片。
+    if (currentId.value && currentId.value === targetId && !pendingApproval.value
+        && (answerStarted || streamTools.value.length)) {
       refreshFromDb()
     }
   }
@@ -383,6 +471,33 @@ const activeConv = computed(() => convs.value.find(c => c.id === currentId.value
           <div v-else class="msg assistant">
             <div class="avatar">云</div>
             <div class="bubble">
+              <!-- 结构化工具卡片：与正文混排在气泡内，折叠态单行（图标+中文名+状态），点击展开参数/结果 -->
+              <div v-if="item.tools.length" class="tool-cards">
+                <div v-for="(tc, ti) in item.tools" :key="`t-${item.final.id}-${ti}`"
+                     class="tool-card" :class="`tool-${tc.status}`"
+                     @click="toggleTool(`${item.final.id}-${ti}`)">
+                  <div class="tool-card-head">
+                    <span class="tool-icon">{{ toolIcon(tc.tool) }}</span>
+                    <span class="tool-name" :title="tc.tool">{{ toolName(tc.tool) }}</span>
+                    <span class="tool-grow"></span>
+                    <span class="tag" :class="statusClass(tc.status)">
+                      <span v-if="tc.status === 'running'" class="tool-spinner"></span>
+                      {{ statusLabel(tc.status) }}
+                    </span>
+                    <span class="tool-arrow">{{ expandedTools.has(`${item.final.id}-${ti}`) ? '▾' : '▸' }}</span>
+                  </div>
+                  <div v-if="expandedTools.has(`${item.final.id}-${ti}`)" class="tool-card-body">
+                    <div v-if="tc.args !== undefined && tc.args !== null" class="tool-sec">
+                      <div class="tool-sec-label">参数</div>
+                      <pre class="mono tool-pre">{{ fmtValue(tc.args) }}</pre>
+                    </div>
+                    <div v-if="tc.result !== undefined && tc.result !== null" class="tool-sec">
+                      <div class="tool-sec-label">结果</div>
+                      <pre class="mono tool-pre">{{ fmtValue(tc.result) }}</pre>
+                    </div>
+                  </div>
+                </div>
+              </div>
               <div v-if="item.final.content === '' && streaming && i === displayMessages.length - 1" class="typing"><span></span><span></span><span></span></div>
               <Md v-else :content="item.final.content" />
               <div v-if="item.steps.length" class="steps-toggle" @click="toggleSteps(item.final.id)">
@@ -491,6 +606,32 @@ const activeConv = computed(() => convs.value.find(c => c.id === currentId.value
 
 .input-bar { padding: 14px 20px 18px; border-top: 1px solid var(--border); background: var(--background); }
 
+/* ===== 结构化工具卡片 ===== */
+.tool-cards { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.tool-card {
+  background: var(--video-bg); border: 1px solid var(--border);
+  border-radius: var(--radius-md); overflow: hidden; cursor: pointer;
+  transition: border-color .18s;
+}
+.tool-card:hover { border-color: var(--info); }
+.tool-card-head { display: flex; align-items: center; gap: 8px; padding: 6px 10px; }
+.tool-icon { font-size: 14px; flex-shrink: 0; }
+.tool-name { font-size: 13px; font-weight: 500; color: var(--foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tool-grow { flex: 1; }
+.tool-spinner { width: 10px; height: 10px; border: 2px solid color-mix(in srgb, var(--info) 30%, transparent); border-top-color: var(--info); border-radius: 50%; animation: tool-rotate .8s linear infinite; }
+@keyframes tool-rotate { to { transform: rotate(360deg); } }
+.tool-arrow { font-size: 10px; color: var(--muted-foreground); flex-shrink: 0; }
+.tool-card-body { border-top: 1px dashed var(--border); padding: 8px 10px; display: flex; flex-direction: column; gap: 8px; }
+.tool-sec-label { font-size: 11px; color: var(--muted-foreground); margin-bottom: 4px; font-family: var(--font-mono); }
+.tool-pre {
+  margin: 0; font-size: 11.5px; line-height: 1.55;
+  max-height: 180px; overflow-y: auto; white-space: pre-wrap; word-break: break-all;
+  background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-md);
+  padding: 8px 10px; color: var(--foreground);
+}
+/* 失败卡片状态徽标颜色强调（tag-red 已够用，hover 描边换成错误色） */
+.tool-card.tool-error:hover { border-color: var(--danger, #e5484d); }
+
 /* ===== 移动端（<768px）：会话列表抽屉化 + 触控优化 ===== */
 @media (max-width: 768px) {
   /* 会话面板 → 左侧滑出抽屉 */
@@ -510,5 +651,8 @@ const activeConv = computed(() => convs.value.find(c => c.id === currentId.value
   .msg { max-width: 88%; }
   /* 删除按钮：放大且常显（触屏无 hover，opacity:.35 几乎隐形） */
   .conv-del { opacity: .6; width: 26px; height: 26px; line-height: 24px; font-size: 12px; }
+  /* 工具卡片触控优化：头部触控区加大，pre 内容区收紧 */
+  .tool-card-head { padding: 9px 12px; }
+  .tool-pre { max-height: 150px; }
 }
 </style>
