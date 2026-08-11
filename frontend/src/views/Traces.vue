@@ -146,7 +146,7 @@ function openDetail(e: TraceEventItem) {
 </template>
 
 <style scoped>
-.page-wrap { padding: 20px; height: calc(100vh - 56px); box-sizing: border-box; display: flex; flex-direction: column; }
+.page-wrap { padding: 20px; height: calc(100vh - 56px); height: calc(100dvh - 56px); box-sizing: border-box; display: flex; flex-direction: column; }
 .page-grid { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 /* 留痕列表与事件时间线各自独立滚动，互不影响 */
 .page-grid > .card { min-height: 0; overflow-y: auto; }
@@ -175,4 +175,13 @@ function openDetail(e: TraceEventItem) {
 .detail-label { flex-shrink: 0; width: 90px; color: var(--muted-foreground); text-align: right; font-size: 12px; padding-top: 2px; }
 .detail-value { flex: 1; min-width: 0; color: var(--foreground); white-space: pre-wrap; word-break: break-all; font-size: 12.5px; }
 .detail-long { max-height: 300px; overflow-y: auto; margin: 0; padding: 8px 10px; background: var(--video-bg); border: 1px solid var(--border); border-radius: var(--radius-md); }
+@media (max-width: 768px) {
+  /* 移动端 shell 变 column + 底部 Tab 占流内高度，calc(100dvh - 56px) 不再等于内容区高度；
+     改 height:auto 让整页由 .app-content 单容器滚动，消除双滚动 */
+  .page-wrap { height: auto; padding: 12px; }
+  .page-grid { overflow-y: visible; }
+  /* 详情弹窗字段行竖排：窄屏下 label(90px) + value 横排会挤 */
+  .detail-row { flex-direction: column; gap: 2px; }
+  .detail-label { width: auto; text-align: left; }
+}
 </style>

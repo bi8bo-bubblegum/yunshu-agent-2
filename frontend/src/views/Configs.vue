@@ -285,7 +285,7 @@ async function removeBinding(id: string) {
 </template>
 
 <style scoped>
-.page-wrap { padding: 20px; height: calc(100vh - 56px); box-sizing: border-box; display: flex; flex-direction: column; }
+.page-wrap { padding: 20px; height: calc(100vh - 56px); height: calc(100dvh - 56px); box-sizing: border-box; display: flex; flex-direction: column; }
 .page-grid { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 /* MCP 服务与 Agent 绑定各自独立滚动，互不影响 */
 .page-grid > .card { min-height: 0; overflow-y: auto; }
@@ -295,4 +295,13 @@ async function removeBinding(id: string) {
 }
 .risk-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border); }
 .risk-row:last-child { border-bottom: none; }
+@media (max-width: 768px) {
+  /* 移动端 shell 变 column + 底部 Tab 占流内高度，calc(100dvh - 56px) 不再等于内容区高度；
+     改 height:auto 让整页由 .app-content 单容器滚动，消除双滚动 */
+  .page-wrap { height: auto; padding: 12px; }
+  .page-grid { overflow-y: visible; }
+  /* 风险行竖排：窄屏下 grow 名称 + 130px select 并排会过窄 */
+  .risk-row { flex-direction: column; align-items: stretch; gap: 8px; }
+  .risk-row .select { width: 100%; }
+}
 </style>

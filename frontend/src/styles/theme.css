@@ -62,7 +62,7 @@ html, body {
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
 }
-#app { height: 100vh; }
+#app { height: 100vh; height: 100dvh; }
 a { color: var(--secondary); text-decoration: none; }
 a:hover { text-decoration: underline; }
 ::placeholder { color: var(--muted-foreground); opacity: 0.7; }
@@ -162,6 +162,16 @@ td .muted, .muted { color: var(--muted-foreground); }
 .text-sm { font-size: 12.5px; }
 .text-muted { color: var(--muted-foreground); }
 
+/* ===== 移动端显隐工具类 =====
+   配合 @media (max-width: 768px) 使用。加 !important 以盖过 scoped 样式
+   （scoped 选择器特异性 (0,2,0) 高于本工具类 (0,1,0)，不加 !important 会被覆盖）。 */
+.show-mobile { display: none !important; }
+.hide-mobile { /* 桌面端无效果 */ }
+@media (max-width: 768px) {
+  .show-mobile { display: flex !important; }
+  .hide-mobile { display: none !important; }
+}
+
 /* ===== 弹窗 ===== */
 .modal-mask {
   position: fixed; inset: 0; z-index: 100;
@@ -211,3 +221,27 @@ td .muted, .muted { color: var(--muted-foreground); }
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 .loading-row { display: flex; align-items: center; gap: 10px; color: var(--muted-foreground); font-size: 13px; padding: 16px; }
+
+/* ===== 移动端（<768px）全局补丁 ===== */
+@media (max-width: 768px) {
+  /* 触控目标放大：小按钮从 28px 提到 34px，符合手指可点区域 */
+  .btn-sm { height: 34px; font-size: 13px; }
+
+  /* 弹窗收窄 + 底部 safe-area：盖过各页内联 width(720/640/560px)，max-width 兜底 */
+  .modal {
+    width: calc(100vw - 32px);
+    max-width: calc(100vw - 32px);
+    padding: 16px;
+    padding-bottom: calc(16px + env(safe-area-inset-bottom));
+  }
+
+  /* toast 改底部居中，浮在底部 Tab 栏上方，避免盖住右上内容 */
+  .toast-wrap {
+    top: auto; right: auto; left: 50%;
+    bottom: calc(68px + env(safe-area-inset-bottom));
+    transform: translateX(-50%);
+    width: calc(100vw - 32px);
+    align-items: center;
+  }
+  .toast { min-width: 0; width: 100%; }
+}

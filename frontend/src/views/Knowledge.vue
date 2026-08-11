@@ -124,13 +124,19 @@ const statusTag: Record<string, string> = { ready: 'tag-green', parsing: 'tag-bl
 </template>
 
 <style scoped>
-.page-wrap { padding: 20px; height: calc(100vh - 56px); box-sizing: border-box; display: flex; flex-direction: column; }
+.page-wrap { padding: 20px; height: calc(100vh - 56px); height: calc(100dvh - 56px); box-sizing: border-box; display: flex; flex-direction: column; }
 .page-grid { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 /* 文档库与检索测试各自独立滚动，互不影响 */
 .page-grid > .card { min-height: 0; overflow-y: auto; }
 @media (max-width: 1100px) {
   .page-grid { grid-template-columns: 1fr; overflow-y: auto; }
   .page-grid > .card { overflow-y: visible; }
+}
+@media (max-width: 768px) {
+  /* 移动端 shell 变 column + 底部 Tab 占流内高度，calc(100dvh - 56px) 不再等于内容区高度；
+     改 height:auto 让整页由 .app-content 单容器滚动，消除双滚动 */
+  .page-wrap { height: auto; padding: 12px; }
+  .page-grid { overflow-y: visible; }
 }
 .hit { background: var(--video-bg); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 12px; }
 .hit-content { margin: 8px 0 0; font-size: 13px; line-height: 1.6; color: var(--foreground); }

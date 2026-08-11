@@ -159,7 +159,7 @@ async function submit() {
 </template>
 
 <style scoped>
-.login-page { display: flex; min-height: 100vh; width: 100%; background: var(--background); }
+.login-page { display: flex; min-height: 100vh; min-height: 100dvh; width: 100%; background: var(--background); }
 
 /* ===== 左 · 品牌面板 ===== */
 .brand-panel {

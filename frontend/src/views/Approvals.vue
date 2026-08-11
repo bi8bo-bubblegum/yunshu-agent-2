@@ -125,4 +125,9 @@ function fmtArgs(ctx: Record<string, unknown> | null): string {
 
 <style scoped>
 .page-wrap { padding: 20px; }
+@media (max-width: 768px) {
+  .page-wrap { padding: 12px; }
+  /* 顶部状态切换按钮行窄屏换行，避免溢出 */
+  .row-between { flex-wrap: wrap; row-gap: 8px; }
+}
 </style>

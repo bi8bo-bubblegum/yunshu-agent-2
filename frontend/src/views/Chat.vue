@@ -15,6 +15,8 @@ const messages = ref<Message[]>([])
 const input = ref('')
 const streaming = ref(false)
 const listRef = ref<HTMLElement>()
+// 移动端会话列表面板 → 抽屉：开关状态
+const convDrawerOpen = ref(false)
 const router = useRouter()
 const pendingApproval = ref<{ conversationId: string; approvalId: string } | null>(null)
 // 流式状态与会话绑定：切走再回来能恢复气泡与流程面板，互不串扰
@@ -58,6 +60,7 @@ async function newConv() {
 }
 
 async function selectConv(id: string) {
+  convDrawerOpen.value = false // 移动端：选中会话即收起抽屉
   stopPoll()
   currentId.value = id
   messages.value = []
@@ -342,8 +345,8 @@ const activeConv = computed(() => convs.value.find(c => c.id === currentId.value
 
 <template>
   <div class="chat-page">
-    <!-- 会话列表 -->
-    <aside class="conv-panel">
+    <!-- 会话列表（移动端抽屉化） -->
+    <aside class="conv-panel" :class="{ open: convDrawerOpen }">
       <button class="btn btn-primary btn-block" @click="newConv">+ 新建会话</button>
       <div class="conv-list">
         <div v-for="c in convs" :key="c.id" class="conv-item"
@@ -355,9 +358,11 @@ const activeConv = computed(() => convs.value.find(c => c.id === currentId.value
         <div v-if="!convs.length" class="empty"><span class="icon">💬</span>暂无会话</div>
       </div>
     </aside>
+    <div v-if="convDrawerOpen" class="conv-mask" @click="convDrawerOpen = false"></div>
 
     <!-- 消息区 -->
     <section class="msg-panel">
+      <button class="conv-toggle show-mobile" aria-label="打开会话列表" @click="convDrawerOpen = true">☰ 会话</button>
       <div class="msg-list" ref="listRef">
         <div v-if="!currentId" class="empty">
           <span class="icon">💬</span>
@@ -452,8 +457,15 @@ const activeConv = computed(() => convs.value.find(c => c.id === currentId.value
 .conv-del { position: absolute; top: 8px; right: 8px; width: 18px; height: 18px; line-height: 16px; padding: 0; border: none; border-radius: 4px; background: transparent; color: var(--muted-foreground); opacity: .35; font-size: 11px; cursor: pointer; transition: opacity .15s, background-color .15s; }
 .conv-del:hover { opacity: 1; background: var(--card); color: var(--foreground); }
 
-.msg-panel { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.msg-panel { flex: 1; min-width: 0; position: relative; display: flex; flex-direction: column; }
 .msg-list { flex: 1; min-height: 0; overflow-y: auto; padding: 20px 24px; display: flex; flex-direction: column; gap: 16px; }
+/* 移动端「会话列表」抽屉触发按钮（显隐交给全局 .show-mobile） */
+.conv-toggle {
+  position: absolute; top: 10px; left: 10px; z-index: 5;
+  height: 34px; padding: 0 12px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--card); color: var(--foreground);
+  font-size: 13px; display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+}
 .msg { display: flex; gap: 10px; max-width: 78%; }
 .msg.user { align-self: flex-end; flex-direction: row-reverse; }
 .avatar { width: 30px; height: 30px; border-radius: 999px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; }
@@ -478,4 +490,25 @@ const activeConv = computed(() => convs.value.find(c => c.id === currentId.value
 @keyframes blink { 0%, 80%, 100% { opacity: .2; } 40% { opacity: 1; } }
 
 .input-bar { padding: 14px 20px 18px; border-top: 1px solid var(--border); background: var(--background); }
+
+/* ===== 移动端（<768px）：会话列表抽屉化 + 触控优化 ===== */
+@media (max-width: 768px) {
+  /* 会话面板 → 左侧滑出抽屉 */
+  .conv-panel {
+    position: fixed; top: 0; left: 0; bottom: 0;
+    width: 280px; max-width: 85vw;
+    transform: translateX(-100%);
+    transition: transform .25s ease;
+    z-index: 91;
+    padding-bottom: calc(14px + env(safe-area-inset-bottom));
+  }
+  .conv-panel.open { transform: none; box-shadow: 20px 0 60px rgba(0, 0, 0, .4); }
+  .conv-mask { position: fixed; inset: 0; z-index: 90; background: rgba(0, 0, 0, .6); }
+
+  /* 消息区触控优化 */
+  .msg-list { padding: 12px; }
+  .msg { max-width: 88%; }
+  /* 删除按钮：放大且常显（触屏无 hover，opacity:.35 几乎隐形） */
+  .conv-del { opacity: .6; width: 26px; height: 26px; line-height: 24px; font-size: 12px; }
+}
 </style>

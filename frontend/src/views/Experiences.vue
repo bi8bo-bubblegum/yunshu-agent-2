@@ -160,4 +160,9 @@ const statusLabel: Record<string, string> = { draft: '草稿', pending: '审批�
 
 <style scoped>
 .page-wrap { padding: 20px; }
+@media (max-width: 768px) {
+  .page-wrap { padding: 12px; }
+  /* 详情弹窗标题行（标题 + 2 个 tag）窄屏允许换行 */
+  .modal-title { flex-wrap: wrap; row-gap: 6px; }
+}
 </style>
