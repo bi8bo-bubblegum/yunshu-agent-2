@@ -10,6 +10,28 @@ from app.tools.risk import get_mcp_risk
 
 logger = logging.getLogger(__name__)
 
+# MCP 工具单次执行限时。外部 MCP 网关（天气/地图等第三方服务）无响应时，工具调用会
+# 无限挂起：SSE 流不结束、前端一直转圈、trace 保持 running（真实事故：营销 agent 在
+# ReAct 循环里调 mcp_map 天气工具，外部服务无响应挂起 >5min）。发现工具已有 10s 超时，
+# 但执行本身没有——这里给执行包 wait_for：超时抛 asyncio.TimeoutError → ToolNode 记为
+# 工具错误 → 卡片标 error，agent 继续生成而非挂死（与 stream_llm 超时降级同模式）。
+MCP_TOOL_EXEC_TIMEOUT = 20.0
+
+
+def _with_exec_timeout(fn, timeout: float = MCP_TOOL_EXEC_TIMEOUT):
+    """给工具执行包 asyncio.wait_for 超时，外部网关无响应时不再无限等待。
+
+    MCP 工具可执行对象可能是 async（coroutine）或 sync（func）：async 用 wait_for
+    包裹，超时取消并抛 TimeoutError；sync 直接调用。"""
+
+    async def wrapped(*args, **kwargs):
+        coro = fn(*args, **kwargs)
+        if hasattr(coro, "__await__"):
+            return await asyncio.wait_for(coro, timeout=timeout)
+        return coro
+
+    return wrapped
+
 
 async def load_mcp_tools_with_risk(db: AsyncSession, server_name: str) -> list[Tool]:
     """连接 MCP 服务发现工具，注入风险等级，包装为 DataFacade.Tool。
@@ -44,7 +66,7 @@ async def load_mcp_tools_with_risk(db: AsyncSession, server_name: str) -> list[T
         callable_fn = getattr(t, "coroutine", None) or getattr(t, "func", None)
         result.append(Tool(
             name=f"mcp_{server_name}_{t.name}",
-            fn=callable_fn,
+            fn=_with_exec_timeout(callable_fn),
             risk=risk,
             description=t.description,
             args_schema=t.args_schema,
