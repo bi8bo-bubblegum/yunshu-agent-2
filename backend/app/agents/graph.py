@@ -222,8 +222,12 @@ def build_graph(registry: AgentRegistry, checkpointer=None):
     g.add_node("done", done_node)
     g.set_entry_point("supervisor")
     g.add_conditional_edges("supervisor", router, {**{c: c for c in registry.list()}, "done": "done"})
+    # agent 执行完直接进 done，不再回 supervisor 做二次路由。
+    # 原设计意图是多 agent 协作（marketing→sales_analysis），但实际几乎未发生，
+    # 二次路由只多花一次 LLM 调用且偶发自相矛盾导致空转（trace 实证 marketing×4）。
+    # 后续如需多 agent 协作再重新开发。
     for code in registry.list():
-        g.add_edge(code, "supervisor")
+        g.add_edge(code, "done")
     g.add_edge("done", END)
 
     # 用 checkpointer 编译，thread_id = conversation_id

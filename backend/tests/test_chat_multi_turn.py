@@ -92,7 +92,8 @@ async def _final_messages(conv_id):
 @pytest.mark.asyncio
 async def test_multi_turn_no_history_duplication(monkeypatch):
     """两轮对话（每轮 marketing×1 → done）：第二轮必须正常回复，不复读用户消息。"""
-    await _stubs(monkeypatch, ["marketing", "done", "marketing", "done"])
+    # agent→done 不回 supervisor，每轮只调一次 route_decision（路由 agent）
+    await _stubs(monkeypatch, ["marketing", "marketing"])
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
@@ -126,14 +127,14 @@ async def test_multi_turn_no_history_duplication(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_same_round_repeat_agent_forced_done(monkeypatch):
-    """同一轮内 supervisor 连续路由到同一 agent（marketing×2）时强制 done：
+async def test_agent_direct_to_done(monkeypatch):
+    """agent 执行完直接进 done，不回 supervisor 做二次路由。
 
-    修复前 LLM 结构化输出自相矛盾（reason 说该 done 但 agent 填旧值），
-    导致 marketing 被连续路由 4 次直到 MAX_ROUTES，每次输出完全一样（空转）。
-    守卫在 supervisor_node 检测到连续同 agent 后改写为 done，只路由 1 次。
+    原设计 agent→supervisor→done，二次路由只多花一次 LLM 调用且偶发
+    自相矛盾导致空转（trace 实证 marketing×4）。改为 agent→done，
+    route_history 只含 agent（不含 done），单次路由即结束。
     """
-    await _stubs(monkeypatch, ["marketing", "marketing", "done"])
+    await _stubs(monkeypatch, ["marketing"])
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
@@ -145,11 +146,11 @@ async def test_same_round_repeat_agent_forced_done(monkeypatch):
         await _stream(c, h, conv_id, "你好")
 
         msgs = (await c.get(f"/api/conversations/{conv_id}/messages", headers=h)).json()
-        # 守卫触发：marketing → done（第二次 marketing 被改写为 done），只落 1 条 assistant
+        # agent→done：只落 1 条 assistant，不回 supervisor 二次路由
         assert [m["role"] for m in msgs] == ["user", "assistant"], msgs
         assert msgs[1]["content"] == "回复:你好"
 
-        # 图最终状态：route_history = [marketing, done]，不空转
+        # 图最终状态：route_history = [marketing]（不含 done，agent 直接到 done）
         cp_msgs, values = await _final_messages(conv_id)
-        assert values.get("route_history") == ["marketing", "done"], values.get("route_history")
+        assert values.get("route_history") == ["marketing"], values.get("route_history")
         assert values.get("agent_response") == "回复:你好", values.get("agent_response")
