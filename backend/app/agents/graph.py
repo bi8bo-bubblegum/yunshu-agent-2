@@ -158,6 +158,13 @@ def build_graph(registry: AgentRegistry, checkpointer=None):
         except asyncio.TimeoutError:
             logger.warning("路由决策超时(%ss)，降级关键词兜底", ROUTE_TIMEOUT)
             decision = fallback_decision(context, agents_with_done)
+        # 同 agent 连续路由守卫：LLM 结构化输出偶发自相矛盾（reason 说该 done
+        # 但 agent 填旧值），连续路由同一 agent 不会产生新工作（trace 实证 4 次
+        # marketing 输出完全一样），强制结束。不影响跨轮：新轮 history[-1] 是
+        # 上一轮的 done，与新决策的 agent 不同，不触发守卫。
+        history = state.get("route_history", [])
+        if history and decision["agent"] == history[-1] and decision["agent"] != "done":
+            decision = {"agent": "done", "reason": "同一 agent 连续路由，强制结束", "confidence": 1.0}
         # 每次路由决策即时留痕（interrupt 挂起时也能看到完整路由轨迹）
         trace_id = state.get("trace_id")
         if trace_id:

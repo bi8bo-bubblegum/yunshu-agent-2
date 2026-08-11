@@ -126,11 +126,12 @@ async def test_multi_turn_no_history_duplication(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_same_round_multi_route_no_bloat(monkeypatch):
-    """同一轮内 supervisor 多次路由到同一 agent（marketing×2 → done）：子图不得膨胀。
+async def test_same_round_repeat_agent_forced_done(monkeypatch):
+    """同一轮内 supervisor 连续路由到同一 agent（marketing×2）时强制 done：
 
-    修复前子图在固定 sub-thread 累积历史，第二次路由时 checkpoint 历史与父图传入
-    的完整 messages 用 add 合并重复（messages 超 3 条、出现重复块）。
+    修复前 LLM 结构化输出自相矛盾（reason 说该 done 但 agent 填旧值），
+    导致 marketing 被连续路由 4 次直到 MAX_ROUTES，每次输出完全一样（空转）。
+    守卫在 supervisor_node 检测到连续同 agent 后改写为 done，只路由 1 次。
     """
     await _stubs(monkeypatch, ["marketing", "marketing", "done"])
 
@@ -144,18 +145,11 @@ async def test_same_round_multi_route_no_bloat(monkeypatch):
         await _stream(c, h, conv_id, "你好")
 
         msgs = (await c.get(f"/api/conversations/{conv_id}/messages", headers=h)).json()
-        # 单轮 2 次 marketing：分段落库落 2 条 assistant（step + final），中间产出不丢失
-        assert [m["role"] for m in msgs] == ["user", "assistant", "assistant"], msgs
+        # 守卫触发：marketing → done（第二次 marketing 被改写为 done），只落 1 条 assistant
+        assert [m["role"] for m in msgs] == ["user", "assistant"], msgs
         assert msgs[1]["content"] == "回复:你好"
-        assert msgs[1]["metadata"] == {"agent": "marketing", "segment": "step"}
-        assert msgs[2]["content"] == "回复:你好"  # final（最终答案，FakeLLM 固定内容）
-        assert msgs[2]["metadata"] == {"agent": "marketing", "segment": "final"}
 
-        # 图最终状态：期望 [H1, A1, A2]，无重复块（两轮调用都基于同一条用户消息）
+        # 图最终状态：route_history = [marketing, done]，不空转
         cp_msgs, values = await _final_messages(conv_id)
-        roles = [m.type for m in cp_msgs]
-        contents = [str(getattr(m, "content", m))[:12] for m in cp_msgs]
-        assert roles == ["human", "ai", "ai"], (roles, contents)
-        assert contents.count("你好") == 1, contents
-        assert contents.count("回复:你好") == 2, contents  # 两次路由各产出一条，不膨胀
+        assert values.get("route_history") == ["marketing", "done"], values.get("route_history")
         assert values.get("agent_response") == "回复:你好", values.get("agent_response")
