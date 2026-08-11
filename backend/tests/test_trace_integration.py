@@ -30,8 +30,6 @@ async def test_trace_created_per_chat(monkeypatch):
         return ""
     async def _exp(db, uid, dept, q, **k):
         return ""
-    async def _kb(db, q, **k):
-        return ""
     async def _extract(db, uid, text):
         return None
     async def _distill(text, uid, tid):
@@ -41,7 +39,6 @@ async def test_trace_created_per_chat(monkeypatch):
     monkeypatch.setattr("app.memory.assembly.short_term.build_context", _ctx)
     monkeypatch.setattr("app.memory.assembly.pref_mem.build_context", _pref)
     monkeypatch.setattr("app.memory.assembly.exp_mem.build_experience_context", _exp)
-    monkeypatch.setattr("app.memory.assembly.knowledge.retrieve_knowledge", _kb)
     monkeypatch.setattr("app.services.chat_service.maybe_extract_batch", _extract)
     monkeypatch.setattr("app.services.chat_service.distill_experience", _distill)
     monkeypatch.setattr("app.services.summary.generate_title", _title)

@@ -63,7 +63,7 @@ async def _stubs(monkeypatch, spec):
     monkeypatch.setattr("app.memory.assembly.short_term.build_context", _ctx)
     monkeypatch.setattr("app.memory.assembly.pref_mem.build_context", _ctx)
     monkeypatch.setattr("app.memory.assembly.exp_mem.build_experience_context", _exp)
-    monkeypatch.setattr("app.memory.assembly.knowledge.retrieve_knowledge", _ctx)
+    # 知识库已改 search_knowledge 工具，不再自动装配，无需 mock
     monkeypatch.setattr("app.services.chat_service.maybe_extract_batch", _noop)
     monkeypatch.setattr("app.services.chat_service.distill_experience", _noop)
     monkeypatch.setattr("app.services.chat_service.save_personal_experience", _noop)

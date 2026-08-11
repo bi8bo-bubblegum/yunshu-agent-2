@@ -6,7 +6,8 @@ from app.agents.marketing.agent import build_marketing_agent, TOOL_NAMES, MAX_TO
 @pytest.mark.asyncio
 async def test_marketing_agent_subgraph(db_session):
     """营销助手模块声明自己的工具并构建编译子图（供父图嵌入）。"""
-    assert TOOL_NAMES == ["query_marketing_campaigns", "create_marketing_campaign", "publish_campaign"]
+    assert TOOL_NAMES == ["query_marketing_campaigns", "create_marketing_campaign",
+                          "publish_campaign", "search_knowledge"]
     assert await build_marketing_agent(db_session) is not None
 
 @pytest.mark.asyncio

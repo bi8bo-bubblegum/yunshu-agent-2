@@ -37,7 +37,7 @@ SYSTEM_PROMPT = (
     "- 只调用经营分析相关工具，不要调用其他 agent 的工具。"
 )
 
-TOOL_NAMES = ["query_sales_data", "delete_order"]
+TOOL_NAMES = ["query_sales_data", "delete_order", "search_knowledge"]
 AGENT_CODE = "sales_analysis"
 MAX_TOOL_ROUNDS = 6
 

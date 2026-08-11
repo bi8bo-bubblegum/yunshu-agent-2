@@ -7,6 +7,7 @@ from app.tools.builtin.create_marketing_campaign import CreateMarketingCampaignA
 from app.tools.builtin.adjust_schedule import AdjustScheduleArgs, adjust_schedule, DESCRIPTION as ADJUST_SCHED_DESC
 from app.tools.builtin.publish_campaign import PublishCampaignArgs, publish_campaign, DESCRIPTION as PUBLISH_CAMP_DESC
 from app.tools.builtin.delete_order import DeleteOrderArgs, delete_order, DESCRIPTION as DELETE_ORDER_DESC
+from app.tools.builtin.search_knowledge import SearchKnowledgeArgs, search_knowledge, DESCRIPTION as SEARCH_KB_DESC
 
 def register_builtin_tools(f: DataFacade) -> None:
     # risk 字段先声明，任务 31 增强时用于风险分级包装
@@ -17,3 +18,5 @@ def register_builtin_tools(f: DataFacade) -> None:
     f.register(Tool("adjust_schedule", adjust_schedule, "high", ADJUST_SCHED_DESC, AdjustScheduleArgs))
     f.register(Tool("publish_campaign", publish_campaign, "critical", PUBLISH_CAMP_DESC, PublishCampaignArgs))
     f.register(Tool("delete_order", delete_order, "critical", DELETE_ORDER_DESC, DeleteOrderArgs))
+    # 知识库检索：低风险查询类，agent 主动调用（不再自动装配）
+    f.register(Tool("search_knowledge", search_knowledge, "low", SEARCH_KB_DESC, SearchKnowledgeArgs))

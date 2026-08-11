@@ -6,12 +6,12 @@ from app.agents.scheduling.agent import build_scheduling_agent, TOOL_NAMES as SC
 
 @pytest.mark.asyncio
 async def test_sales_agent_subgraph(db_session):
-    assert SALES_TOOLS == ["query_sales_data", "delete_order"]
+    assert SALES_TOOLS == ["query_sales_data", "delete_order", "search_knowledge"]
     assert await build_sales_agent(db_session) is not None
 
 @pytest.mark.asyncio
 async def test_scheduling_agent_subgraph(db_session):
-    assert SCHEDULING_TOOLS == ["query_schedule", "adjust_schedule"]
+    assert SCHEDULING_TOOLS == ["query_schedule", "adjust_schedule", "search_knowledge"]
     assert await build_scheduling_agent(db_session) is not None
 
 @pytest.mark.asyncio

@@ -36,7 +36,7 @@ SYSTEM_PROMPT = (
     "- 只调用调度相关工具，不要调用其他 agent 的工具。"
 )
 
-TOOL_NAMES = ["query_schedule", "adjust_schedule"]
+TOOL_NAMES = ["query_schedule", "adjust_schedule", "search_knowledge"]
 AGENT_CODE = "scheduling"
 MAX_TOOL_ROUNDS = 6
 

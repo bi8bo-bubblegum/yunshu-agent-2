@@ -41,7 +41,7 @@ SYSTEM_PROMPT = (
 )
 
 # 内置工具仍硬编码（新增内置工具本身就需要写代码）
-TOOL_NAMES = ["query_marketing_campaigns", "create_marketing_campaign", "publish_campaign"]
+TOOL_NAMES = ["query_marketing_campaigns", "create_marketing_campaign", "publish_campaign", "search_knowledge"]
 AGENT_CODE = "marketing"
 MAX_TOOL_ROUNDS = 6
 
