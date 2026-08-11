@@ -161,18 +161,12 @@ const liveToolCards = computed<ToolCardData[]>(() =>
   streamTools.value.map(t => ({ tool: t.tool, args: t.args, result: t.result, status: t.status })),
 )
 const expandedTools = ref<Set<string>>(new Set())
-// 内置工具中文名/图标映射（未知工具兜底 🔧）
-const TOOL_NAMES: Record<string, string> = {
-  query_marketing_campaigns: '查询营销活动', create_marketing_campaign: '创建营销活动',
-  publish_campaign: '发布活动', query_sales_data: '查询销售数据', delete_order: '删除订单',
-  query_schedule: '查询排班', adjust_schedule: '调整排班', search_knowledge: '检索知识库',
-}
+// 内置工具图标映射（未知工具兜底 🔧）；工具名直接展示原始英文名，不做中文映射
 const TOOL_ICONS: Record<string, string> = {
   query_marketing_campaigns: '📢', create_marketing_campaign: '🛠️', publish_campaign: '🚀',
   query_sales_data: '📊', delete_order: '🗑️', query_schedule: '📅', adjust_schedule: '🔁',
   search_knowledge: '📚',
 }
-function toolName(t: string) { return TOOL_NAMES[t] ?? t }
 function toolIcon(t: string) { return TOOL_ICONS[t] ?? '🔧' }
 function statusLabel(s: string) { return s === 'running' ? '执行中' : s === 'error' ? '失败' : '成功' }
 function statusClass(s: string) { return s === 'running' ? 'tag-blue' : s === 'error' ? 'tag-red' : 'tag-green' }
@@ -478,7 +472,7 @@ const activeConv = computed(() => convs.value.find(c => c.id === currentId.value
                      @click="toggleTool(`${item.final.id}-${ti}`)">
                   <div class="tool-card-head">
                     <span class="tool-icon">{{ toolIcon(tc.tool) }}</span>
-                    <span class="tool-name" :title="tc.tool">{{ toolName(tc.tool) }}</span>
+                    <span class="tool-name" :title="tc.tool">{{ tc.tool }}</span>
                     <span class="tool-grow"></span>
                     <span class="tag" :class="statusClass(tc.status)">
                       <span v-if="tc.status === 'running'" class="tool-spinner"></span>
