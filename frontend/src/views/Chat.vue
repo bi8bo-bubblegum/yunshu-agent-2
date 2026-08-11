@@ -23,12 +23,15 @@ const pendingApproval = ref<{ conversationId: string; approvalId: string } | nul
 const streamActive = ref(false)
 const streamConv = ref('')
 const streamBuf = ref('')
+// 用户主动终止标志：发送后按钮变「终止」，点击后置位并 abort 流式请求
+const stopping = ref(false)
 
 onMounted(loadConvs)
 
 // keep-alive 下从其他页面切回时刷新消息并滚动到底部
 // （审批中心处理完 critical 后回复可能已落库；流式进行中则保留现场）
 onActivated(async () => {
+  stopAbortPoll()
   if (!streaming.value) await loadConvs()
   if (currentId.value && !streaming.value && messages.value.length) {
     await selectConv(currentId.value)
@@ -62,6 +65,7 @@ async function newConv() {
 async function selectConv(id: string) {
   convDrawerOpen.value = false // 移动端：选中会话即收起抽屉
   stopPoll()
+  stopAbortPoll()
   currentId.value = id
   messages.value = []
   try {
@@ -131,6 +135,12 @@ async function removeConv(c: Conversation) {
 // ---- 发送 / SSE ----
 let abortCtrl: AbortController | null = null
 let answerStarted = false
+
+// 用户手动终止：置位终止标志并中断 SSE 流式请求，后端取消处理中异步落库半截回答
+function stopSend() {
+  stopping.value = true
+  abortCtrl?.abort()
+}
 
 function agentName(code: string) {
   return ({ marketing: '营销助手', sales_analysis: '经营分析', scheduling: '调度优化', done: '完成' } as Record<string, string>)[code] || code || '未知'
@@ -243,6 +253,34 @@ async function refreshFromDb() {
   } catch { /* 忽略 */ }
 }
 
+// ---- 手动终止后的落库轮询 ----
+// 用户点击「终止」→ SSE 断开 → 后端在取消处理中异步写半截回答+工具卡片。
+// 但 SSE 已断，前端拿不到完成信号，只能轮询 DB：直到最后一条变成 assistant
+//（半截回答已落库）或尝试次数耗尽。切会话/新一轮消息/组件切换时 stopAbortPoll。
+let abortPollTimer: number | undefined
+
+function stopAbortPoll() {
+  if (abortPollTimer) {
+    clearInterval(abortPollTimer)
+    abortPollTimer = undefined
+  }
+}
+
+function abortPoll() {
+  stopAbortPoll()
+  let tries = 0
+  abortPollTimer = window.setInterval(async () => {
+    tries++
+    if (streaming.value || !currentId.value) return stopAbortPoll()
+    try {
+      const { data } = await client.get<Message[]>(`/conversations/${currentId.value}/messages`)
+      messages.value = data
+      if (data[data.length - 1]?.role === 'assistant') stopAbortPoll()  // 半截回答已落库
+    } catch { /* ignore */ }
+    if (tries >= 8) stopAbortPoll()  // 最多约 12 秒
+  }, 1500)
+}
+
 function streamLine(text: string) {
   streamBuf.value = streamBuf.value === '⏳ 正在思考…' ? text : `${streamBuf.value}\n${text}`
   renderStreamText()
@@ -252,6 +290,8 @@ async function send() {
   const text = input.value.trim()
   if (!text || streaming.value || !currentId.value) return
   input.value = ''
+  stopping.value = false
+  stopAbortPoll()  // 新一轮消息开始前清掉上一轮终止后的落库轮询
   streamActive.value = true
   streamConv.value = currentId.value
   streamBuf.value = '⏳ 正在思考…'
@@ -348,10 +388,23 @@ async function send() {
     if (err.name !== 'AbortError') toast('连接中断', 'error')
   } finally {
     const targetId = streamConv.value
+    const aborted = stopping.value
+    stopping.value = false
     streaming.value = false
     streamActive.value = false
     streamConv.value = ''
     const sb = messages.value.find(m => m.id === 'stream-buf')
+    if (aborted) {
+      // 用户手动终止：无任何产出时把占位气泡改为「（已终止）」；
+      // 已有半截内容则保留展示。后端在取消处理中异步落库半截回答+工具卡片，
+      // 轮询等落库完成后用 DB 数据整体刷新（覆盖 stream-buf）。
+      if (sb && (sb.content === '' || sb.content === '⏳ 正在思考…')) {
+        sb.content = '（已终止）'
+        streamBuf.value = sb.content
+      }
+      if (currentId.value && currentId.value === targetId && !pendingApproval.value) abortPoll()
+      return  // 跳过 maybePollPending 与普通 refreshFromDb
+    }
     if (sb && (sb.content === '' || sb.content === '⏳ 正在思考…') && !pendingApproval.value) {
       sb.content = '（无响应）'
       streamBuf.value = sb.content
@@ -522,9 +575,8 @@ const activeConv = computed(() => convs.value.find(c => c.id === currentId.value
                   :disabled="streaming" @keydown.enter.exact.prevent="send" />
         <div class="row-between mt-8">
           <span class="text-muted text-sm">{{ streaming ? 'Agent 思考中…' : waitingReply ? '⏳ 等待审批/回复中…' : activeConv ? '会话已就绪' : '' }}</span>
-          <button class="btn btn-primary" :disabled="!input.trim() || streaming || !currentId" @click="send">
-            <span v-if="streaming" class="spinner"></span>发送
-          </button>
+          <button v-if="!streaming" class="btn btn-primary" :disabled="!input.trim() || !currentId" @click="send">发送</button>
+          <button v-else class="btn btn-danger" @click="stopSend"><span class="stop-icon"></span>终止</button>
         </div>
       </div>
     </section>
@@ -599,6 +651,8 @@ const activeConv = computed(() => convs.value.find(c => c.id === currentId.value
 @keyframes blink { 0%, 80%, 100% { opacity: .2; } 40% { opacity: 1; } }
 
 .input-bar { padding: 14px 20px 18px; border-top: 1px solid var(--border); background: var(--background); }
+/* 终止按钮的实心方块图标 */
+.stop-icon { width: 10px; height: 10px; display: inline-block; background: currentColor; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
 
 /* ===== 结构化工具卡片 ===== */
 .tool-cards { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }

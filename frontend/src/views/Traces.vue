@@ -34,7 +34,7 @@ async function openTrace(t: TraceItem) {
   } catch { /* ignore */ }
 }
 
-const statusTag: Record<string, string> = { running: 'tag-blue', completed: 'tag-green', interrupted: 'tag-orange', failed: 'tag-red' }
+const statusTag: Record<string, string> = { running: 'tag-blue', completed: 'tag-green', interrupted: 'tag-orange', failed: 'tag-red', aborted: 'tag-gray' }
 // 后端 emit 的事件 type：route / llm_call / tool_call / memory / approval；兼容旧名 llm / tool
 const typeTag: Record<string, string> = { route: 'tag-blue', llm_call: 'tag-purple', tool_call: 'tag-orange', memory: 'tag-cyan', approval: 'tag-red', llm: 'tag-purple', tool: 'tag-orange' }
 const typeLabel: Record<string, string> = { route: '路由', llm_call: 'LLM', tool_call: '工具', memory: '记忆', approval: '审批', llm: 'LLM', tool: '工具' }

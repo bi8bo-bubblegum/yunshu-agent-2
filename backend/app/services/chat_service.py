@@ -30,6 +30,45 @@ logger = logging.getLogger(__name__)
 # 后台记忆沉淀任务管理：持有引用防 GC（与 summary._bg_title_tasks 同模式）
 _bg_mem_tasks: set[asyncio.Task] = set()
 
+# 手动终止收尾任务管理：持有引用防 GC。终止发生在当前请求 task 被 uvicorn 取消后，
+# 收尾落库必须放独立 task + 独立 session 执行（见 _abort_cleanup）
+_bg_abort_tasks: set[asyncio.Task] = set()
+
+
+async def _abort_cleanup(conv_id: str, sent_text: str, tool_recorder: ToolCallRecorder | None,
+                         trace_id: str) -> None:
+    """手动终止 / 客户端断开的收尾落库：半截回答 + 已完成工具卡片 + trace aborted。
+
+    必须用独立 task + 独立 session（SessionLocal）执行：
+    1. uvicorn 对客户端断开是 task.cancel()（注入 CancelledError，而非 aclose 的
+       GeneratorExit）。CancelledError 注入后当前 task 处于「取消状态」，后续任何
+       await（落库/commit）会立即再抛 CancelledError，直接 await 全部失败、trace
+       留 running 僵尸（真实事故：curl 断开后图被取消但 trace 保持 running）。
+    2. 请求级注入的 self.db 在响应结束后关闭，独立 session 规避。
+    失败仅降级记录，不影响图取消本身。"""
+    try:
+        async with SessionLocal() as db:
+            repo = MessageRepository(db)
+            text = sent_text.strip()
+            if text:
+                await repo.add(Message(conversation_id=conv_id, role="assistant", content=text))
+            if tool_recorder:
+                for tm in tool_message_rows(conv_id, tool_recorder):
+                    await repo.add(tm)
+            if text or (tool_recorder and tool_recorder.order):
+                await repo.commit()
+            # 独立 session 无法复用请求内的 trace/conv 对象，直接 UPDATE：
+            # aborted 区别于 interrupted（resume 的 fallback 查 status=="interrupted"，
+            # 若复用会误恢复已终止的执行）；清 current_trace_id 防 resume 定位到它。
+            from sqlalchemy import update
+            await db.execute(
+                update(ExecutionTrace).where(ExecutionTrace.id == trace_id).values(status="aborted"))
+            await db.execute(
+                update(Conversation).where(Conversation.id == conv_id).values(current_trace_id=None))
+            await db.commit()
+    except Exception as e:
+        logger.warning("终止收尾落库失败（已降级）: %s", e)
+
 # resume/审批恢复执行整体限时。恢复图执行时 agent 内 LLM 已由 stream_llm 超时兜底（60s），
 # 但链路仍可能因多次工具往返/路由超时叠加变长，给恢复执行一个总闸：超时后返回提示
 # 而非无限等待（真实事故：resume 恢复后 agent 生成挂起 >170s，前端永不返回）。
@@ -101,73 +140,105 @@ class ChatService:
                 _title_result["title"] = title
 
         schedule_title_generation(conv_id, message, on_done=_on_title)
-        yield json.dumps({"event": "start", "trace_id": trace.id}, ensure_ascii=False)
-        # 装配多层记忆
-        user = await self.user_repo.get(user_id)
-        dep_id = user.department_id if user and user.department_id else None
-        mem = await assemble_memory(self.db, user_id, conv_id, dep_id, message)
-        graph = await get_graph()
-        # 请求级事件队列：回调与图节点把过程事件放入队列，SSE 生成器实时转发。
-        # 重要：图在后台 task 运行——LangGraph 父图 stream_mode="messages" 不穿透
-        # 编译子图内部，子图内 LLM token 由 agent_node 经注入的 sse_queue 直接推送；
-        # 主循环只从 queue 实时读取，避免「astream 无事件产出时队列堆积、
-        # 子图结束后一次性刷出」导致的非流式观感。
-        queue: asyncio.Queue = asyncio.Queue(maxsize=500)
-        # 结构化工具卡片收集器：本轮回调记录工具调用（start/end 按 run_id 配对），
-        # 图到达终态后由 tool_message_rows 转成 tool 消息一次性落库
-        tool_recorder = ToolCallRecorder()
-        config = {
-            "configurable": {"thread_id": conv_id, "trace_id": trace.id,
-                             "requester_id": user_id, "sse_queue": queue},
-            "callbacks": [StreamEventHandler(queue, trace.id, recorder=tool_recorder),
-                          TraceCallbackHandler(trace.id)],
-        }
-        inputs = {
-            "conversation_id": conv_id, "user_id": user_id,
-            "user_message": message, "memory_context": mem,
-            "trace_id": trace.id,
-            # 只注入本轮用户消息，历史由 checkpointer 按 thread_id 累积恢复
-            "messages": [HumanMessage(content=message)],
-        }
-        # 本轮开始前的 agent_outputs 长度：agent_outputs 是跨轮累积的 add 通道，
-        # 本轮结束后取 [l0:] 即本轮各 agent 产出段落（分段落库，方案 B）。
-        pre_snap = await graph.aget_state(config)
-        l0 = len((pre_snap.values or {}).get("agent_outputs", [])) if pre_snap else 0
+        # 手动终止 / 客户端断开统一收尾。try 必须覆盖 yield start 之后的所有 await：
+        # 前端收到 start 才能点「终止」，其后任意挂起点（记忆装配 / 图启动 / 主循环）
+        # 抛 GeneratorExit 都要进入 except BaseException 做取消 + 半截落库，否则 trace
+        # 会留 running 僵尸、半截内容不落库（真实时序：start 已发出、图尚未启动时终止）。
+        graph_task: asyncio.Task | None = None
+        tool_recorder: ToolCallRecorder | None = None
+        sent_text = ""
+        try:
+            yield json.dumps({"event": "start", "trace_id": trace.id}, ensure_ascii=False)
+            # 装配多层记忆
+            user = await self.user_repo.get(user_id)
+            dep_id = user.department_id if user and user.department_id else None
+            mem = await assemble_memory(self.db, user_id, conv_id, dep_id, message)
+            graph = await get_graph()
+            # 请求级事件队列：回调与图节点把过程事件放入队列，SSE 生成器实时转发。
+            # 重要：图在后台 task 运行——LangGraph 父图 stream_mode="messages" 不穿透
+            # 编译子图内部，子图内 LLM token 由 agent_node 经注入的 sse_queue 直接推送；
+            # 主循环只从 queue 实时读取，避免「astream 无事件产出时队列堆积、
+            # 子图结束后一次性刷出」导致的非流式观感。
+            queue: asyncio.Queue = asyncio.Queue(maxsize=500)
+            # 结构化工具卡片收集器：本轮回调记录工具调用（start/end 按 run_id 配对），
+            # 图到达终态后由 tool_message_rows 转成 tool 消息一次性落库
+            tool_recorder = ToolCallRecorder()
+            config = {
+                "configurable": {"thread_id": conv_id, "trace_id": trace.id,
+                                 "requester_id": user_id, "sse_queue": queue},
+                "callbacks": [StreamEventHandler(queue, trace.id, recorder=tool_recorder),
+                              TraceCallbackHandler(trace.id)],
+            }
+            inputs = {
+                "conversation_id": conv_id, "user_id": user_id,
+                "user_message": message, "memory_context": mem,
+                "trace_id": trace.id,
+                # 只注入本轮用户消息，历史由 checkpointer 按 thread_id 累积恢复
+                "messages": [HumanMessage(content=message)],
+            }
+            # 本轮开始前的 agent_outputs 长度：agent_outputs 是跨轮累积的 add 通道，
+            # 本轮结束后取 [l0:] 即本轮各 agent 产出段落（分段落库，方案 B）。
+            pre_snap = await graph.aget_state(config)
+            l0 = len((pre_snap.values or {}).get("agent_outputs", [])) if pre_snap else 0
 
-        stream_interrupts_holder: dict = {}
+            stream_interrupts_holder: dict = {}
 
-        async def _run_graph():
-            """后台执行图：路由/中断事件入队；agent 输出 token 由 agent_node 直接推送。"""
-            try:
-                async for item in graph.astream(inputs, config, stream_mode=["messages", "updates"]):
-                    if not isinstance(item, tuple):
-                        continue
-                    mode, chunk = item
-                    if mode == "updates":
-                        # langgraph 1.x：interrupt 以 updates 顶层 __interrupt__ 块出现
-                        if isinstance(chunk, dict) and "__interrupt__" in chunk:
-                            stream_interrupts_holder["v"] = chunk["__interrupt__"]
+            async def _run_graph():
+                """后台执行图：路由/中断事件入队；agent 输出 token 由 agent_node 直接推送。"""
+                try:
+                    async for item in graph.astream(inputs, config, stream_mode=["messages", "updates"]):
+                        if not isinstance(item, tuple):
                             continue
-                        sv = chunk.get("supervisor") if isinstance(chunk, dict) else None
-                        if sv and sv.get("pending_agent"):
-                            queue.put_nowait({"event": "route", "agent": sv["pending_agent"]})
-                        continue
-                    # messages 模式不转发：子图内部不穿透（agent_node 已直接推送 token），
-                    # supervisor 路由文本不需要展示，避免与 agent_node 推送重复。
-            except Exception as e:
-                logger.warning("图执行异常: %s", e)
-            finally:
-                await queue.put(None)  # 哨兵：图执行结束，主循环退出
+                        mode, chunk = item
+                        if mode == "updates":
+                            # langgraph 1.x：interrupt 以 updates 顶层 __interrupt__ 块出现
+                            if isinstance(chunk, dict) and "__interrupt__" in chunk:
+                                stream_interrupts_holder["v"] = chunk["__interrupt__"]
+                                continue
+                            sv = chunk.get("supervisor") if isinstance(chunk, dict) else None
+                            if sv and sv.get("pending_agent"):
+                                queue.put_nowait({"event": "route", "agent": sv["pending_agent"]})
+                            continue
+                        # messages 模式不转发：子图内部不穿透（agent_node 已直接推送 token），
+                        # supervisor 路由文本不需要展示，避免与 agent_node 推送重复。
+                except Exception as e:
+                    logger.warning("图执行异常: %s", e)
+                finally:
+                    # 哨兵：图执行结束，主循环退出。手动终止时主循环已退出、无人消费，
+                    # 若队列满（>500 事件）put 会永久阻塞导致任务泄漏，加超时兜底
+                    try:
+                        await asyncio.wait_for(queue.put(None), timeout=2)
+                    except Exception:
+                        pass
 
-        graph_task = asyncio.create_task(_run_graph())
-        # 主循环：实时转发队列事件，直到哨兵（图结束）。queue 本身保证实时性，
-        # 子图执行期间 token / tool 事件随时可读，不再等 astream 产出。
-        while True:
-            evt = await queue.get()
-            if evt is None:
-                break
-            yield json.dumps(evt, ensure_ascii=False)
-        await graph_task
+            graph_task = asyncio.create_task(_run_graph())
+            # 主循环：实时转发队列事件，直到哨兵（图结束）。queue 本身保证实时性，
+            # 子图执行期间 token / tool 事件随时可读，不再等 astream 产出。
+            # sent_text 累计已推送的 token 文本：用户手动终止/客户端断开时，agent LLM
+            # 可能尚未生成完整回复（半截 token 不在 checkpoint，agent_node 未完成），
+            # 只有主循环消费到的 token 才能作为「已生成内容」落库。
+            while True:
+                evt = await queue.get()
+                if evt is None:
+                    break
+                if evt.get("event") == "token":
+                    sent_text += str(evt.get("content", ""))
+                yield json.dumps(evt, ensure_ascii=False)
+            await graph_task
+        except BaseException:
+            # 手动终止 / 客户端断开（GeneratorExit / uvicorn 取消的 CancelledError）。
+            # 两者都继承 BaseException（不是 Exception），_run_graph 内部的
+            # except Exception 不会捕获、graph_task 会成为孤儿任务继续跑完图。
+            # 1) 取消后台图执行（LangGraph astream 支持 asyncio 取消，
+            #    CancelledError 一路穿到子图 PregelLoop）；
+            # 2) 收尾落库移入独立 task（_abort_cleanup）：当前 task 已处于取消态，
+            #    任何 await 立即再抛 CancelledError，直接 await 落库会全部失败。
+            if graph_task and not graph_task.done():
+                graph_task.cancel()
+            task = asyncio.create_task(_abort_cleanup(conv_id, sent_text, tool_recorder, trace.id))
+            _bg_abort_tasks.add(task)
+            task.add_done_callback(_bg_abort_tasks.discard)
+            raise
         stream_interrupts = stream_interrupts_holder.get("v")
 
         # 取最终状态：interrupt 挂起 / agent_response 终文
