@@ -179,6 +179,9 @@ async def upload_campaign_file(db: AsyncSession, user_id: str, department_id: st
     except Exception as e:
         logger.warning("营销活动文件解析失败 %s: %s", filename, e)
         raise HTTPException(500, f"文件解析失败: {e}")
+    if not text.strip():
+        # 解析结果为空：扫描件 PDF / 老式 .doc / 不支持的格式，无法进入提炼
+        raise HTTPException(400, "文件解析结果为空（可能是不支持的格式或扫描件，请使用含文字的 PDF/Word/文本）")
     exp = await distill_campaign_experience(text, user_id)
     if exp is None:
         raise HTTPException(400, "未能从文件中识别出可沉淀的营销经验")

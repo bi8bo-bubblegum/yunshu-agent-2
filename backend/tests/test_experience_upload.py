@@ -1,7 +1,9 @@
 # backend/tests/test_experience_upload.py
+import io
 from datetime import date
 
 import pytest
+from docx import Document as DocxDocument
 from httpx import AsyncClient, ASGITransport
 from sqlalchemy import func, select
 
@@ -51,6 +53,46 @@ async def test_upload_markdown_creates_draft(db_session, monkeypatch):
     assert exp.title == "国庆大促复盘"
     assert exp.event_time == date(2024, 10, 1)
     assert exp.result_metrics == {"gmv": 320, "roi": 5}
+
+
+@pytest.mark.asyncio
+async def test_upload_docx_with_table_includes_table_data(db_session, monkeypatch):
+    """上传方案+数据表格混合 docx：表格内容（效果指标）必须进 LLM prompt。
+
+    真实事故：parse_text 只提段落不提表格，营销活动 docx 的效果指标全丢，
+    LLM 因缺 result_metrics 判无价值 → 400。"""
+    class FakeLLM:
+        def with_structured_output(self, schema):
+            return self
+        async def ainvoke(self, prompt):
+            assert "GMV" in prompt and "860万" in prompt  # 表格数据确实喂给了 LLM
+            return DistillOutput(
+                title="国庆大促复盘", summary="直播+满减，ROI 5.2",
+                content="详情", tags=["营销"],
+                event_time=date(2024, 10, 1), result_metrics={"gmv": 860, "roi": 5.2},
+            )
+    monkeypatch.setattr("app.services.experience_svc.ModelFactory.get_llm", lambda: FakeLLM())
+    async def _embed(t):
+        return [[0.1] * 1536]
+    monkeypatch.setattr("app.services.experience_svc.embed_texts", _embed)
+
+    doc = DocxDocument()
+    doc.add_paragraph("国庆营销活动复盘方案")
+    table = doc.add_table(rows=2, cols=2)
+    table.cell(0, 0).text = "GMV"
+    table.cell(0, 1).text = "860万"
+    table.cell(1, 0).text = "ROI"
+    table.cell(1, 1).text = "5.2"
+    buf = io.BytesIO()
+    doc.save(buf)
+
+    transport = ASGITransport(app=app)
+    h = await _register(transport, "up4")
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        files = {"file": ("活动复盘.docx", buf.getvalue(), "application/vnd.openxmlformats-officedocument.wordprocessingml.document")}
+        r = await c.post("/api/experiences/upload", files=files, headers=h)
+        assert r.status_code == 200, r.text
+        assert r.json()["title"] == "国庆大促复盘"
 
 
 @pytest.mark.asyncio
