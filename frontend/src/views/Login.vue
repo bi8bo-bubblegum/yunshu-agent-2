@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import client from '../api/client'
 import { toast } from '../api/toast'
@@ -11,6 +11,32 @@ const password = ref('')
 const displayName = ref('')
 const loading = ref(false)
 const showPwd = ref(false)
+
+// 钉钉扫码登录（M2）：enabled 时才显示入口；跳转 qrconnect 授权页后回跳 /dingtalk/callback
+const dingtalkEnabled = ref(false)
+const dingtalkClientId = ref('')
+onMounted(async () => {
+  try {
+    const { data } = await client.get('/auth/dingtalk/config')
+    dingtalkEnabled.value = !!data.enabled
+    dingtalkClientId.value = data.client_id || ''
+  } catch { /* 未配置钉钉时保持隐藏 */ }
+})
+
+function dingtalkLogin() {
+  // state 随机串存 sessionStorage，回调页校验防止 CSRF
+  const state = Math.random().toString(36).slice(2)
+  sessionStorage.setItem('dingtalk_state', state)
+  const redirectUri = `${window.location.origin}/dingtalk/callback`
+  const params = new URLSearchParams({
+    appid: dingtalkClientId.value,
+    response_type: 'code',
+    scope: 'snsapi_login',
+    state,
+    redirect_uri: redirectUri,
+  })
+  location.href = `https://oapi.dingtalk.com/connect/qrconnect?${params}`
+}
 
 async function submit() {
   if (!username.value || !password.value) return toast('请输入账号和密码', 'error')
@@ -137,11 +163,15 @@ async function submit() {
 
           <div class="divider">
             <span class="divider-line"></span>
-            <span class="divider-text">或使用企业 SSO</span>
+            <span class="divider-text">或使用钉钉扫码登录</span>
             <span class="divider-line"></span>
           </div>
 
-          <button type="button" class="sso-btn" :disabled="loading" @click="toast('企业 SSO 尚未开通', 'info')">
+          <button v-if="dingtalkEnabled" type="button" class="sso-btn" :disabled="loading" @click="dingtalkLogin">
+            <span class="sso-icon">💙</span>钉钉扫码登录
+          </button>
+          <button v-else type="button" class="sso-btn" :disabled="loading"
+                  @click="toast('企业 SSO 尚未开通，请联系管理员配置钉钉', 'info')">
             <span class="sso-icon">🛡</span>通过企业 SSO 登录
           </button>
 

@@ -9,8 +9,8 @@ import type { User } from './api/types'
 const route = useRoute()
 const router = useRouter()
 
-// 登录页为独立页：不渲染 app-shell（侧边栏/顶栏）
-const isLogin = computed(() => route.path === '/login')
+// 登录页 / 钉钉扫码回调页为独立页：不渲染 app-shell（侧边栏/顶栏）
+const isLogin = computed(() => route.path === '/login' || route.path === '/dingtalk/callback')
 
 const navs = [
   { key: 'chat', label: '聊天工作台', path: '/chat' },

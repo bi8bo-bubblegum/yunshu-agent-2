@@ -16,6 +16,11 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
 
+class DingTalkLoginRequest(BaseModel):
+    """钉钉登录：mode=workbench（钉钉内工作台免登码）/ scan（网页扫码 authCode）。"""
+    mode: str
+    code: str
+
 class UserOut(BaseModel):
     id: str
     username: str
