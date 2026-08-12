@@ -9,20 +9,25 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from app.core.config import settings
 from app.core.response import convert_datetimes_to_beijing
-from app.api import auth, org, chat, conversations, document, experiences, approval, traces, configs
+from app.api import auth, org, chat, conversations, document, experiences, approval, traces, configs, dingtalk
 from app.traces.writer import trace_writer_loop
 from app.services.dingtalk.stream import start_stream_subscriber
+from app.services.dingtalk.org_sync import start_org_sync_loop
 from app.agents import graph as graph_module
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """挂载常驻后台任务：留痕批量落库 + 钉钉 Stream 事件订阅（可开关）。"""
+    """挂载常驻后台任务：留痕批量落库 + 钉钉 Stream 事件订阅 / 组织同步（可开关）。"""
     task = asyncio.create_task(trace_writer_loop())
     # 钉钉 Stream 常驻：仅当凭证已配置且显式启用时启动，避免本地无钉钉环境报错
     stream_task = None
     if settings.dingtalk_enabled and settings.DINGTALK_STREAM_ENABLED:
         stream_task = asyncio.create_task(start_stream_subscriber())
+    # 钉钉组织定时对账：凭证已配置即启动（与 Stream 独立，只拉取通讯录接口）
+    sync_loop_task = None
+    if settings.dingtalk_enabled:
+        sync_loop_task = asyncio.create_task(start_org_sync_loop())
     # 在应用事件循环中初始化主图（连接池绑定当前 loop，
     # 避免模块导入时用临时事件循环创建连接导致跨 loop 冲突）
     graph_module.graph = await graph_module.get_graph()
@@ -32,6 +37,8 @@ async def lifespan(app: FastAPI):
         task.cancel()
         if stream_task:
             stream_task.cancel()
+        if sync_loop_task:
+            sync_loop_task.cancel()
 
 
 app = FastAPI(title="云枢 Agent", lifespan=lifespan)
@@ -75,3 +82,4 @@ app.include_router(experiences.router)
 app.include_router(approval.router)
 app.include_router(traces.router)
 app.include_router(configs.router)
+app.include_router(dingtalk.router)

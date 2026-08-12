@@ -5,4 +5,5 @@ from app.models.knowledge import Document, Chunk
 from app.models.trace import TraceEvent, ExecutionTrace, Approval
 from app.models.configs import McpServer, AgentMcpBinding
 from app.models.preferences import Preference
-__all__ = ["User", "Department", "Role", "Message", "Conversation", "Experience", "Document", "Chunk", "ExecutionTrace", "TraceEvent", "Approval", "McpServer", "AgentMcpBinding", "Preference"]
+from app.models.dingtalk import DingTalkSyncState, ApprovalBinding
+__all__ = ["User", "Department", "Role", "Message", "Conversation", "Experience", "Document", "Chunk", "ExecutionTrace", "TraceEvent", "Approval", "McpServer", "AgentMcpBinding", "Preference", "DingTalkSyncState", "ApprovalBinding"]

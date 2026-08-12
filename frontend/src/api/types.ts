@@ -6,6 +6,12 @@ export interface User {
   display_name: string
   role_code: string
   department_id: string | null
+  // 钉钉同步字段
+  dingtalk_userid?: string | null
+  source?: string | null
+  status?: string | null
+  title?: string | null
+  synced_at?: string | null
 }
 
 export interface Conversation {
@@ -91,6 +97,9 @@ export interface ApprovalItem {
 export interface Department {
   id: string
   name: string
+  parent_id: string | null
+  dingtalk_dept_id: number | null
+  source: string | null
 }
 
 export interface McpServer {

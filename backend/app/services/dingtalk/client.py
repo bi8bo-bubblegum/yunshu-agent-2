@@ -11,6 +11,9 @@
 进程内单例使用：不引入 Redis，缓存存在内存；进程重启后自动重新获取。
 """
 import asyncio
+import base64
+import hashlib
+import hmac
 import logging
 import time
 
@@ -186,23 +189,93 @@ class DingTalkClient:
     # ------------------------------------------------------------------
 
     async def get_userinfo_by_code(self, auth_code: str) -> dict:
-        """通过免登码获取用户信息（旧版 topapi/v2/user/getuserinfo）。
+        """通过免登码获取用户信息（topapi/v2/user/getuserinfo，官方文档确认）。
 
-        用于 H5 微应用免登：前端 dd.getAuthCode() 得到 auth_code 后，
-        后端拿企业内部应用 token 换 userid。返回 result 含 userid/unionid。
+        用于钉钉内 H5 工作台免登：前端 dd.getAuthCode() 得到免登码后，
+        后端拿企业内部应用 token 换 userid。返回 result 含 userid/unionid/name。
         """
         body = await self._post_oapi("/topapi/v2/user/getuserinfo", json={"code": auth_code})
         return body.get("result") or {}
 
     async def get_user_by_unionid(self, unionid: str) -> str | None:
-        """根据 unionid 获取钉钉 userid（旧版 topapi/user/getbyunionid）。
+        """根据 unionid 获取钉钉 userid（topapi/user/getbyunionid，官方文档确认）。
 
-        网页扫码登录链路：authCode → 用户 token → /contact/users/me 拿 unionid
-        → 本接口换 userid（注意：必须用企业内部应用 token，不能用用户 token）。
+        网页扫码登录链路：免登码 → unionid（sns 接口）→ 本接口换 userid。
+        注意：文档明确必须用企业内部应用 token 调本接口，不能用免登用户 token。
         """
         body = await self._post_oapi("/topapi/user/getbyunionid", json={"unionid": unionid})
         result = body.get("result") or {}
+        # contact_type: 0=企业内部员工 1=外部联系人
         return result.get("userid")
+
+    async def get_sns_userinfo_bycode(self, tmp_auth_code: str) -> dict:
+        """网页扫码登录：免登授权码换用户信息（sns/getuserinfo_bycode，官方文档确认）。
+
+        与内部应用免登不同：不走 access_token，认证用 query 参数
+        accessKey(AppId) + timestamp(毫秒) + signature（HmacSHA256 签名，
+        签名字符串 timestamp+"\\n"+AppSecret）。返回 user_info（unionid/nick/openid，无 userid）。
+        """
+        timestamp = str(int(time.time() * 1000))
+        sign_str = f"{timestamp}\n{self.client_secret}"
+        signature = base64.b64encode(
+            hmac.new(self.client_secret.encode(), sign_str.encode(), hashlib.sha256).digest()
+        ).decode()
+        async with httpx.AsyncClient(base_url="https://oapi.dingtalk.com", timeout=15,
+                                     transport=self._transport) as c:
+            resp = await c.post(
+                "/sns/getuserinfo_bycode",
+                params={"accessKey": self.client_id, "timestamp": timestamp, "signature": signature},
+                json={"tmp_auth_code": tmp_auth_code},
+            )
+            body = resp.json()
+            if body.get("errcode") != 0:
+                self._raise_error(body, str(body.get("errcode", "unknown")))
+            return body.get("user_info") or {}
+
+    # ------------------------------------------------------------------
+    # 通讯录接口（M3 组织同步，全部走旧版 OAPI）
+    # ------------------------------------------------------------------
+
+    async def get_dept_detail(self, dept_id: int) -> dict:
+        """部门详情（topapi/v2/department/get）：返回 name / parent_id / id 等。"""
+        body = await self._post_oapi("/topapi/v2/department/get", json={"dept_id": dept_id, "language": "zh_CN"})
+        return body.get("result") or {}
+
+    async def list_sub_departments(self, dept_id: int) -> list[dict]:
+        """获取指定部门的直属下级部门（topapi/v2/department/listsub）。
+
+        只取下一级，不递归；返回元素含 dept_id / name / parent_id。
+        """
+        body = await self._post_oapi("/topapi/v2/department/listsub",
+                                     json={"dept_id": dept_id, "language": "zh_CN"})
+        return body.get("result") or []
+
+    async def list_dept_users(self, dept_id: int, cursor: int = 0, size: int = 100) -> tuple[list[dict], bool, int]:
+        """分页获取指定部门直属员工完整详情（topapi/v2/user/list，官方文档确认）。
+
+        返回 (员工列表, has_more, next_cursor)；分页终止以 has_more=false 为准
+        （官方文档明确，不能只看 next_cursor 是否为 0）。
+        员工元素含 userid / unionid / name / avatar / mobile / job_number / title / email /
+        dept_id_list(Number[]) / active / admin / leader。
+        """
+        body = await self._post_oapi("/topapi/v2/user/list", json={
+            "dept_id": dept_id, "cursor": cursor, "size": size, "language": "zh_CN"})
+        result = body.get("result") or {}
+        return result.get("list") or [], bool(result.get("has_more")), int(result.get("next_cursor") or 0)
+
+    async def list_all_dept_users(self, dept_id: int) -> list[dict]:
+        """循环翻页拉取指定部门全部直属员工（has_more 终止，供全量同步用）。"""
+        users: list[dict] = []
+        cursor, has_more = 0, True
+        while has_more:
+            page, has_more, cursor = await self.list_dept_users(dept_id, cursor=cursor)
+            users.extend(page)
+        return users
+
+    async def get_user_detail(self, userid: str) -> dict:
+        """员工详情（topapi/v2/user/get）：供增量事件按 userid 拉取单条最新数据。"""
+        body = await self._post_oapi("/topapi/v2/user/get", json={"userid": userid, "language": "zh_CN"})
+        return body.get("result") or {}
 
 
 # 进程内共享单例（避免各模块各自建 client、重复缓存 token）

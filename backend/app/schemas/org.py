@@ -8,6 +8,9 @@ class DepartmentOut(BaseModel):
     id: str
     name: str
     owner_id: str | None = None
+    parent_id: str | None = None
+    dingtalk_dept_id: int | None = None
+    source: str | None = None
     model_config = {"from_attributes": True}
 
 class UserUpdate(BaseModel):
