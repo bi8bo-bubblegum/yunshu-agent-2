@@ -100,12 +100,21 @@ async def _distill_with_retry(llm, prompt: str) -> DistillOutput | None:
     return result
 
 
+def _distill_has_value(result: DistillOutput | None) -> bool:
+    """提炼结果是否有价值：title 为空、或 LLM 把 JSON null 输出成 'null'/'None' 字符串，
+    均视为无价值（真实事故：LLM 返回 title='null' 字符串，if not title 判定为真值，
+    落库了 title='null'、内容全空的无效经验）。"""
+    if not result or not result.title:
+        return False
+    return str(result.title).strip().lower() not in ("null", "none")
+
+
 async def distill_experience(text: str, user_id: str, trace_id: str) -> Experience | None:
     """对话自动提炼经验（无价值返回 None，不落库）。"""
     llm = ModelFactory.get_llm().with_structured_output(DistillOutput)
     prompt = DISTILL_PROMPT.format(text=text[:6000])
     result = await _distill_with_retry(llm, prompt)
-    if not result or not result.title:
+    if not _distill_has_value(result):
         return None
     vec = (await embed_texts([f"{result.title} {result.summary}"]))[0]
     return Experience(
@@ -155,7 +164,7 @@ async def distill_campaign_experience(text: str, user_id: str) -> Experience | N
     llm = ModelFactory.get_llm().with_structured_output(DistillOutput)
     prompt = CAMPAIGN_DISTILL_PROMPT.format(text=text[:CAMPAIGN_MAX_CHARS])
     result = await _distill_with_retry(llm, prompt)
-    if not result or not result.title:
+    if not _distill_has_value(result):
         return None
     vec = (await embed_texts([f"{result.title} {result.summary}"]))[0]
     return Experience(

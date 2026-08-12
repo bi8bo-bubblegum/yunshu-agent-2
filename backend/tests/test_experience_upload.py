@@ -118,6 +118,30 @@ async def test_upload_unvaluable_returns_400(db_session, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_upload_title_null_string_returns_400(db_session, monkeypatch):
+    """LLM 把 JSON null 输出成字符串 'null' → 视为无价值，400 不落库。
+
+    真实事故：title='null' 字符串被 if not title 判为真值，落库了内容全空的无效经验。"""
+    class FakeLLM:
+        def with_structured_output(self, schema):
+            return self
+        async def ainvoke(self, prompt):
+            return DistillOutput(title="null", summary="", content="")
+    monkeypatch.setattr("app.services.experience_svc.ModelFactory.get_llm", lambda: FakeLLM())
+    async def _embed(t):
+        return [[0.1] * 1536]
+    monkeypatch.setattr("app.services.experience_svc.embed_texts", _embed)
+
+    transport = ASGITransport(app=app)
+    h = await _register(transport, "up5")
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        files = {"file": ("无价值.txt", "普通文本".encode(), "text/plain")}
+        r = await c.post("/api/experiences/upload", files=files, headers=h)
+        assert r.status_code == 400
+    assert (await db_session.scalar(select(func.count()).select_from(Experience))) == 0
+
+
+@pytest.mark.asyncio
 async def test_upload_bad_pdf_returns_500(db_session):
     """损坏 pdf 文件 → 解析失败 → 500 且不落库。"""
     transport = ASGITransport(app=app)
