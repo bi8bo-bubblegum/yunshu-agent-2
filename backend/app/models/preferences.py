@@ -14,3 +14,8 @@ class Preference(Base):
     confidence: Mapped[float] = mapped_column(Float, default=0.5)
     source: Mapped[str] = mapped_column(String(64), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # 最近一次确认/刷新的时间，驱动注入排序（新鲜优先）。onupdate 仅作 ORM 兜底，
+    # merge 命中时显式赋值（confidence 相同时 SQLAlchemy 不生成 UPDATE，onupdate 不触发）。
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(),
+    )

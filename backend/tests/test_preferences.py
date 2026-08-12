@@ -94,3 +94,67 @@ async def test_batch_preference_across_conversations(db_session, monkeypatch):
     assert sum("c1q" in d for d in dialogs) == 6
     assert sum("c2q" in d for d in dialogs) == 4
     assert all("助手：" in d for d in dialogs)
+
+
+@pytest.mark.asyncio
+async def test_merge_refresh_updated_at(db_session):
+    """merge 命中同一偏好时刷新 updated_at：再次观察到该偏好 = 偏好仍活跃。
+
+    关键场景：confidence 不变时 SQLAlchemy 不生成 UPDATE（onupdate 不触发），
+    必须显式赋值 updated_at，否则偏好新鲜度永不更新、注入排序恒为 created_at 序。"""
+    from datetime import datetime, timezone
+    repo = PreferenceRepository(db_session)
+    await repo.merge(user_id="u1", category="style", content="回答简洁", confidence=0.8, source="s1")
+    row = (await db_session.scalars(select(Preference).where(Preference.user_id == "u1"))).one()
+    past = datetime(2020, 1, 1, tzinfo=timezone.utc)
+    row.updated_at = past  # 模拟很久没再确认
+    await db_session.flush()
+    # 再次确认同一偏好，confidence 相同（仅靠 onupdate 不会刷新）
+    await repo.merge(user_id="u1", category="style", content="回答简洁", confidence=0.8, source="s2")
+    await db_session.flush()
+    assert row.updated_at > past
+
+
+@pytest.mark.asyncio
+async def test_build_context_top_n(db_session):
+    """偏好超过注入上限时只取最新 Top-N（LIMIT 截断），最旧偏好被排除。"""
+    from datetime import datetime, timedelta, timezone
+    from app.memory.preferences import build_context, MAX_PREF_CHARS
+    base = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    repo = PreferenceRepository(db_session)
+    for i in range(12):
+        await repo.merge(user_id="u1", category="style", content=f"偏好{i:02d}", confidence=0.5, source="s")
+        row = (await db_session.scalars(select(Preference).where(Preference.user_id == "u1", Preference.content == f"偏好{i:02d}"))).one()
+        row.updated_at = base + timedelta(days=i)  # i 越大越新
+    await db_session.flush()
+
+    ctx = await build_context(db_session, "u1")
+    assert ctx.startswith("【个人偏好】")
+    assert "偏好00" not in ctx and "偏好01" not in ctx, "最旧 2 条应被 LIMIT 排除"
+    for i in range(2, 12):
+        assert f"偏好{i:02d}" in ctx, f"最新偏好{i:02d} 应注入"
+    assert len(ctx) <= MAX_PREF_CHARS
+
+
+@pytest.mark.asyncio
+async def test_build_context_recency(db_session):
+    """再次确认的偏好 updated_at 刷新后，注入排序前移（软性演化，零误删）。"""
+    from datetime import datetime, timezone
+    from app.memory.preferences import build_context
+    repo = PreferenceRepository(db_session)
+    await repo.merge(user_id="u1", category="style", content="回答简洁", confidence=0.6, source="s1")
+    await repo.merge(user_id="u1", category="habit", content="偏好邮件沟通", confidence=0.6, source="s1")
+    rows = {p.content: p for p in (await db_session.scalars(select(Preference).where(Preference.user_id == "u1"))).all()}
+    rows["回答简洁"].updated_at = datetime(2022, 1, 1, tzinfo=timezone.utc)
+    rows["偏好邮件沟通"].updated_at = datetime(2025, 1, 1, tzinfo=timezone.utc)
+    await db_session.flush()
+
+    def _first(ctx: str) -> str:
+        return "回答简洁" if ctx.index("回答简洁") < ctx.index("偏好邮件沟通") else "偏好邮件沟通"
+
+    # 新确认的「偏好邮件沟通」优先注入
+    assert _first(await build_context(db_session, "u1")) == "偏好邮件沟通"
+    # 再次确认「回答简洁」（刷新 updated_at 为当前时间）→ 排到最前
+    await repo.merge(user_id="u1", category="style", content="回答简洁", confidence=0.6, source="s2")
+    await db_session.flush()
+    assert _first(await build_context(db_session, "u1")) == "回答简洁"
