@@ -8,6 +8,7 @@ import Md from '../components/Md.vue'
 
 const items = ref<ExperienceItem[]>([])
 const showCreate = ref(false)
+const uploading = ref(false)
 const form = ref({ title: '', summary: '', content: '', tags: '' })
 const detailTarget = ref<ExperienceDetail | null>(null)
 
@@ -18,6 +19,25 @@ async function load() {
     const { data } = await client.get<ExperienceItem[]>('/experiences')
     items.value = data
   } catch { /* ignore */ }
+}
+
+async function onUpload(e: Event) {
+  const el = e.target as HTMLInputElement
+  const file = el.files?.[0]
+  if (!file) return
+  uploading.value = true
+  const form = new FormData()
+  form.append('file', file)
+  try {
+    await client.post('/experiences/upload', form)
+    toast('已生成经验草稿', 'success')
+    await load()
+  } catch (err: any) {
+    toast(err.response?.data?.detail || '解析失败', 'error')
+  } finally {
+    uploading.value = false
+    el.value = ''
+  }
 }
 
 async function create() {
@@ -78,7 +98,13 @@ const statusLabel: Record<string, string> = { draft: '草稿', pending: '审批�
   <div class="page-wrap">
     <div class="row-between mb-12">
       <p class="text-muted">个人经验沉淀 · 部门/公司层级晋升，经统一审批中心审核</p>
-      <button class="btn btn-primary" @click="showCreate = !showCreate">+ 沉淀经验</button>
+      <div class="row" style="gap:8px">
+        <label class="btn">
+          {{ uploading ? '解析中…' : '上传活动文件' }}
+          <input type="file" style="display:none" accept=".pdf,.doc,.docx,.txt,.md" @change="onUpload" />
+        </label>
+        <button class="btn btn-primary" @click="showCreate = !showCreate">+ 沉淀经验</button>
+      </div>
     </div>
 
     <div v-if="showCreate" class="card mb-12">

@@ -1,10 +1,11 @@
 # backend/app/api/experiences.py —— 薄路由
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, File, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
 from app.core.deps import get_db, get_current_user
 from app.models.org import User
 from app.services.experience_service import ExperienceService
+from app.services.experience_svc import upload_campaign_file
 
 router = APIRouter(prefix="/api/experiences", tags=["experiences"])
 
@@ -24,6 +25,15 @@ class SubmitRequest(BaseModel):
 
 def get_exp_service(db: AsyncSession = Depends(get_db)) -> ExperienceService:
     return ExperienceService(db)
+
+
+@router.post("/upload")
+async def upload_experience_file(file: UploadFile = File(...), db: AsyncSession = Depends(get_db),
+                                 user: User = Depends(get_current_user)):
+    """上传营销活动文件（pdf/docx/txt/md），解析后自动沉淀为个人草稿经验。"""
+    content = await file.read()
+    exp = await upload_campaign_file(db, user.id, user.department_id, file.filename, content)
+    return {"ok": True, "id": exp.id, "title": exp.title, "summary": exp.summary}
 
 
 @router.post("")

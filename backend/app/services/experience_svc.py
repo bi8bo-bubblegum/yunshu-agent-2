@@ -1,6 +1,7 @@
 # backend/app/services/experience_svc.py
 import logging
 from datetime import date
+from fastapi import HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.experience import Experience
@@ -80,11 +81,11 @@ async def build_experience_dialog(db: AsyncSession, conv_id: str) -> str:
     return dialog
 
 
-async def distill_experience(text: str, user_id: str, trace_id: str) -> Experience | None:
-    llm = ModelFactory.get_llm().with_structured_output(DistillOutput)
-    prompt = DISTILL_PROMPT.format(text=text[:6000])
-    # LLM 偶发返回非法日期（如 0000-01-01）会导致 pydantic 校验失败，
-    # 重试一次并强调日期约束；仍失败则放弃本条经验，不影响聊天主流程
+async def _distill_with_retry(llm, prompt: str) -> DistillOutput | None:
+    """LLM 结构化输出 + 非法日期重试一次，返回 DistillOutput（无价值/失败时 title 为空）。
+
+    LLM 偶发返回非法日期（如 0000-01-01）会导致 pydantic 校验失败，重试一次并强调
+    日期约束；仍失败则放弃本条经验，不影响主流程。"""
     result = None
     for attempt, extra in enumerate((
         "",
@@ -96,7 +97,15 @@ async def distill_experience(text: str, user_id: str, trace_id: str) -> Experien
             break
         except Exception as e:
             logger.warning("经验提炼 LLM 输出校验失败（第 %d 次）: %s", attempt + 1, e)
-    if not result.title:
+    return result
+
+
+async def distill_experience(text: str, user_id: str, trace_id: str) -> Experience | None:
+    """对话自动提炼经验（无价值返回 None，不落库）。"""
+    llm = ModelFactory.get_llm().with_structured_output(DistillOutput)
+    prompt = DISTILL_PROMPT.format(text=text[:6000])
+    result = await _distill_with_retry(llm, prompt)
+    if not result or not result.title:
         return None
     vec = (await embed_texts([f"{result.title} {result.summary}"]))[0]
     return Experience(
@@ -106,7 +115,73 @@ async def distill_experience(text: str, user_id: str, trace_id: str) -> Experien
         source_trace_id=trace_id, embedding=vec,
     )
 
+
 async def save_personal_experience(db: AsyncSession, exp: Experience) -> None:
     repo = ExperienceRepository(db)
     await repo.add(exp)
     await repo.commit()
+
+
+# 营销活动文件经验提炼提示词：与对话提炼（DISTILL_PROMPT）并列，专门处理上传的
+# 营销活动方案/复盘/报表文件。营销类经验必须带 event_time + result_metrics，
+# 否则视为无价值（与 DISTILL_PROMPT 一致的价值判定），避免报表文件沉淀出垃圾经验。
+CAMPAIGN_DISTILL_PROMPT = (
+    "你是营销活动经验提炼器。从营销活动文件中提炼【可复用的营销经验】："
+    "一次实际营销活动（方案/复盘/报表）中形成的、未来同类活动可复用的策略、打法或教训。\n"
+    "\n"
+    "## 从文件中提取：\n"
+    "1. 活动名称、活动时间、活动周期、渠道、预算、目标人群；\n"
+    "2. 效果指标：GMV、ROI、转化率、订单量、拉新数、客单价等；\n"
+    "3. 核心打法：渠道组合、预算分配、玩法（满减/直播/裂变/会员日等）；\n"
+    "4. 复盘结论：成功原因、失败教训、下次改进点。\n"
+    "\n"
+    "## 无价值场景（title 必须为 null）：\n"
+    "1. 文件不含实际营销活动信息（空内容、纯数据表无背景无结论、无法识别活动）；\n"
+    "2. 只有活动名称，没有效果指标与打法，无法形成可复用经验。\n"
+    "\n"
+    "## 输出要求：\n"
+    "- 有价值 → title 简洁概括（≤20 字），summary 提炼可复用要点，content 记录活动全貌（背景/做法/结果）；\n"
+    "- 营销活动经验必须包含 event_time（活动时间）和 result_metrics（效果指标），否则视为无价值，title 设为 null。\n"
+    "\n"
+    "文件内容：\n{text}"
+)
+
+# 营销活动文件文本喂 LLM 的上限：活动方案/报表可能很大，超出部分丢弃（保留开头）。
+CAMPAIGN_MAX_CHARS = 8000
+
+
+async def distill_campaign_experience(text: str, user_id: str) -> Experience | None:
+    """从营销活动文件文本提炼经验（不落库，无价值返回 None）。"""
+    llm = ModelFactory.get_llm().with_structured_output(DistillOutput)
+    prompt = CAMPAIGN_DISTILL_PROMPT.format(text=text[:CAMPAIGN_MAX_CHARS])
+    result = await _distill_with_retry(llm, prompt)
+    if not result or not result.title:
+        return None
+    vec = (await embed_texts([f"{result.title} {result.summary}"]))[0]
+    return Experience(
+        owner_id=user_id, scope="personal", status="draft",
+        title=result.title, summary=result.summary, content=result.content,
+        tags=result.tags, event_time=result.event_time, result_metrics=result.result_metrics,
+        embedding=vec,
+    )
+
+
+async def upload_campaign_file(db: AsyncSession, user_id: str, department_id: str | None,
+                               filename: str, content: bytes) -> Experience:
+    """解析营销活动文件 → LLM 提炼 → 落库为个人草稿经验（不落盘原文件）。
+
+    文件是临时载体，沉淀目标是经验；解析出的文本只喂给提炼 LLM，不持久化，
+    避免 storage 目录随活动文件增长。解析失败（坏文件）由调用方兜底。"""
+    from app.services.document_parser import parse_text
+    ext = filename.rsplit(".", 1)[-1].lower()
+    try:
+        text = parse_text(content, ext)
+    except Exception as e:
+        logger.warning("营销活动文件解析失败 %s: %s", filename, e)
+        raise HTTPException(500, f"文件解析失败: {e}")
+    exp = await distill_campaign_experience(text, user_id)
+    if exp is None:
+        raise HTTPException(400, "未能从文件中识别出可沉淀的营销经验")
+    exp.department_id = department_id
+    await save_personal_experience(db, exp)
+    return exp
