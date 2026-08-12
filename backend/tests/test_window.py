@@ -16,7 +16,7 @@ tool message，token 按轮次平方级浪费。
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from app.agents.window import round_window
+from app.agents.window import round_window, MAX_TOOL_CHARS, MAX_HIST_TOOL_CHARS
 
 
 def test_round_window_keeps_recent_rounds():
@@ -92,3 +92,56 @@ def test_round_window_truncates_beyond_10():
     assert len(win) == 10
     assert win[0].content == "第6轮"
     assert win[-1].content == "第15轮"
+
+
+def test_huge_tool_message_truncated_to_budget():
+    """工具返回全量数据（如 query_lines 实测 25.6MB）截断到单条预算，
+    否则单轮就撑爆上下文窗口（真实事故：ContextWindowExceededError）。"""
+    huge = "x" * (MAX_TOOL_CHARS + 5000)
+    msgs = [
+        HumanMessage(content="查一下线路"),
+        AIMessage(content="", tool_calls=[{"name": "query_lines", "args": {}, "id": "1"}]),
+        ToolMessage(content=huge, tool_call_id="1"),
+    ]
+    win = round_window(msgs)
+    # 单轮场景：窗口短，全部视为当前轮 → 按 MAX_TOOL_CHARS 截断
+    tool = win[-1]
+    assert isinstance(tool.content, str)
+    assert tool.content.startswith("x" * MAX_TOOL_CHARS), "保留前 MAX_TOOL_CHARS 字符"
+    assert "已截断" in tool.content
+    assert len(tool.content) < MAX_TOOL_CHARS + 200, "仅尾部追加截断标记，不膨胀"
+
+
+def test_historical_tool_compressed_to_small_budget():
+    """历史轮次的工具数据（已由 agent 消化成回复）压到历史预算；
+    当前轮往返（最近 RECENT_MSG_KEEP 条）保留更大单条上限。"""
+    big_hist = "h" * (MAX_HIST_TOOL_CHARS + 2000)   # 历史轮大工具返回
+    big_cur = "c" * (MAX_HIST_TOOL_CHARS + 2000)    # 当前轮同样大小（未超当前预算）
+    msgs = [
+        HumanMessage(content="第一轮"),
+        AIMessage(content="第一轮回复"),
+        ToolMessage(content=big_hist, tool_call_id="t1"),   # 历史轮
+        HumanMessage(content="第二轮"),
+        AIMessage(content="", tool_calls=[{"name": "q", "args": {}, "id": "2"}]),
+        ToolMessage(content=big_cur, tool_call_id="2"),      # 当前轮
+    ]
+    win = round_window(msgs)
+    hist_tool = win[2]
+    cur_tool = win[5]
+    assert len(hist_tool.content) <= MAX_HIST_TOOL_CHARS + 100, len(hist_tool.content)
+    assert "已截断" in hist_tool.content
+    # 当前轮大工具：超过当前预算则截断，但阈值远大于历史预算
+    assert "已截断" not in cur_tool.content
+
+
+def test_small_tool_message_untouched():
+    """小工具返回不截断，且返回原对象（无副作用，不污染图状态）。"""
+    msgs = [
+        HumanMessage(content="查数据"),
+        AIMessage(content="", tool_calls=[{"name": "q", "args": {}, "id": "1"}]),
+        ToolMessage(content="小数据", tool_call_id="1"),
+    ]
+    win = round_window(msgs)
+    assert win == msgs
+    # 元素是同一对象：浅拷贝列表但未复制消息
+    assert win[2] is msgs[2]
