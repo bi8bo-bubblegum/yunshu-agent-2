@@ -2,6 +2,7 @@
 import { ref, onMounted } from 'vue'
 import client from '../api/client'
 import { toast } from '../api/toast'
+import { askConfirm } from '../api/confirm'
 import { fmtDateTime } from '../api/format'
 import type { DocumentItem, SearchHit } from '../api/types'
 
@@ -40,7 +41,7 @@ async function onUpload(e: Event) {
 }
 
 async function removeDoc(id: string, title: string) {
-  if (!confirm(`确认删除文档「${title}」？`) ) return
+  if (!(await askConfirm({ message: `确认删除文档「${title}」？`, danger: true }))) return
   try {
     await client.delete(`/documents/${id}`)
     toast('已删除', 'success')

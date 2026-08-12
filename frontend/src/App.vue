@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import client from './api/client'
 import { toasts } from './api/toast'
+import ConfirmDialog from './components/ConfirmDialog.vue'
 import type { User } from './api/types'
 
 const route = useRoute()
@@ -166,6 +167,7 @@ function go(path: string) {
     <div class="toast-wrap">
       <div v-for="t in toasts" :key="t.id" class="toast" :class="`toast-${t.kind}`">{{ t.text }}</div>
     </div>
+    <ConfirmDialog />
   </div>
 </template>
 

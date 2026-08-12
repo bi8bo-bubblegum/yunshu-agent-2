@@ -2,6 +2,7 @@
 import { ref, onMounted } from 'vue'
 import client from '../api/client'
 import { toast } from '../api/toast'
+import { askConfirm } from '../api/confirm'
 import { fmtDateTime } from '../api/format'
 import type { ExperienceDetail, ExperienceItem } from '../api/types'
 import Md from '../components/Md.vue'
@@ -61,7 +62,10 @@ async function create() {
 }
 
 async function submit(id: string, title: string, toScope: 'dept' | 'company') {
-  if (!confirm(`将「${title}」提交至${toScope === 'dept' ? '部门' : '公司'}层晋升审批？`)) return
+  if (!(await askConfirm({
+    title: '晋升审批',
+    message: `将「${title}」提交至${toScope === 'dept' ? '部门' : '公司'}层晋升审批？`,
+  }))) return
   try {
     await client.post(`/experiences/${id}/submit`, { to_scope: toScope })
     toast('已提交审批，等待管理员审核', 'success')
@@ -72,7 +76,7 @@ async function submit(id: string, title: string, toScope: 'dept' | 'company') {
 }
 
 async function removeItem(e: ExperienceItem) {
-  if (!confirm(`确认删除经验「${e.title}」？删除后不可恢复`)) return
+  if (!(await askConfirm({ message: `确认删除经验「${e.title}」？删除后不可恢复`, danger: true }))) return
   try {
     await client.delete(`/experiences/${e.id}`)
     toast('经验已删除', 'success')

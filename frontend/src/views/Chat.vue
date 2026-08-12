@@ -5,6 +5,7 @@ import { useRouter } from 'vue-router'
 import { streamChat, resumeChat, type SSEEvent } from '../api/chat'
 import client from '../api/client'
 import { toast } from '../api/toast'
+import { askConfirm } from '../api/confirm'
 import { fmtDateTime } from '../api/format'
 import type { Conversation, Message } from '../api/types'
 import Md from '../components/Md.vue'
@@ -116,7 +117,7 @@ function maybePollPending() {
 }
 
 async function removeConv(c: Conversation) {
-  if (!confirm(`确认删除会话「${c.title || '新会话'}」？删除后不可恢复`)) return
+  if (!(await askConfirm({ message: `确认删除会话「${c.title || '新会话'}」？删除后不可恢复`, danger: true }))) return
   try {
     await client.delete(`/conversations/${c.id}`)
     toast('会话已删除', 'success')
