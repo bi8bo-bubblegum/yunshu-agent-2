@@ -147,6 +147,33 @@ async def test_decide_tool_call_returns_immediately(db_session, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_list_shows_requester_and_approver_username(db_session):
+    """审批列表展示发起人/审批人 username（而非不可读的 id）。"""
+    transport = ASGITransport(app=app)
+    h_req = await _register(transport, "requser")
+    h_admin = await _register(transport, "admin3")
+    await _set_role(db_session, "admin3", "admin")
+    req = (await db_session.scalars(select(User).where(User.username == "requser"))).first()
+    db_session.add(Approval(category="tool_call", risk="critical", mode="sync", ref_type="trace",
+                            ref_id="t1", title="删除文件", status="pending",
+                            requester_id=str(req.id), approver_role="admin"))
+    await db_session.commit()
+    ap_id = (await db_session.scalars(select(Approval).where(Approval.ref_id == "t1"))).first().id
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        # 待审批：有发起人 username，无审批人
+        r = await c.get("/api/approvals?status=pending", headers=h_admin)
+        row = next(x for x in r.json() if x["id"] == ap_id)
+        assert row["requester_name"] == "requser"
+        assert row["approver_name"] is None
+        # 通过后：展示审批人 username
+        await c.post(f"/api/approvals/{ap_id}/decide", json={"approve": True, "comment": "ok"}, headers=h_admin)
+        r = await c.get("/api/approvals?status=approved", headers=h_admin)
+        row = next(x for x in r.json() if x["id"] == ap_id)
+        assert row["approver_name"] == "admin3"
+        assert row["requester_name"] == "requser"
+
+
+@pytest.mark.asyncio
 async def test_dept_owner_cannot_approve_other_dept(db_session):
     """dept_owner 只能审批本部门审批单：跨部门经验晋升返回 403。"""
     db_session.add(User(id="11111111-1111-1111-1111-111111111111", username="other", password_hash="x",

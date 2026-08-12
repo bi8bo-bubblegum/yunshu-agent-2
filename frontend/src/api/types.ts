@@ -79,9 +79,11 @@ export interface ApprovalItem {
   title: string
   context: Record<string, unknown> | null
   requester_id: string
+  requester_name: string
   status: string
   comment: string | null
   approver_id: string | null
+  approver_name: string | null
   submitted_at: string | null
   decided_at: string | null
 }

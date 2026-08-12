@@ -76,7 +76,7 @@ function fmtArgs(ctx: Record<string, unknown> | null): string {
       <div class="table-wrap" v-else>
         <table>
           <thead>
-            <tr><th>类型</th><th>标题</th><th>风险</th><th>详情</th><th>发起人</th><th>提交时间</th><th>状态</th><th style="text-align:right">操作</th></tr>
+            <tr><th>类型</th><th>标题</th><th>风险</th><th>详情</th><th>发起人</th><th>提交时间</th><th>状态</th><th>审批人</th><th style="text-align:right">备注</th></tr>
           </thead>
           <tbody>
             <tr v-for="a in items" :key="a.id">
@@ -87,16 +87,17 @@ function fmtArgs(ctx: Record<string, unknown> | null): string {
                 <span v-else class="tag tag-gray">—</span>
               </td>
               <td class="muted text-sm mono" style="max-width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ fmtArgs(a.context) }}</td>
-              <td class="muted text-sm">{{ a.requester_id?.slice(0, 8) }}</td>
+              <td class="muted text-sm">{{ a.requester_name || a.requester_id?.slice(0, 8) }}</td>
               <td class="muted text-sm">{{ fmtDateTime(a.submitted_at) }}</td>
               <td><span class="tag" :class="statusTag[a.status] ?? 'tag-gray'">{{ statusLabel[a.status] ?? a.status }}</span></td>
+              <td class="muted text-sm">{{ a.approver_name || '—' }}</td>
               <td style="text-align:right">
                 <button v-if="a.status === 'pending'" class="btn btn-sm btn-primary" @click="openDecide(a)">审批</button>
                 <span v-else class="muted text-sm">{{ a.comment || '—' }}</span>
               </td>
             </tr>
             <tr v-if="!items.length">
-              <td colspan="8"><div class="empty"><span class="icon">📋</span>{{ status === 'pending' ? '暂无待审批事项' : '暂无记录' }}</div></td>
+              <td colspan="9"><div class="empty"><span class="icon">📋</span>{{ status === 'pending' ? '暂无待审批事项' : '暂无记录' }}</div></td>
             </tr>
           </tbody>
         </table>

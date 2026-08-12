@@ -38,12 +38,18 @@ class ApprovalService:
         self.user_repo = UserRepository(db)
 
     async def list_pending(self, user: User, status: str | None = None, category: str | None = None):
-        """审批单列表（pending/approved/rejected），按角色可见性过滤，前端按 status 筛选展示。"""
+        """审批单列表（pending/approved/rejected），按角色可见性过滤，前端按 status 筛选展示。
+        发起人/审批人附 username（id 不可读，展示用）。"""
         rows = await self.approval_repo.list_for_user(
             user.id, user.role_code, user.department_id, status, category)
+        ids = {a.requester_id for a in rows} | {a.approver_id for a in rows if a.approver_id}
+        users = {u.id: u.username for u in await self.user_repo.list_by_ids(list(ids))}
         return [{"id": a.id, "category": a.category, "risk": a.risk, "mode": a.mode,
                  "title": a.title, "context": a.context, "requester_id": a.requester_id,
-                 "status": a.status, "comment": a.comment, "approver_id": a.approver_id,
+                 "requester_name": users.get(a.requester_id, ""),
+                 "status": a.status, "comment": a.comment,
+                 "approver_id": a.approver_id,
+                 "approver_name": users.get(a.approver_id) if a.approver_id else None,
                  "submitted_at": a.submitted_at.isoformat() if a.submitted_at else None,
                  "decided_at": a.decided_at.isoformat() if a.decided_at else None} for a in rows]
 
