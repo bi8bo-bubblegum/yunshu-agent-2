@@ -135,6 +135,9 @@ async function removeConv(c: Conversation) {
 // ---- 发送 / SSE ----
 let abortCtrl: AbortController | null = null
 let answerStarted = false
+// 服务端 SSE error 事件置位：图执行失败时后端已落失败消息，finally 里用 DB 刷新
+// 展示失败气泡，不再落入「（无响应）」占位 / 残留上一次的回复
+let errorReceived = false
 
 // 用户手动终止：置位终止标志并中断 SSE 流式请求，后端取消处理中异步落库半截回答
 function stopSend() {
@@ -296,6 +299,7 @@ async function send() {
   streamConv.value = currentId.value
   streamBuf.value = '⏳ 正在思考…'
   answerStarted = false
+  errorReceived = false
   streamTools.value = []  // 上一轮的实时工具卡片（终态落库后由 DB 消息重建，不再残留）
   // 清理残留的流式缓冲气泡：若上一轮异常中断未做 DB 刷新，列表里可能还留着
   // 旧的 id='stream-buf'，与本次新 push 的重复，导致 renderStreamText 更新错
@@ -380,6 +384,7 @@ async function send() {
           approvalId: String(p.approval_id ?? ''),
         }
       } else if (e.event === 'error') {
+        errorReceived = true  // 后端已落失败消息，finally 用 DB 刷新替换占位气泡
         toast(String(e.content ?? '请求失败'), 'error')
       }
     }, abortCtrl.signal)
@@ -404,6 +409,12 @@ async function send() {
       }
       if (currentId.value && currentId.value === targetId && !pendingApproval.value) abortPoll()
       return  // 跳过 maybePollPending 与普通 refreshFromDb
+    }
+    if (errorReceived && currentId.value && currentId.value === targetId && !pendingApproval.value) {
+      // 图执行失败：后端已落失败 assistant 消息（含错误摘要），DB 刷新替换占位气泡，
+      // 不落入「（无响应）」占位（该占位面向连接中断等无 DB 落库场景）
+      refreshFromDb()
+      return
     }
     if (sb && (sb.content === '' || sb.content === '⏳ 正在思考…') && !pendingApproval.value) {
       sb.content = '（无响应）'

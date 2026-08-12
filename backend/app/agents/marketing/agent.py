@@ -95,7 +95,10 @@ async def build_marketing_agent(db: AsyncSession, enable_checkpointer: bool = Fa
 
     g = StateGraph(AgentState)
     g.add_node("agent", agent_node)
-    g.add_node("tools", ToolNode(tools))
+    # handle_tool_errors=True：工具异常（MCP 传输错误/LLM 网关超时等非 ToolInvocationError）
+    # 一律转 error ToolMessage 让 agent 重试/降级，子图永不因工具失败崩溃
+    #（真实事故：up_occupancy 参数错误崩子图 → 父图 __error__ → 回退旧消息）
+    g.add_node("tools", ToolNode(tools, handle_tool_errors=True))
     g.set_entry_point("agent")
     g.add_edge("tools", "agent")
     g.add_conditional_edges("agent", should_continue, {"tools": "tools", "end": END})

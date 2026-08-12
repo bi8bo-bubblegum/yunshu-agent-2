@@ -182,6 +182,11 @@ class ChatService:
             l0 = len((pre_snap.values or {}).get("agent_outputs", [])) if pre_snap else 0
 
             stream_interrupts_holder: dict = {}
+            # 图执行异常暂存：_run_graph 在后台 task 里吞掉异常（否则 SSE 生成器
+            # 拿不到），这里存下来供主流程判断——图崩溃后 aget_state 返回的是崩溃前
+            # checkpoint（agent_outputs 无本轮新增），否则 else 分支会回退落上一轮
+            # agent_response（真实事故：工具失败崩图 → 前端重复显示上一次的回复）。
+            graph_error_holder: dict = {}
 
             async def _run_graph():
                 """后台执行图：路由/中断事件入队；agent 输出 token 由 agent_node 直接推送。"""
@@ -203,6 +208,7 @@ class ChatService:
                         # supervisor 路由文本不需要展示，避免与 agent_node 推送重复。
                 except Exception as e:
                     logger.warning("图执行异常: %s", e)
+                    graph_error_holder["v"] = e
                 finally:
                     # 哨兵：图执行结束，主循环退出。手动终止时主循环已退出、无人消费，
                     # 若队列满（>500 事件）put 会永久阻塞导致任务泄漏，加超时兜底
@@ -290,6 +296,27 @@ class ChatService:
                 ))
             await self.message_repo.commit()
         else:
+            graph_error = graph_error_holder.get("v")
+            if graph_error is not None:
+                # 图执行失败且本轮无新增产出：明确落失败提示，绝不回退上一轮 agent_response
+                #（用户报告的 bug：工具失败崩图 → aget_state 返回崩溃前 checkpoint →
+                # segments 为空 → 旧逻辑落上一轮的 text，前端重复显示上一次的回复）。
+                # 工具卡片（tool_message_rows，上方已加入本会话）随本次 commit 一并落库，
+                # 用户能看到 agent 尝试过什么。
+                err_text = f"{type(graph_error).__name__}: {str(graph_error)}"[:200]
+                await self.message_repo.add(Message(
+                    conversation_id=conv_id, role="assistant",
+                    content=f"⚠️ 本轮回答失败：{err_text}。请稍后重试。",
+                    metadata_={"segment": "final", "failed": True},
+                ))
+                await self.message_repo.commit()
+                trace.status = "failed"
+                trace.supervisor_routes = values.get("route_history", [])
+                conv.current_trace_id = trace.id
+                await self.trace_repo.commit()
+                yield json.dumps({"event": "error", "content": f"本轮回答失败：{err_text}"},
+                                 ensure_ascii=False)
+                return
             await self.message_repo.add(Message(conversation_id=conv_id, role="assistant", content=text))
             await self.message_repo.commit()
         # 更新 trace 终态 + 路由历史
