@@ -92,6 +92,11 @@ export interface ApprovalItem {
   approver_name: string | null
   submitted_at: string | null
   decided_at: string | null
+  // M4 钉钉 OA 审批绑定信息（「去钉钉处理」跳转 + 推送状态）
+  process_instance_id: string | null
+  push_status: string | null   // pushed/synced；null=未推送（历史单/推送失败）
+  pc_url: string | null
+  mobile_url: string | null
 }
 
 export interface Department {

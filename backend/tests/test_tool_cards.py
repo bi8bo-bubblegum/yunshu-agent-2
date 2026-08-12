@@ -13,9 +13,10 @@ import time
 import pytest
 from httpx import AsyncClient, ASGITransport
 from langchain_core.messages import AIMessage
-from sqlalchemy import update
+from sqlalchemy import select, update
 
 from app.main import app
+from app.models.dingtalk import ApprovalBinding
 from app.models.org import User
 from app.tools.facade import facade
 
@@ -210,7 +211,7 @@ async def test_tool_card_persisted(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_interrupt_no_tool_rows_until_terminal(db_session, monkeypatch):
+async def test_interrupt_no_tool_rows_until_terminal(db_session, monkeypatch, mock_dingtalk_push):
     """多级 interrupt：初始 stream 与 resume（二次 interrupt）都不落库（避免 resume 重放重复卡片），
     审批通过后终态一次性落 2 条工具卡片（create + publish，均 success）。"""
     await _stubs_critical(monkeypatch)
@@ -253,10 +254,14 @@ async def test_interrupt_no_tool_rows_until_terminal(db_session, monkeypatch):
         msgs = (await c.get(f"/api/conversations/{conv_id}/messages", headers=h_user)).json()
         assert [m["role"] for m in msgs] == ["user"], msgs
 
-        # 3. 审批通过 → 后台恢复 → 终态一次性落库：create + publish 2 条工具卡片，均 success
-        r = await c.post(f"/api/approvals/{approval_id}/decide",
-                         json={"approve": True, "comment": "ok"}, headers=h_admin)
-        assert r.status_code == 200, r.text
+        # 3. 钉钉审批通过事件回写（本地 decide 已下线）→ 后台恢复 → 终态一次性落库
+        binding = (await db_session.scalars(
+            select(ApprovalBinding).where(ApprovalBinding.approval_id == approval_id))).first()
+        assert binding is not None
+        from app.services.dingtalk.approval_gateway import handle_approval_instance_change
+        await handle_approval_instance_change({"processInstanceId": binding.process_instance_id,
+                                               "type": "finish", "result": "agree",
+                                               "staffId": "ic_admin_ding"})
         msgs = await _wait_msgs(c, conv_id, h_user, want_tools=2)
         tools = [m for m in msgs if m["role"] == "tool"]
         assert len(tools) == 2, [m["role"] for m in msgs]

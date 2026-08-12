@@ -9,10 +9,6 @@ const status = ref('pending')
 const items = ref<ApprovalItem[]>([])
 const loading = ref(false)
 
-// 审批弹窗
-const decideTarget = ref<ApprovalItem | null>(null)
-const comment = ref('')
-
 onMounted(load)
 
 async function load() {
@@ -27,29 +23,16 @@ async function load() {
   }
 }
 
-function openDecide(item: ApprovalItem) {
-  decideTarget.value = item
-  comment.value = ''
-}
-
-async function decide(approve: boolean) {
-  const target = decideTarget.value
-  if (!target) return
-  try {
-    await client.post(`/approvals/${target.id}/decide`, { approve, comment: comment.value })
-    toast(approve ? '已通过' : '已驳回', approve ? 'success' : 'info')
-    decideTarget.value = null
-    await load()
-  } catch (err: any) {
-    toast(err.response?.data?.detail || '操作失败', 'error')
-  }
-}
-
 const categoryLabel: Record<string, string> = { tool_call: '工具调用', experience_promotion: '经验晋升' }
 const riskLabel: Record<string, string> = { critical: '高危', high: '较高', medium: '中危' }
 const riskTag: Record<string, string> = { critical: 'tag-red', high: 'tag-orange', medium: 'tag-blue' }
 const statusLabel: Record<string, string> = { pending: '待审批', approved: '已通过', rejected: '已驳回' }
 const statusTag: Record<string, string> = { pending: 'tag-orange', approved: 'tag-green', rejected: 'tag-red' }
+
+// 钉钉处理跳转地址：优先移动端短链，其次 PC 端（均为钉钉审批实例链接，钉钉内/浏览器均可打开）
+function goUrl(a: ApprovalItem): string {
+  return a.mobile_url || a.pc_url || ''
+}
 
 function fmtArgs(ctx: Record<string, unknown> | null): string {
   if (!ctx) return ''
@@ -76,7 +59,7 @@ function fmtArgs(ctx: Record<string, unknown> | null): string {
       <div class="table-wrap" v-else>
         <table>
           <thead>
-            <tr><th>类型</th><th>标题</th><th>风险</th><th>详情</th><th>发起人</th><th>提交时间</th><th>状态</th><th>审批人</th><th style="text-align:right">{{ status === 'pending' ? '操作' : '备注' }}</th></tr>
+            <tr><th>类型</th><th>标题</th><th>风险</th><th>详情</th><th>发起人</th><th>提交时间</th><th>状态</th><th>审批人</th><th style="text-align:right">去向 / 备注</th></tr>
           </thead>
           <tbody>
             <tr v-for="a in items" :key="a.id">
@@ -89,10 +72,22 @@ function fmtArgs(ctx: Record<string, unknown> | null): string {
               <td class="muted text-sm mono" style="max-width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ fmtArgs(a.context) }}</td>
               <td class="muted text-sm">{{ a.requester_name || a.requester_id?.slice(0, 8) }}</td>
               <td class="muted text-sm">{{ fmtDateTime(a.submitted_at) }}</td>
-              <td><span class="tag" :class="statusTag[a.status] ?? 'tag-gray'">{{ statusLabel[a.status] ?? a.status }}</span></td>
+              <td>
+                <!-- 待审批：展示钉钉推送状态；已处理：正常状态标签 -->
+                <template v-if="a.status === 'pending'">
+                  <span class="tag" :class="a.push_status === 'pushed' ? 'tag-orange' : 'tag-gray'">
+                    {{ a.push_status === 'pushed' ? '已推送·待审批' : '未推送' }}
+                  </span>
+                </template>
+                <span v-else class="tag" :class="statusTag[a.status] ?? 'tag-gray'">{{ statusLabel[a.status] ?? a.status }}</span>
+              </td>
               <td class="muted text-sm">{{ a.approver_name || '—' }}</td>
               <td style="text-align:right">
-                <button v-if="a.status === 'pending'" class="btn btn-sm btn-primary" @click="openDecide(a)">审批</button>
+                <!-- M4 全走钉钉审批：去钉钉处理（跳转钉钉审批实例），无本地审批按钮 -->
+                <template v-if="a.status === 'pending'">
+                  <a v-if="goUrl(a)" class="btn btn-sm btn-primary" :href="goUrl(a)" target="_blank" rel="noopener">去钉钉处理</a>
+                  <span v-else class="muted text-sm">{{ a.push_status === 'pushed' ? '回填中' : '未推送' }}</span>
+                </template>
                 <span v-else class="muted text-sm">{{ a.comment || '—' }}</span>
               </td>
             </tr>
@@ -101,24 +96,6 @@ function fmtArgs(ctx: Record<string, unknown> | null): string {
             </tr>
           </tbody>
         </table>
-      </div>
-    </div>
-
-    <!-- 审批弹窗 -->
-    <div v-if="decideTarget" class="modal-mask">
-      <div class="modal">
-        <h3 class="modal-title">审批 · {{ decideTarget.title }}</h3>
-        <div class="modal-body col">
-          <div class="card" style="background:var(--video-bg)">
-            <pre class="mono" style="margin:0;font-size:12px">{{ JSON.stringify(decideTarget.context, null, 2) }}</pre>
-          </div>
-          <input class="input" v-model="comment" placeholder="审批意见（可选）" />
-        </div>
-        <div class="modal-foot">
-          <button class="btn" @click="decideTarget = null">取消</button>
-          <button class="btn btn-danger" @click="decide(false)">驳回</button>
-          <button class="btn btn-primary" @click="decide(true)">通过</button>
-        </div>
       </div>
     </div>
   </div>

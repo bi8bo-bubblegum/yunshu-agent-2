@@ -27,3 +27,6 @@ class ApprovalBinding(Base):
     process_instance_id: Mapped[str] = mapped_column(String(64), unique=True)  # 钉钉审批实例 ID
     pushed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     status: Mapped[str] = mapped_column(String(16), default="pushed", server_default="pushed")  # pushed/synced/revoked
+    # 钉钉审批实例跳转地址（后台任务拉详情回填；「去钉钉处理」前端跳转用）
+    mobile_url: Mapped[str | None] = mapped_column(String(512))
+    pc_url: Mapped[str | None] = mapped_column(String(512))

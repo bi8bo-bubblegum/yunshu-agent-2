@@ -88,7 +88,7 @@ class DataFacade:
                             requester_id=eff_requester, approver_role="admin",
                             approval_id=approval_id,
                         )
-                # interrupt 冻结图，等待审批中心 decide 后 resume
+                # interrupt 冻结图，等待钉钉 OA 审批事件回写（handle_approval_instance_change）后 resume
                 result = interrupt({
                     "approval_id": approval_id, "stage": "review",
                 })

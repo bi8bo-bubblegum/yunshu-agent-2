@@ -53,3 +53,23 @@ async def db_session():
     async with Session() as session:
         yield session
     await engine.dispose()
+
+
+@pytest.fixture
+def mock_dingtalk_push(monkeypatch):
+    """把钉钉审批推送替换为无操作：仅落一条 binding，不触网、不校验钉钉配置/账号。
+
+    M4 全走钉钉审批后，create_approval 会调用 approval_gateway.push_approval_to_dingtalk；
+    非钉钉专项测试（审批列表/经验晋升/聊天 critical 流程）用它隔离推送，
+    专注本地行为。binding.process_instance_id 由审批单 ID 确定性生成，测试据此触发事件回写。
+    """
+    from app.models.dingtalk import ApprovalBinding
+
+    async def _fake_push(db, approval):
+        pid = f"inst_{approval.id.replace('-', '')[:24]}"
+        binding = ApprovalBinding(approval_id=approval.id, process_code="TEST_PROC",
+                                  process_instance_id=pid, status="pushed")
+        db.add(binding)
+        return binding
+
+    monkeypatch.setattr("app.services.dingtalk.approval_gateway.push_approval_to_dingtalk", _fake_push)

@@ -4,7 +4,7 @@ from httpx import AsyncClient, ASGITransport
 from app.main import app
 
 @pytest.mark.asyncio
-async def test_submit_experience_for_approval(monkeypatch, db_session):
+async def test_submit_experience_for_approval(monkeypatch, db_session, mock_dingtalk_push):
     # create 内部 embed_texts 调用真实 embedding API，测试中 stub 掉
     async def fake_embed(texts):
         return [[0.1] * 1536] * len(texts)
@@ -171,7 +171,7 @@ async def test_update_experience_metrics(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_submit_dept_requires_department(monkeypatch):
+async def test_submit_dept_requires_department(monkeypatch, mock_dingtalk_push):
     """无部门的用户晋升部门层 → 400；晋升公司层 → 200（admin 审批）。
 
     真实事故：无部门用户晋升 dept 成功，但经验无 department_id，同部门成员不可见，
@@ -196,7 +196,7 @@ async def test_submit_dept_requires_department(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_promote_dept_experience_to_company(monkeypatch, db_session):
+async def test_promote_dept_experience_to_company(monkeypatch, db_session, mock_dingtalk_push):
     """部门层已通过的经验可继续晋升公司层；company 层不可再晋升。
 
     真实事故：晋升到部门后无继续晋升企业的入口。"""

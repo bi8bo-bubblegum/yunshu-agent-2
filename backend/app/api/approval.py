@@ -1,16 +1,11 @@
-# backend/app/api/approvals.py —— 薄路由
+# backend/app/api/approval.py —— 薄路由（M4 全走钉钉审批，本地 decide 下线，仅保留列表）
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from pydantic import BaseModel
 from app.core.deps import get_db, get_current_user
 from app.models.org import User
 from app.services.approval_service import ApprovalService
 
 router = APIRouter(prefix="/api/approvals", tags=["approvals"])
-
-class DecideRequest(BaseModel):
-    approve: bool
-    comment: str = ""
 
 def get_approval_service(db: AsyncSession = Depends(get_db)) -> ApprovalService:
     return ApprovalService(db)
@@ -23,7 +18,3 @@ async def list_approvals(
     user: User = Depends(get_current_user),
 ):
     return await svc.list_pending(user, status, category)
-
-@router.post("/{approval_id}/decide")
-async def decide_approval(approval_id: str, body: DecideRequest, svc: ApprovalService = Depends(get_approval_service), user: User = Depends(get_current_user)):
-    return await svc.decide(approval_id, user, body.approve, body.comment)

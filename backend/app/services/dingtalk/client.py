@@ -277,6 +277,45 @@ class DingTalkClient:
         body = await self._post_oapi("/topapi/v2/user/get", json={"userid": userid, "language": "zh_CN"})
         return body.get("result") or {}
 
+    # ------------------------------------------------------------------
+    # OA 审批接口（M4 审批对接，全部走新版 API）
+    # ------------------------------------------------------------------
+
+    async def create_process_instance(self, originator_user_id: str, process_code: str,
+                                      dept_id: int, form_component_values: list[dict],
+                                      microapp_agent_id: int | None = None) -> str:
+        """发起钉钉 OA 审批实例（POST /v1.0/workflow/processInstances，官方文档确认）。
+
+        不传 approvers（复用模板后台默认审批流），故 deptId 必填（无部门传 -1 根部门）。
+        form_component_values 每项含 name(模板控件 label)/value/componentType。
+        返回 processInstanceId；响应缺 instanceId 抛 DingTalkError。
+        常见错误 needAuth/processCodeError/formConverterError 已在 ERROR_MESSAGES 映射。
+        """
+        body = {
+            "originatorUserId": originator_user_id,
+            "processCode": process_code,
+            "deptId": dept_id,
+            "formComponentValues": form_component_values,
+        }
+        if microapp_agent_id is not None:
+            body["microappAgentId"] = microapp_agent_id
+        resp = await self._post_new("/v1.0/workflow/processInstances", json=body)
+        instance_id = resp.get("instanceId")
+        if not instance_id:
+            raise DingTalkError("发起审批成功但响应缺少 instanceId", "invalidParameter")
+        return instance_id
+
+    async def get_process_instance(self, process_instance_id: str) -> dict:
+        """获取审批实例详情（GET /v1.0/workflow/processInstances，官方文档确认）。
+
+        返回 result 字典，含 status(RUNNING/TERMINATED/COMPLETED)、result(agree/refuse)、
+        approverUserIds、tasks[]（每项含 taskId/userId/mobileUrl/pcUrl）、formComponentValues[]。
+        供审批事件回写解析结果 + 后台回填「去钉钉处理」跳转 URL 用。
+        """
+        resp = await self._get_new("/v1.0/workflow/processInstances",
+                                   params={"processInstanceId": process_instance_id})
+        return resp.get("result") or {}
+
 
 # 进程内共享单例（避免各模块各自建 client、重复缓存 token）
 dingtalk_client = DingTalkClient()

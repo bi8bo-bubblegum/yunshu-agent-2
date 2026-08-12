@@ -1,7 +1,7 @@
 """回归：流式聊天 + high/critical 多级 interrupt 全链路。
 
 用 FakeLLM 强制触发 create(high) → publish(critical) 工具链，验证：
-SSE confirm_required → resume → 审批中心 decide → 图恢复 → 回复落库。
+SSE confirm_required → resume → 钉钉审批事件回写（本地 decide 已下线）→ 图恢复 → 回复落库。
 """
 import asyncio
 import json
@@ -10,9 +10,10 @@ import time
 import pytest
 from httpx import AsyncClient, ASGITransport
 from langchain_core.messages import AIMessage
-from sqlalchemy import update
+from sqlalchemy import select, update
 
 from app.main import app
+from app.models.dingtalk import ApprovalBinding
 from app.models.org import User
 
 
@@ -89,7 +90,7 @@ async def _stubs(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_critical_approval_flow(db_session, monkeypatch):
+async def test_critical_approval_flow(db_session, monkeypatch, mock_dingtalk_push):
     await _stubs(monkeypatch)
     seq = SequencedLLM()
     monkeypatch.setattr("app.agents.marketing.agent.ModelFactory.get_llm", lambda k: seq)
@@ -130,12 +131,16 @@ async def test_critical_approval_flow(db_session, monkeypatch):
         approval_id = body["payload"]["approval_id"]
         assert approval_id
 
-        # 3. 管理员审批 critical → decide 立即返回，图恢复在后台执行后落库
-        r = await c.post(f"/api/approvals/{approval_id}/decide",
-                         json={"approve": True, "comment": "ok"}, headers=h_admin)
-        assert r.status_code == 200, r.text
+        # 3. 钉钉审批通过事件回写（本地 decide 已下线）→ 图恢复在后台执行后落库
+        binding = (await db_session.scalars(
+            select(ApprovalBinding).where(ApprovalBinding.approval_id == approval_id))).first()
+        assert binding is not None
+        from app.services.dingtalk.approval_gateway import handle_approval_instance_change
+        await handle_approval_instance_change({"processInstanceId": binding.process_instance_id,
+                                               "type": "finish", "result": "agree",
+                                               "staffId": "flow_admin_ding"})
 
-        # 后台图恢复完成前 decide 已返回（前端即时反馈），轮询等待回复落库
+        # 事件回写立即返回（图恢复后台执行），轮询等待回复落库
         assistant = await _wait_assistant(c, conv_id, h_user)
         assert assistant, "后台恢复应落库 assistant"
         assert assistant[-1]["content"] == "最终方案已生成"
@@ -152,7 +157,7 @@ async def test_critical_approval_flow(db_session, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_critical_rejection_still_replies(db_session, monkeypatch):
+async def test_critical_rejection_still_replies(db_session, monkeypatch, mock_dingtalk_push):
     """驳回 critical 审批：工具不执行，但图恢复完成并保存最终回复。"""
     await _stubs(monkeypatch)
     seq = SequencedLLM()
@@ -183,10 +188,14 @@ async def test_critical_rejection_still_replies(db_session, monkeypatch):
         r = await c.post("/api/chat/resume", json={"conversation_id": conv_id, "approved": True}, headers=h_user)
         approval_id = r.json()["payload"]["approval_id"]
 
-        # 驳回：decide 立即返回，图恢复在后台执行后落库，轮询等待
-        r = await c.post(f"/api/approvals/{approval_id}/decide",
-                         json={"approve": False, "comment": "暂不发布"}, headers=h_admin)
-        assert r.status_code == 200, r.text
+        # 驳回：钉钉 refuse 事件回写，图恢复在后台执行后落库，轮询等待
+        binding = (await db_session.scalars(
+            select(ApprovalBinding).where(ApprovalBinding.approval_id == approval_id))).first()
+        assert binding is not None
+        from app.services.dingtalk.approval_gateway import handle_approval_instance_change
+        await handle_approval_instance_change({"processInstanceId": binding.process_instance_id,
+                                               "type": "finish", "result": "refuse",
+                                               "staffId": "flow_admin_ding"})
 
         assistant = await _wait_assistant(c, conv_id, h_user)
         assert assistant, "后台恢复应落库 assistant"

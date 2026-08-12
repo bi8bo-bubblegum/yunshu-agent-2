@@ -4,6 +4,7 @@
 全部用 httpx.MockTransport 拦截请求，不触网。
 """
 import asyncio
+import json
 
 import pytest
 from httpx import MockTransport, Response
@@ -160,3 +161,77 @@ async def test_oapi_error_raised():
     with pytest.raises(DingTalkError) as ei:
         await client.get_user_by_unionid("u")
     assert ei.value.code == "500"
+
+
+# ---------------------------------------------------------------------------
+# OA 审批接口（M4）
+# ---------------------------------------------------------------------------
+
+async def test_create_process_instance_success():
+    """发起审批：请求体含 originatorUserId/processCode/deptId/formComponentValues，返回 instanceId。"""
+    seen = {}
+
+    def handler(request):
+        if request.url.path == "/v1.0/oauth2/accessToken":
+            return Response(200, json={"accessToken": "T", "expireIn": 7200})
+        seen["json"] = json.loads(request.content or b"{}")
+        seen["auth_header"] = request.headers.get("x-acs-dingtalk-access-token")
+        return Response(200, json={"instanceId": "inst_123"})
+
+    client = DingTalkClient(client_id="k", client_secret="s", transport=MockTransport(handler))
+    pid = await client.create_process_instance(
+        originator_user_id="user_a", process_code="PROC-X",
+        dept_id=2, form_component_values=[{"name": "审批标题", "value": "t", "componentType": "TextField"}])
+    assert pid == "inst_123"
+    assert seen["json"]["originatorUserId"] == "user_a"
+    assert seen["json"]["processCode"] == "PROC-X"
+    assert seen["json"]["deptId"] == 2
+    assert seen["json"]["formComponentValues"][0]["name"] == "审批标题"
+    assert seen["auth_header"] == "T"
+
+
+async def test_create_process_instance_with_agent_id():
+    """传 microappAgentId 时写入请求体。"""
+    seen = {}
+
+    def handler(request):
+        if request.url.path == "/v1.0/oauth2/accessToken":
+            return Response(200, json={"accessToken": "T", "expireIn": 7200})
+        seen["json"] = json.loads(request.content or b"{}")
+        return Response(200, json={"instanceId": "inst"})
+
+    client = DingTalkClient(client_id="k", client_secret="s", transport=MockTransport(handler))
+    await client.create_process_instance("u", "PROC", 1, [], microapp_agent_id=456)
+    assert seen["json"]["microappAgentId"] == 456
+
+
+async def test_create_process_instance_missing_instance_id():
+    """响应缺 instanceId 抛 DingTalkError。"""
+    client = build_client({**TOKEN_RESP,
+                           "/v1.0/workflow/processInstances": Response(200, json={"code": "invalidParameter"})})
+    with pytest.raises(DingTalkError) as ei:
+        await client.create_process_instance("u", "PROC", 1, [])
+    assert ei.value.code == "invalidParameter"
+
+
+async def test_create_process_instance_process_code_error():
+    """processCodeError（模板不存在）→ 业务可读错误。"""
+    client = build_client({**TOKEN_RESP,
+                           "/v1.0/workflow/processInstances":
+                               Response(400, json={"code": "processCodeError", "message": "no such process"})})
+    with pytest.raises(DingTalkError) as ei:
+        await client.create_process_instance("u", "PROC", 1, [])
+    assert "审批模板不存在" in ei.value.message
+
+
+async def test_get_process_instance_returns_result():
+    """获取审批实例详情：返回 result（含 tasks[].mobileUrl/pcUrl）。"""
+    client = build_client({
+        **TOKEN_RESP,
+        "/v1.0/workflow/processInstances":
+            Response(200, json={"result": {"status": "RUNNING",
+                                           "tasks": [{"mobileUrl": "https://m", "pcUrl": "https://p"}]}}),
+    })
+    result = await client.get_process_instance("inst_123")
+    assert result["status"] == "RUNNING"
+    assert result["tasks"][0]["mobileUrl"] == "https://m"

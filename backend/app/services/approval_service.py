@@ -2,11 +2,13 @@
 import asyncio
 import logging
 from datetime import datetime, timezone
-from fastapi import HTTPException
+from app.core.config import settings
 from app.models.org import User
 from app.models.trace import Approval
+from app.models.dingtalk import ApprovalBinding
 from app.repositories.trace_repo import ApprovalRepository, TraceRepository
 from app.repositories.experience_repo import ExperienceRepository
+from app.repositories.dingtalk_repo import ApprovalBindingRepository
 from app.repositories.user_repo import UserRepository
 from app.services.tool_cards import tool_message_rows
 from app.traces.handlers import (StreamEventHandler, TraceCallbackHandler,
@@ -25,41 +27,71 @@ _bg_resume_tasks: set[asyncio.Task] = set()
 
 
 class ApprovalService:
-    """统一审批中心：列出待办 + decide 按 category 分发后处理。
-    - tool_call + sync（critical 工具调用）：更新审批单状态 + 恢复图执行
-    - experience_promotion（经验晋升）：更新审批单状态 + 经验层级晋升
-    权限：admin 可审批全部；dept_owner 可审批本部门经验晋升（dept 范围）；
-    其他角色（member）无审批资格。列表按角色做可见性过滤。"""
+    """统一审批中心（M4 起全走钉钉 OA 审批，本地审批流程下线）。
+
+    - create_approval：创建本地单 + 同事务推送钉钉 OA（approval_gateway.push_approval_to_dingtalk）
+    - apply_decision：审批结果回写入口，按 category 分发后处理：
+      - tool_call + sync（critical 工具调用）：更新状态 + 后台恢复 LangGraph 图执行
+      - experience_promotion（经验晋升）：更新状态 + 经验层级晋升
+    本地无审批按钮；结果全部来自钉钉事件回写（handle_approval_instance_change 调用）。"""
     def __init__(self, db):
         self.db = db
         self.approval_repo = ApprovalRepository(db)
         self.trace_repo = TraceRepository(db)
         self.experience_repo = ExperienceRepository(db)
         self.user_repo = UserRepository(db)
+        self.binding_repo = ApprovalBindingRepository(db)
 
     async def list_pending(self, user: User, status: str | None = None, category: str | None = None):
         """审批单列表（pending/approved/rejected），按角色可见性过滤，前端按 status 筛选展示。
-        发起人/审批人附 username（id 不可读，展示用）。"""
+        发起人/审批人附 username（id 不可读，展示用）；补钉钉绑定信息（跳转 URL/推送状态）。"""
         rows = await self.approval_repo.list_for_user(
             user.id, user.role_code, user.department_id, status, category)
         ids = {a.requester_id for a in rows} | {a.approver_id for a in rows if a.approver_id}
         users = {u.id: u.username for u in await self.user_repo.list_by_ids(list(ids))}
-        return [{"id": a.id, "category": a.category, "risk": a.risk, "mode": a.mode,
-                 "title": a.title, "context": a.context, "requester_id": a.requester_id,
-                 "requester_name": users.get(a.requester_id, ""),
-                 "status": a.status, "comment": a.comment,
-                 "approver_id": a.approver_id,
-                 "approver_name": users.get(a.approver_id) if a.approver_id else None,
-                 "submitted_at": a.submitted_at.isoformat() if a.submitted_at else None,
-                 "decided_at": a.decided_at.isoformat() if a.decided_at else None} for a in rows]
+        bindings = await self.binding_repo.list_by_approval_ids([a.id for a in rows])
+        bmap = {b.approval_id: b for b in bindings}
+        items = []
+        for a in rows:
+            b = bmap.get(a.id)
+            items.append({"id": a.id, "category": a.category, "risk": a.risk, "mode": a.mode,
+                          "title": a.title, "context": a.context, "requester_id": a.requester_id,
+                          "requester_name": users.get(a.requester_id, ""),
+                          "status": a.status, "comment": a.comment,
+                          "approver_id": a.approver_id,
+                          "approver_name": users.get(a.approver_id) if a.approver_id else None,
+                          "submitted_at": a.submitted_at.isoformat() if a.submitted_at else None,
+                          "decided_at": a.decided_at.isoformat() if a.decided_at else None,
+                          # 钉钉绑定信息（「去钉钉处理」跳转 + 推送状态展示）
+                          "process_instance_id": b.process_instance_id if b else None,
+                          "push_status": b.status if b else None,
+                          "pc_url": b.pc_url if b else None,
+                          "mobile_url": b.mobile_url if b else None})
+        return items
 
     async def create_approval(self, category: str, risk: str | None, mode: str,
                               ref_type: str, ref_id: str, title: str,
                               context: dict | None, requester_id: str,
                               approver_role: str | None = None,
                               approval_id: str | None = None) -> str:
-        """创建审批单，返回审批单 ID。供 facade.guarded_critical 和 ExperienceService.submit 调用。
-        approval_id 用于 critical 工具场景传入确定性 ID（interrupt 恢复重放时幂等，避免重复建单）。"""
+        """创建审批单并推送钉钉 OA，返回审批单 ID。
+
+        M4 起全走钉钉审批：本地单创建（add+flush）后同事务推送钉钉（add binding），
+        再统一 commit。推送失败抛 HTTPException → 调用方会话回滚（图不冻结/经验回 draft）。
+        供 facade.guarded_critical 和 ExperienceService.submit 调用。
+        approval_id 用于 critical 工具场景传入确定性 ID（interrupt 恢复重放时幂等，避免重复建单）。
+        """
+        if approval_id:
+            existing = await self.approval_repo.get(approval_id)
+            if existing is not None:
+                # 重放路径（interrupt 恢复）：复用已存在单；历史遗留无绑定单补推钉钉；
+                # 绑定已存在但缺跳转 URL（首推回填失败）时顺带重新回填
+                binding = await self.binding_repo.get_by(approval_id=existing.id)
+                if binding is None:
+                    binding = await self._push_or_raise(existing)
+                    await self.approval_repo.commit()
+                self._schedule_binding_enrich(binding)
+                return existing.id
         approval = Approval(
             id=approval_id,
             category=category, risk=risk, mode=mode,
@@ -68,51 +100,68 @@ class ApprovalService:
             approver_role=approver_role,
         )
         await self.approval_repo.add(approval)
-        await self.approval_repo.commit()
+        binding = await self._push_or_raise(approval)   # add(binding)，推送失败抛异常会话回滚
+        await self.approval_repo.commit()               # 审批单 + binding 同事务提交
+        self._schedule_binding_enrich(binding)          # 落库后调度回填跳转 URL（独立 session 可见）
         return approval.id
 
-    async def decide(self, approval_id: str, user: User, approve: bool, comment: str = ""):
+    async def _push_or_raise(self, approval: Approval) -> ApprovalBinding:
+        """推送钉钉 OA 返回 binding（懒加载网关避免循环导入：gateway 顶层 import 本模块）。"""
+        from app.services.dingtalk.approval_gateway import push_approval_to_dingtalk
+        return await push_approval_to_dingtalk(self.db, approval)
+
+    def _schedule_binding_enrich(self, binding: ApprovalBinding | None) -> None:
+        """commit 后调度后台回填「去钉钉处理」URL；绑定缺失/已有 URL/未启用钉钉时跳过。
+
+        未启用钉钉（如 mock_dingtalk_push 测试）不调度：回填任务用真实 client 触网，
+        会造成测试真实网络请求，且无钉钉实例本就无 URL 可回填。"""
+        if binding is None or (binding.mobile_url and binding.pc_url):
+            return
+        if not settings.dingtalk_enabled:
+            return
+        from app.services.dingtalk.approval_gateway import schedule_enrich_binding_urls
+        schedule_enrich_binding_urls(binding.process_instance_id)
+
+    async def apply_decision(self, approval_id: str, approved: bool, comment: str = "",
+                             approver_dingtalk_userid: str | None = None,
+                             decided_at: datetime | None = None) -> bool:
+        """审批结果回写入口（钉钉事件回写调用），返回 True 表示已处理 / False 幂等跳过。
+
+        更新状态 + 按 category 分发后处理，与旧 decide 行为完全一致：
+        - tool_call + sync：后台恢复 LangGraph 图执行（独立 session，decide 入口立即返回）
+        - experience_promotion：通过则层级晋升；驳回则恢复审批前状态
+        approver_dingtalk_userid 为钉钉审批人 userid，反查本地用户写 approver_id。
+        """
         ap = await self.approval_repo.get(approval_id)
         if not ap or ap.status != "pending":
-            raise HTTPException(404, "审批单不存在或已处理")
-        if not await self._can_approve(user, ap):
-            raise HTTPException(403, "无权审批该审批单")
-
-        # 1. 更新审批单（公共逻辑）
-        ap.status = "approved" if approve else "rejected"
-        ap.approver_id = user.id
-        ap.comment = comment
-        ap.decided_at = datetime.now(timezone.utc)
+            return False    # 幂等：事件重复/迟到自动跳过
+        approver_id = None
+        if approver_dingtalk_userid:
+            approver = await self.user_repo.get_by(dingtalk_userid=approver_dingtalk_userid)
+            approver_id = approver.id if approver else None
+        ap.status = "approved" if approved else "rejected"
+        if approver_id:
+            ap.approver_id = approver_id
+        if comment:
+            ap.comment = comment
+        ap.decided_at = decided_at or datetime.now(timezone.utc)
         await self.approval_repo.commit()
 
-        # 2. 按 category 分发后处理
         if ap.category == "tool_call" and ap.mode == "sync":
             # critical 工具调用：恢复 LangGraph 图执行。
-            # 改后台任务执行：恢复图含 LLM 调用（最长 RESUME_TIMEOUT），若同步 await，
-            # decide 请求长时间不返回，前端「无反应」；而审批单状态已在上方 commit 为
-            # approved，用户再次点击即抛 404「审批单不存在或已处理」（真实事故）。
-            # 后台独立 session 恢复，decide 立即返回 ok，前端即时得到反馈。
-            task = asyncio.create_task(_resume_graph_in_background(ap.id, approve, ap.ref_id))
+            # 后台任务执行：恢复图含 LLM 调用（最长 RESUME_TIMEOUT），若同步 await，
+            # 事件处理长时间不返回会拖慢 Stream ack；后台独立 session 恢复，入口立即返回。
+            task = asyncio.create_task(_resume_graph_in_background(ap.id, approved, ap.ref_id))
             _bg_resume_tasks.add(task)
             task.add_done_callback(_bg_resume_tasks.discard)
         elif ap.category == "experience_promotion":
             # 经验晋升：通过则层级晋升；驳回则恢复审批前状态（否则经验 status 卡在
             # pending 无法再次晋升，真实事故：晋升被拒后经验永远显示「审批中」）
-            if approve:
+            if approved:
                 await self._promote_experience(ap.ref_id, ap.context.get("to_scope", "dept"))
             else:
                 await self._reject_experience_promotion(ap.ref_id, ap.context.get("from_scope", "personal"))
-        return {"ok": True}
-
-    async def _can_approve(self, user: User, ap: Approval) -> bool:
-        """审批资格：admin 可审批全部；dept_owner 可审批本部门（dept 范围）经验晋升；其余无权。"""
-        role = user.role_code or ""
-        if role == "admin":
-            return True
-        if ap.approver_role != "dept_owner" or role != "dept_owner":
-            return False
-        requester = await self.user_repo.get(ap.requester_id)
-        return bool(user.department_id and requester and requester.department_id == user.department_id)
+        return True
 
     async def _promote_experience(self, experience_id: str, to_scope: str):
         """经验层级晋升。"""
