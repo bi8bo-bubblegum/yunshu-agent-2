@@ -8,6 +8,9 @@ const departments = ref<Department[]>([])
 const users = ref<User[]>([])
 const showCreateDept = ref(false)
 const newDeptName = ref('')
+// 分配角色/部门弹窗：编辑目标 + 表单（department_id 空串表示无部门）
+const editUser = ref<User | null>(null)
+const editForm = ref({ role_code: 'member', department_id: '' })
 
 onMounted(async () => {
   await Promise.all([loadDepts(), loadUsers()])
@@ -40,7 +43,35 @@ async function createDept() {
   }
 }
 
-const roleTag: Record<string, string> = { admin: 'tag-red', dept_owner: 'tag-orange', staff: 'tag-blue' }
+// 角色选项：与后端 ROLES（member/dept_owner/admin）一致；roleTag 修复 staff 残留映射
+const roleLabel: Record<string, string> = { member: '成员', dept_owner: '部门负责人', admin: '公司管理员' }
+const roleTag: Record<string, string> = { admin: 'tag-red', dept_owner: 'tag-orange', member: 'tag-blue' }
+const roleOptions = [
+  { value: 'member', label: '成员' },
+  { value: 'dept_owner', label: '部门负责人' },
+  { value: 'admin', label: '公司管理员' },
+]
+
+function openEditUser(u: User) {
+  editUser.value = u
+  editForm.value = { role_code: u.role_code || 'member', department_id: u.department_id || '' }
+}
+
+async function saveEditUser() {
+  const u = editUser.value
+  if (!u) return
+  try {
+    await client.patch(`/users/${u.id}`, {
+      role_code: editForm.value.role_code || null,
+      department_id: editForm.value.department_id || null,
+    })
+    toast(`已更新用户「${u.username}」的角色与部门`, 'success')
+    editUser.value = null
+    await loadUsers()
+  } catch (err: any) {
+    toast(err.response?.data?.detail || '保存失败', 'error')
+  }
+}
 </script>
 
 <template>
@@ -75,17 +106,42 @@ const roleTag: Record<string, string> = { admin: 'tag-red', dept_owner: 'tag-ora
         <h3 class="card-title">用户</h3>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>用户名</th><th>显示名</th><th>角色</th><th>部门</th></tr></thead>
+            <thead><tr><th>用户名</th><th>显示名</th><th>角色</th><th>部门</th><th style="text-align:right">操作</th></tr></thead>
             <tbody>
               <tr v-for="u in users" :key="u.id">
                 <td class="mono text-sm">{{ u.username }}</td>
                 <td>{{ u.display_name }}</td>
-                <td><span class="tag" :class="roleTag[u.role_code] ?? 'tag-gray'">{{ u.role_code }}</span></td>
+                <td><span class="tag" :class="roleTag[u.role_code] ?? 'tag-gray'">{{ roleLabel[u.role_code] ?? u.role_code ?? '—' }}</span></td>
                 <td class="muted text-sm">{{ departments.find(d => d.id === u.department_id)?.name || '—' }}</td>
+                <td style="text-align:right;white-space:nowrap">
+                  <button class="btn btn-sm" @click="openEditUser(u)">分配</button>
+                </td>
               </tr>
-              <tr v-if="!users.length"><td colspan="4"><div class="empty"><span class="icon">👤</span>暂无用户</div></td></tr>
+              <tr v-if="!users.length"><td colspan="5"><div class="empty"><span class="icon">👤</span>暂无用户</div></td></tr>
             </tbody>
           </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- 分配角色与部门弹窗（仅 admin 可操作，后端兜底校验） -->
+    <div v-if="editUser" class="modal-mask">
+      <div class="modal" style="width:420px">
+        <div class="modal-title"><span>分配角色与部门：{{ editUser.username }}</span></div>
+        <div class="modal-body col">
+          <p class="text-muted text-sm" style="margin:0 0 4px">角色</p>
+          <select class="select" v-model="editForm.role_code">
+            <option v-for="r in roleOptions" :key="r.value" :value="r.value">{{ r.label }}</option>
+          </select>
+          <p class="text-muted text-sm" style="margin:8px 0 4px">所属部门</p>
+          <select class="select" v-model="editForm.department_id">
+            <option value="">无部门</option>
+            <option v-for="d in departments" :key="d.id" :value="d.id">{{ d.name }}</option>
+          </select>
+        </div>
+        <div class="modal-foot">
+          <button class="btn btn-primary" @click="saveEditUser">保存</button>
+          <button class="btn" @click="editUser = null">取消</button>
         </div>
       </div>
     </div>
