@@ -5,9 +5,14 @@
   用发起人钉钉账号调 POST /v1.0/workflow/processInstances 建钉钉审批实例，写 approval_binding。
   全走钉钉审批：推送失败抛 HTTPException，调用方会话回滚（图不冻结 / 经验回 draft），不做本地兜底。
 
-结果回写：Stream 订阅 bpms_instance_change 事件 → handle_approval_instance_change 按
-  processInstanceId 查 binding → 幂等更新本地单状态 → 复用 approval_service.apply_decision
+结果回写：Stream 订阅 bpms_instance_change（审批实例级）事件 → handle_approval_instance_change
+  按 processInstanceId 查 binding → 幂等更新本地单状态 → 复用 approval_service.apply_decision
   恢复 LangGraph 图执行（与本地审批行为完全一致）。
+  多级/会签模板以实例事件为最终结果；任务级 bpms_task_change 不作为回写依据。
+
+订阅规则（官方）：Stream 按 processCode+type 精确订阅
+  /v1.0/event/bpms_instance_change/processCode/{processCode}/type/{type}，
+  钉钉后台需为 DINGTALK_OA_PROCESS_CODES 的每个模板编码配置实例事件订阅。
 
 撤销对接（本期不做）：terminate 接口由钉钉侧发起时，事件 type=terminate 视为驳回处理。
 """
@@ -122,14 +127,16 @@ async def _enrich_binding_urls(process_instance_id: str) -> None:
 # ------------------------------------------------------------------
 
 async def handle_approval_instance_change(data: dict) -> None:
-    """审批实例状态变更事件回写（start / finish / terminate），幂等，失败仅记日志。
+    """审批实例状态变更事件回写（start / finish / terminate / delete），幂等，失败仅记日志。
 
-    事件 data 字段（按钉钉官方文档，待用户确认后校正）：
+    事件 data 字段（按钉钉官方文档 bpms_instance_change）：
       processInstanceId 审批实例 ID（必）
-      type             start / finish / terminate
+      type             start / finish / terminate / delete
       result           agree / refuse（type=finish 时有值）
-      staffId          操作者（审批人）钉钉 userid
-    start 不改状态（此时仍 pending，等待审批）；finish 按 result 判定；terminate 视为驳回。
+      staffId          审批人钉钉 userid
+      title / url / processCode / bizCategoryId / businessId 等辅助字段
+    start 不改状态（此时仍 pending，等待审批）；finish 按 result 判定；
+    terminate / delete 视为驳回（实例被取消/删除，审批不可能通过）。
     """
     try:
         await _handle_approval_change_inner(data)
@@ -155,11 +162,19 @@ async def _handle_approval_change_inner(data: dict) -> None:
         if event_type == "start":
             logger.info("审批实例启动（等待审批）: approval_id=%s pid=%s", binding.approval_id, pid)
             return
+        # 实例级事件四态（官方文档）：start / finish / terminate / delete；
+        # 多级/会签模板下以实例 finish 为最终结果，terminate/delete 视为驳回。
         if event_type == "terminate":
             approved, comment = False, "钉钉审批实例已终止（钉钉侧取消）"
-        else:  # finish
+        elif event_type == "delete":
+            approved, comment = False, "钉钉审批实例已删除"
+        elif event_type == "finish":
             approved = (result == "agree")
             comment = "钉钉审批通过" if approved else "钉钉审批驳回"
+        else:
+            # 未知类型不落任何决定，避免误判恢复图执行
+            logger.warning("未知审批实例事件类型，忽略: type=%s pid=%s", event_type, pid)
+            return
         # 复用统一审批服务：幂等（已处理过返回 False）+ 按 category 恢复图/晋升经验
         from app.services.approval_service import ApprovalService
         svc = ApprovalService(db)

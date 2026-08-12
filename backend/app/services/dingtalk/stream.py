@@ -8,6 +8,9 @@
 事件分发：EventHandler.process 按 headers.event_type 路由：
 - 通讯录用户/部门变更 → 组织增量同步（M3）
 - 审批实例状态变更 bpms_instance_change → 审批回写（M4）
+  实例级事件（start/finish/terminate/delete）是审批最终结果依据——多级/会签模板
+  下任务级 bpms_task_change 不作为回写依据；Stream 订阅按 processCode+type 精确
+  订阅，钉钉后台需为每个审批模板编码配置实例事件订阅。
 
 事件处理全部幂等；处理失败仅记日志（仍返回 200 ack 避免钉钉反复重推），
 由定时兜底对账同步补偿。

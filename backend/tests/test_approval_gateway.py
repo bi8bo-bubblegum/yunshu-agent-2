@@ -4,8 +4,8 @@
 用 MockTransport 拦截钉钉接口（token / 发起实例 / 实例详情），全程不触网。
 覆盖：
 - push_approval_to_dingtalk：成功建绑定（请求体正确）/ 未配置 400 / 发起人未绑定 400 / 钉钉错误 502
-- handle_approval_instance_change：finish agree/refuse、terminate 视为驳回、start 不改状态、
-  幂等（重复事件跳过）、未知实例忽略
+- handle_approval_instance_change：finish agree/refuse、terminate/delete 视为驳回、start 不改状态、
+  幂等（重复事件跳过）、未知实例/未知 type 忽略
 - apply_decision 分发：tool_call 后台恢复图 / experience_promotion 晋升与驳回恢复
 - _enrich_binding_urls：后台回填「去钉钉处理」跳转 URL
 """
@@ -240,6 +240,35 @@ async def test_event_terminate_treated_as_reject(db_session):
     binding = (await db_session.scalars(
         select(ApprovalBinding).where(ApprovalBinding.approval_id == ap_id))).first()
     assert binding.status == "synced"
+
+
+async def test_event_delete_treated_as_reject(db_session):
+    """钉钉侧删除实例（delete）：视为驳回，comment 标注「已删除」。"""
+    ap = await _make_context(db_session, category="experience_promotion")
+    await _add_binding(db_session, ap.id)
+    await handle_approval_instance_change({"processInstanceId": "inst_001", "type": "delete"})
+    ap_id = ap.id
+    db_session.expire_all()
+    ap2 = await db_session.get(Approval, ap_id)
+    assert ap2.status == "rejected"
+    assert "已删除" in (ap2.comment or "")
+    binding = (await db_session.scalars(
+        select(ApprovalBinding).where(ApprovalBinding.approval_id == ap_id))).first()
+    assert binding.status == "synced"
+
+
+async def test_event_unknown_type_ignored(db_session):
+    """未知 type：不落任何决定（状态仍 pending，binding 不置 synced），避免误恢复图。"""
+    ap = await _make_context(db_session, category="experience_promotion")
+    await _add_binding(db_session, ap.id)
+    await handle_approval_instance_change({"processInstanceId": "inst_001", "type": "weird"})
+    ap_id = ap.id
+    db_session.expire_all()
+    ap2 = await db_session.get(Approval, ap_id)
+    assert ap2.status == "pending"
+    binding = (await db_session.scalars(
+        select(ApprovalBinding).where(ApprovalBinding.approval_id == ap_id))).first()
+    assert binding.status == "pushed"
 
 
 async def test_event_start_no_status_change(db_session):
