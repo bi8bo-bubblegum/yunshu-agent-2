@@ -76,7 +76,7 @@ function fmtArgs(ctx: Record<string, unknown> | null): string {
       <div class="table-wrap" v-else>
         <table>
           <thead>
-            <tr><th>类型</th><th>标题</th><th>风险</th><th>详情</th><th>发起人</th><th>提交时间</th><th>状态</th><th>审批人</th><th style="text-align:right">备注</th></tr>
+            <tr><th>类型</th><th>标题</th><th>风险</th><th>详情</th><th>发起人</th><th>提交时间</th><th>状态</th><th>审批人</th><th style="text-align:right">{{ status === 'pending' ? '操作' : '备注' }}</th></tr>
           </thead>
           <tbody>
             <tr v-for="a in items" :key="a.id">
