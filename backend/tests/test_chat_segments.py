@@ -182,6 +182,43 @@ class _CrashGraph:
         raise RuntimeError("工具调用失败: MCP 传输错误")
 
 
+class _NoOutputGraph:
+    """模拟「图成功但 agent 无产出」：第二轮 agent 执行了（route_history 新增
+    sales_analysis）但工具全失败后 LLM 输出空白——agent_outputs 无新增段落、
+    agent_response 被 done_node 回退为上一轮值。这是端到端实测暴露的第二条失败路径：
+    工具失败不再崩图（Layer1 生效），但 agent 无实质产出时旧逻辑 else 分支仍会回退
+    落上一轮 agent_response，前端重复显示上一次的回复。"""
+
+    def __init__(self):
+        self.calls = 0
+        self.snap = {"agent_outputs": [], "agent_response": "", "route_history": []}
+
+    async def aget_state(self, config):
+        return SimpleNamespace(values=self.snap)
+
+    async def astream(self, inputs, config, **kwargs):
+        self.calls += 1
+        if self.calls == 1:
+            self.snap = {
+                "agent_outputs": [{"agent": "marketing", "content": "营销方案已生成"}],
+                "agent_response": "营销方案已生成",
+                "route_history": ["marketing"],
+            }
+            yield None
+            return
+        # 第二轮：图正常完成，但 agent 执行后无实质产出（route_history 加了
+        # sales_analysis，agent_outputs 无新增、agent_response 仍是上一轮值）。
+        # 必须生成「新 checkpoint」dict（而非原地修改）：pre_snap（第二轮开始时的
+        # aget_state）与 values（结束后）需是不同快照——真实 LangGraph checkpoint
+        # 不可变，原地修改会让 prev_routes 也读到改后的 route_history。
+        self.snap = {
+            **self.snap,
+            "route_history": ["marketing", "sales_analysis"],
+        }
+        yield None
+        return
+
+
 @pytest.mark.asyncio
 async def test_graph_error_no_fallback_to_old_message(monkeypatch, db_session):
     """图执行失败（工具失败崩子图）时不回退上一轮回复，落失败提示 + trace failed。
@@ -237,6 +274,66 @@ async def test_graph_error_no_fallback_to_old_message(monkeypatch, db_session):
         assert "失败" in msgs[-1]["content"], msgs[-1]["content"]
         assert msgs[-1]["metadata"]["failed"] is True
         # trace 终态 failed（区别于 interrupted/completed，供 Traces.vue 红标展示）
+        conv = await db_session.get(Conversation, conv_id)
+        assert conv.current_trace_id, "失败后 current_trace_id 应指向本轮 trace"
+        trace = await TraceRepository(db_session).get(conv.current_trace_id)
+        assert trace.status == "failed", trace.status
+
+
+@pytest.mark.asyncio
+async def test_agent_executed_no_output_no_fallback_to_old_message(monkeypatch, db_session):
+    """图成功但 agent 无实质产出（工具全失败 → LLM 输出空白）时不回退上一轮回复。
+
+    端到端实测暴露的第二条失败路径：工具失败不再崩图（Layer1 生效，错误转 error
+    ToolMessage），但 agent 工具全部失败后最终无产出段落（segments 为空），done_node
+    把 agent_response 回退为上一轮值——旧逻辑 else 分支落上一轮回复。修复后：本轮
+    route_history 新增了 agent 路由（agent 实际执行过）且无产出段落时，落明确降级
+    提示 + trace failed + SSE error，绝不显示上一次的回复。"""
+    await _stubs(monkeypatch, ["marketing", "done"])
+    fake = _NoOutputGraph()
+
+    async def _get_graph():
+        return fake
+
+    monkeypatch.setattr("app.services.chat_service.get_graph", _get_graph)
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        await c.post("/api/auth/register", json={"username": "seg_noout", "password": "x123456", "display_name": "S"})
+        r = await c.post("/api/auth/login", json={"username": "seg_noout", "password": "x123456"})
+        h = {"Authorization": f"Bearer {r.json()['access_token']}"}
+        conv_id = (await c.post("/api/conversations", json={}, headers=h)).json()["id"]
+
+        def _sse(body: str) -> list[dict]:
+            return [json.loads(line[6:]) for line in body.splitlines() if line.startswith("data: ")]
+
+        # 第一轮：正常执行，落「营销方案已生成」（上一轮回复基线）
+        body1 = ""
+        async with c.stream("POST", "/api/chat/completions",
+                            json={"conversation_id": conv_id, "message": "做一个营销方案"},
+                            headers=h) as resp:
+            assert resp.status_code == 200
+            async for line in resp.aiter_lines():
+                body1 += line + "\n"
+        assert any(e["event"] == "answer" for e in _sse(body1)), _sse(body1)
+
+        # 第二轮：agent 执行了（route_history 加 sales_analysis）但无产出 → SSE error
+        body2 = ""
+        async with c.stream("POST", "/api/chat/completions",
+                            json={"conversation_id": conv_id, "message": "查上座率"},
+                            headers=h) as resp:
+            assert resp.status_code == 200
+            async for line in resp.aiter_lines():
+                body2 += line + "\n"
+        assert any(e["event"] == "error" for e in _sse(body2)), _sse(body2)
+
+        msgs = (await c.get(f"/api/conversations/{conv_id}/messages", headers=h)).json()
+        assert [m["role"] for m in msgs] == ["user", "assistant", "user", "assistant"], [m["role"] for m in msgs]
+        # 关键断言：本轮 assistant 是降级提示，绝不是上一轮回复
+        assert msgs[-1]["content"] != "营销方案已生成", msgs[-1]["content"]
+        assert "失败" in msgs[-1]["content"] or "未能完成" in msgs[-1]["content"], msgs[-1]["content"]
+        assert msgs[-1]["metadata"]["failed"] is True
+        # trace 终态 failed
         conv = await db_session.get(Conversation, conv_id)
         assert conv.current_trace_id, "失败后 current_trace_id 应指向本轮 trace"
         trace = await TraceRepository(db_session).get(conv.current_trace_id)

@@ -297,16 +297,29 @@ class ChatService:
             await self.message_repo.commit()
         else:
             graph_error = graph_error_holder.get("v")
-            if graph_error is not None:
-                # 图执行失败且本轮无新增产出：明确落失败提示，绝不回退上一轮 agent_response
-                #（用户报告的 bug：工具失败崩图 → aget_state 返回崩溃前 checkpoint →
-                # segments 为空 → 旧逻辑落上一轮的 text，前端重复显示上一次的回复）。
-                # 工具卡片（tool_message_rows，上方已加入本会话）随本次 commit 一并落库，
-                # 用户能看到 agent 尝试过什么。
-                err_text = f"{type(graph_error).__name__}: {str(graph_error)}"[:200]
+            # 本轮是否有 agent 实际执行：route_history 本轮新增部分是否含非 done 路由。
+            # supervisor 直接 done（本轮未执行 agent，如用户说「好的」）时允许回退上一轮
+            # agent_response（对话继续，无新任务）；agent 执行了但最终无产出段落时，
+            # text 是 done_node 回退的旧值——绝不能展示上一次的回复（用户报告的 bug：
+            # 工具全部失败 → LLM 输出空白 → 本轮落库重复显示上一轮的回复）。
+            prev_routes = (pre_snap.values or {}).get("route_history", []) if pre_snap else []
+            new_routes = values.get("route_history", [])[len(prev_routes):]
+            agent_executed = any(r != "done" for r in new_routes)
+            if graph_error is not None or agent_executed:
+                # 两种情况统一落明确失败提示（工具卡片随 commit 一并落库，用户能看到 agent
+                # 尝试过什么），绝不回退上一轮 text：
+                # 1) 图崩溃（工具失败崩子图 → aget_state 返回崩溃前 checkpoint，segments 空）
+                # 2) 图成功但 agent 执行后无实质产出（工具全失败 → LLM 输出空白）
+                if graph_error is not None:
+                    err_text = f"{type(graph_error).__name__}: {str(graph_error)}"[:200]
+                    hint = f"⚠️ 本轮回答失败：{err_text}。请稍后重试。"
+                    err_evt = f"本轮回答失败：{err_text}"
+                else:
+                    hint = "⚠️ 本轮未能完成回答：查询过程中工具调用失败，请稍后重试或换个问法。"
+                    err_evt = hint
                 await self.message_repo.add(Message(
                     conversation_id=conv_id, role="assistant",
-                    content=f"⚠️ 本轮回答失败：{err_text}。请稍后重试。",
+                    content=hint,
                     metadata_={"segment": "final", "failed": True},
                 ))
                 await self.message_repo.commit()
@@ -314,8 +327,7 @@ class ChatService:
                 trace.supervisor_routes = values.get("route_history", [])
                 conv.current_trace_id = trace.id
                 await self.trace_repo.commit()
-                yield json.dumps({"event": "error", "content": f"本轮回答失败：{err_text}"},
-                                 ensure_ascii=False)
+                yield json.dumps({"event": "error", "content": err_evt}, ensure_ascii=False)
                 return
             await self.message_repo.add(Message(conversation_id=conv_id, role="assistant", content=text))
             await self.message_repo.commit()
