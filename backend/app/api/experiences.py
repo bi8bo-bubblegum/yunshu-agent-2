@@ -50,7 +50,7 @@ async def create_experience(body: ExperienceCreate, svc: ExperienceService = Dep
 @router.post("/{exp_id}/submit")
 async def submit_experience(exp_id: str, body: SubmitRequest, svc: ExperienceService = Depends(get_exp_service),
                             user: User = Depends(get_current_user)):
-    return await svc.submit(user.id, exp_id, body.to_scope)
+    return await svc.submit(user.id, user.department_id, exp_id, body.to_scope)
 
 
 @router.get("")

@@ -4,16 +4,21 @@ from httpx import AsyncClient, ASGITransport
 from app.main import app
 
 @pytest.mark.asyncio
-async def test_submit_experience_for_approval(monkeypatch):
+async def test_submit_experience_for_approval(monkeypatch, db_session):
     # create 内部 embed_texts 调用真实 embedding API，测试中 stub 掉
     async def fake_embed(texts):
         return [[0.1] * 1536] * len(texts)
     monkeypatch.setattr("app.services.experience_service.embed_texts", fake_embed)
+    from sqlalchemy import update
+    from app.models.org import User
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         await c.post("/api/auth/register", json={"username": "gary", "password": "x123456", "display_name": "Gary"})
         r = await c.post("/api/auth/login", json={"username": "gary", "password": "x123456"})
         h = {"Authorization": f"Bearer {r.json()['access_token']}"}
+        # 晋升部门层需要所属部门：给 gary 挂部门
+        await db_session.execute(update(User).where(User.username == "gary").values(department_id="dept-1"))
+        await db_session.commit()
         r = await c.post("/api/experiences", json={
             "title": "国庆大促", "summary": "满减+直播", "content": "详情",
             "tags": ["营销"], "event_time": "2025-10-01", "result_metrics": {"gmv": 320},
@@ -163,3 +168,64 @@ async def test_update_experience_metrics(monkeypatch):
                         json={"event_time": None, "result_metrics": None},
                         headers=h_owner)
         assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_submit_dept_requires_department(monkeypatch):
+    """无部门的用户晋升部门层 → 400；晋升公司层 → 200（admin 审批）。
+
+    真实事故：无部门用户晋升 dept 成功，但经验无 department_id，同部门成员不可见，
+    相当于没晋升。无部门的用户只能晋升公司层。"""
+    async def fake_embed(texts):
+        return [[0.1] * 1536] * len(texts)
+    monkeypatch.setattr("app.services.experience_service.embed_texts", fake_embed)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        await c.post("/api/auth/register", json={"username": "nd_owner", "password": "x123456", "display_name": "N"})
+        r = await c.post("/api/auth/login", json={"username": "nd_owner", "password": "x123456"})
+        h = {"Authorization": f"Bearer {r.json()['access_token']}"}
+        exp_id = (await c.post("/api/experiences", json={"title": "无部门晋升", "summary": "s"},
+                               headers=h)).json()["id"]
+        # 无部门 → 晋升部门层被拒
+        assert (await c.post(f"/api/experiences/{exp_id}/submit", json={"to_scope": "dept"},
+                             headers=h)).status_code == 400
+        # 无部门 → 可晋升公司层
+        r = await c.post(f"/api/experiences/{exp_id}/submit", json={"to_scope": "company"}, headers=h)
+        assert r.status_code == 200
+        assert r.json()["status"] == "pending"
+
+
+@pytest.mark.asyncio
+async def test_promote_dept_experience_to_company(monkeypatch, db_session):
+    """部门层已通过的经验可继续晋升公司层；company 层不可再晋升。
+
+    真实事故：晋升到部门后无继续晋升企业的入口。"""
+    async def fake_embed(texts):
+        return [[0.1] * 1536] * len(texts)
+    monkeypatch.setattr("app.services.experience_service.embed_texts", fake_embed)
+    from sqlalchemy import update
+    from app.models.org import User
+    from app.models.experience import Experience
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        await c.post("/api/auth/register", json={"username": "pc_owner", "password": "x123456", "display_name": "P"})
+        r = await c.post("/api/auth/login", json={"username": "pc_owner", "password": "x123456"})
+        h = {"Authorization": f"Bearer {r.json()['access_token']}"}
+        await db_session.execute(update(User).where(User.username == "pc_owner").values(department_id="dept-1"))
+        await db_session.commit()
+        exp_id = (await c.post("/api/experiences", json={"title": "逐级晋升", "summary": "s"},
+                               headers=h)).json()["id"]
+        # 模拟部门层审批已通过
+        exp = await db_session.get(Experience, exp_id)
+        exp.scope, exp.status = "dept", "approved"
+        await db_session.commit()
+        # 部门层经验 → 继续晋升公司层
+        r = await c.post(f"/api/experiences/{exp_id}/submit", json={"to_scope": "company"}, headers=h)
+        assert r.status_code == 200
+        assert r.json()["status"] == "pending"
+        # company 层不可再晋升
+        exp = await db_session.get(Experience, exp_id)
+        exp.scope, exp.status = "company", "approved"
+        await db_session.commit()
+        assert (await c.post(f"/api/experiences/{exp_id}/submit", json={"to_scope": "company"},
+                             headers=h)).status_code == 400

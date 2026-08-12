@@ -183,6 +183,8 @@ const statusLabel: Record<string, string> = { draft: '草稿', pending: '审批�
                   <button class="btn btn-sm" @click="submit(e.id, e.title, 'dept')">晋升部门</button>
                   <button class="btn btn-sm" @click="submit(e.id, e.title, 'company')">晋升公司</button>
                   </template>
+                  <!-- 部门层已通过的经验可继续晋升公司层 -->
+                  <button v-else-if="e.scope === 'dept' && e.status === 'approved'" class="btn btn-sm" @click="submit(e.id, e.title, 'company')">晋升公司</button>
                   <span v-else class="muted text-sm">{{ statusLabel[e.status] ?? e.status }}</span>
                 </div>
               </td>

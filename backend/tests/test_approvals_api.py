@@ -53,6 +53,33 @@ async def test_approve_experience_promotion(db_session, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_reject_promotion_restores_status(db_session, monkeypatch):
+    """经验晋升被驳回 → 恢复审批前状态（personal 回 draft），可再次晋升。
+
+    真实事故：驳回后经验 status 卡在 pending，前端永远显示「审批中」，无法再晋升。"""
+    async def fake_embed(texts):
+        return [[0.1] * 1536] * len(texts)
+    monkeypatch.setattr("app.services.experience_service.embed_texts", fake_embed)
+    transport = ASGITransport(app=app)
+    h = await _register(transport, "rej_owner")
+    await _set_role(db_session, "rej_owner", "dept_owner", department_id="dept-1")
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        exp_id = (await c.post("/api/experiences", json={"title": "被驳回经验", "summary": "s"},
+                               headers=h)).json()["id"]
+        await c.post(f"/api/experiences/{exp_id}/submit", json={"to_scope": "dept"}, headers=h)
+        r = await c.get("/api/approvals?status=pending", headers=h)
+        ap_id = r.json()[0]["id"]
+        # 驳回 → 经验恢复 personal/draft
+        assert (await c.post(f"/api/approvals/{ap_id}/decide",
+                             json={"approve": False, "comment": "no"}, headers=h)).status_code == 200
+        exp = await db_session.get(Experience, exp_id)
+        assert exp.scope == "personal" and exp.status == "draft"
+        # 恢复草稿后可再次晋升
+        r = await c.post(f"/api/experiences/{exp_id}/submit", json={"to_scope": "company"}, headers=h)
+        assert r.status_code == 200
+
+
+@pytest.mark.asyncio
 async def test_list_approvals_by_category(db_session):
     """admin 按 category 筛选可见全部审批单。"""
     db_session.add(Approval(category="tool_call", risk="critical", mode="sync", ref_type="trace",

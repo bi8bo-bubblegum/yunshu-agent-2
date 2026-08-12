@@ -96,9 +96,12 @@ class ApprovalService:
             _bg_resume_tasks.add(task)
             task.add_done_callback(_bg_resume_tasks.discard)
         elif ap.category == "experience_promotion":
-            # 经验晋升：通过则层级晋升
+            # 经验晋升：通过则层级晋升；驳回则恢复审批前状态（否则经验 status 卡在
+            # pending 无法再次晋升，真实事故：晋升被拒后经验永远显示「审批中」）
             if approve:
                 await self._promote_experience(ap.ref_id, ap.context.get("to_scope", "dept"))
+            else:
+                await self._reject_experience_promotion(ap.ref_id, ap.context.get("from_scope", "personal"))
         return {"ok": True}
 
     async def _can_approve(self, user: User, ap: Approval) -> bool:
@@ -118,6 +121,17 @@ class ApprovalService:
             exp.scope = to_scope
             exp.status = "approved"
             await self.experience_repo.commit()
+
+    async def _reject_experience_promotion(self, experience_id: str, from_scope: str):
+        """经验晋升被驳回：恢复审批前状态。
+
+        personal 层晋升被拒 → 回草稿（可修改/重新晋升）；
+        dept 层晋升公司被拒 → 回已通过（保留部门层可见，仍可再次晋升公司）。"""
+        exp = await self.experience_repo.get(experience_id)
+        if not exp:
+            return
+        exp.status = "draft" if from_scope == "personal" else "approved"
+        await self.experience_repo.commit()
 
 
 async def _resume_graph_in_background(approval_id: str, approved: bool, trace_id: str) -> None:

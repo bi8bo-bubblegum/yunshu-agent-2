@@ -32,20 +32,27 @@ class ExperienceService:
         await self.experience_repo.commit()
         return exp
 
-    async def submit(self, user_id: str, exp_id: str, to_scope: str) -> Experience:
+    async def submit(self, user_id: str, department_id: str | None, exp_id: str, to_scope: str) -> Experience:
         exp = await self.experience_repo.get(exp_id)
-        if not exp or exp.owner_id != user_id or exp.scope != "personal":
+        if not exp or exp.owner_id != user_id:
             raise HTTPException(404, "经验不存在或不可提交")
-        if to_scope not in ("dept", "company"):
-            raise HTTPException(400, "目标层级无效")
+        # 可晋升目标：personal 层可升 dept/company；dept 层可再升 company；company 层不可再升。
+        # 部门层经验继续晋升公司（用户反馈：晋升到部门后没有继续晋升企业的入口）。
+        targets = {"personal": ("dept", "company"), "dept": ("company",)}
+        if to_scope not in targets.get(exp.scope, ()):
+            raise HTTPException(400, "当前层级不可晋升到目标层级")
+        # 晋升部门层必须有所属部门：无部门用户的部门层经验无归属，同部门成员不可见，
+        # 等于没晋升（真实事故）。无部门的用户只能晋升公司层（admin 审批）。
+        if to_scope == "dept" and not department_id:
+            raise HTTPException(400, "您没有所属部门，无法晋升到部门层级")
         exp.status = "pending"
-        # 创建统一审批单（经验晋升，非阻塞）
+        # 创建统一审批单（经验晋升，非阻塞）；from_scope 记录审批前层级，驳回时据此恢复状态
         approver_role = "dept_owner" if to_scope == "dept" else "admin"
         await self.approval_svc.create_approval(
             category="experience_promotion", risk=None, mode="async",
             ref_type="experience", ref_id=exp.id,
             title=f"经验晋升：{exp.title}",
-            context={"experience_id": exp.id, "from_scope": "personal", "to_scope": to_scope},
+            context={"experience_id": exp.id, "from_scope": exp.scope, "to_scope": to_scope},
             requester_id=user_id, approver_role=approver_role,
         )
         return exp
