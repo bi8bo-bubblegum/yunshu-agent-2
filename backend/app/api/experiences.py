@@ -23,6 +23,11 @@ class SubmitRequest(BaseModel):
     to_scope: str  # dept/company
 
 
+class ExperienceMetricsUpdate(BaseModel):
+    event_time: str | None = None      # "YYYY-MM-DD"，null 清空
+    result_metrics: dict | None = None
+
+
 def get_exp_service(db: AsyncSession = Depends(get_db)) -> ExperienceService:
     return ExperienceService(db)
 
@@ -60,6 +65,20 @@ async def delete_experience(exp_id: str, svc: ExperienceService = Depends(get_ex
     """删除经验（作者本人或 admin），用于清理重复/无效经验。"""
     await svc.delete(user.id, exp_id, user.role_code)
     return {"ok": True}
+
+
+@router.put("/{exp_id}/metrics")
+async def update_experience_metrics(exp_id: str, body: ExperienceMetricsUpdate,
+                                    svc: ExperienceService = Depends(get_exp_service),
+                                    user: User = Depends(get_current_user)):
+    """更新经验的活动时间与效果指标（作者本人或 admin，自动沉淀的经验常需手动补这两个字段）。"""
+    exp = await svc.update_metrics(user.id, exp_id, user.role_code, body.event_time, body.result_metrics)
+    return {
+        "id": exp.id,
+        "title": exp.title,
+        "event_time": exp.event_time.isoformat() if exp.event_time else None,
+        "result_metrics": exp.result_metrics,
+    }
 
 
 @router.get("/{exp_id}")

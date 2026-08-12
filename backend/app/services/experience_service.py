@@ -80,3 +80,22 @@ class ExperienceService:
         if not visible:
             raise HTTPException(404, "经验不存在")
         return exp
+
+    async def update_metrics(self, user_id: str, exp_id: str, role_code: str | None,
+                             event_time: str | None, result_metrics: dict | None) -> Experience:
+        """更新经验的活动时间与效果指标（作者本人或 admin）。
+
+        这两个字段不参与 embedding（向量由 title+summary 生成），修改无需重算向量；
+        也只允许改这两个字段，标题/内容等改动的编辑入口后续再按需扩展。"""
+        if not _valid_uuid(exp_id):
+            raise HTTPException(404, "经验不存在")
+        exp = await self.experience_repo.get(exp_id)
+        if not exp:
+            raise HTTPException(404, "经验不存在")
+        if exp.owner_id != user_id and role_code != "admin":
+            raise HTTPException(403, "无权编辑该经验")
+        # event_time 为空串/None 表示清空活动时间
+        exp.event_time = date.fromisoformat(event_time) if event_time else None
+        exp.result_metrics = result_metrics
+        await self.experience_repo.commit()
+        return exp

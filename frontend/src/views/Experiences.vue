@@ -11,6 +11,9 @@ const showCreate = ref(false)
 const uploading = ref(false)
 const form = ref({ title: '', summary: '', content: '', tags: '' })
 const detailTarget = ref<ExperienceDetail | null>(null)
+// 编辑弹窗：仅允许手动改活动时间 + 活动效果（自动沉淀的经验这两个字段常缺失或需修正）
+const editTarget = ref<ExperienceDetail | null>(null)
+const editForm = ref({ event_time: '', result_metrics_text: '' })
 
 onMounted(load)
 
@@ -88,6 +91,44 @@ async function openDetail(e: ExperienceItem) {
   }
 }
 
+async function openEdit(e: ExperienceItem) {
+  try {
+    const { data } = await client.get<ExperienceDetail>(`/experiences/${e.id}`)
+    editTarget.value = data
+    editForm.value = {
+      event_time: (data.event_time || '').slice(0, 10),
+      result_metrics_text: data.result_metrics ? JSON.stringify(data.result_metrics, null, 2) : '',
+    }
+  } catch (err: any) {
+    toast(err.response?.data?.detail || '加载详情失败', 'error')
+  }
+}
+
+async function saveEdit() {
+  const id = editTarget.value!.id
+  // 活动效果文本为空 → 清空；非空必须为合法 JSON，否则不提交
+  let result_metrics: Record<string, unknown> | null = null
+  const text = editForm.value.result_metrics_text.trim()
+  if (text) {
+    try {
+      result_metrics = JSON.parse(text)
+    } catch {
+      return toast('活动效果不是合法 JSON', 'error')
+    }
+  }
+  try {
+    await client.put(`/experiences/${id}/metrics`, {
+      event_time: editForm.value.event_time || null,
+      result_metrics,
+    })
+    toast('已更新活动时间与效果', 'success')
+    editTarget.value = null
+    await load()
+  } catch (err: any) {
+    toast(err.response?.data?.detail || '保存失败', 'error')
+  }
+}
+
 const scopeTag: Record<string, string> = { personal: 'tag-gray', dept: 'tag-cyan', company: 'tag-purple' }
 const statusTag: Record<string, string> = { draft: 'tag-gray', pending: 'tag-orange', approved: 'tag-green', rejected: 'tag-red' }
 const scopeLabel: Record<string, string> = { personal: '个人', dept: '部门', company: '公司' }
@@ -136,6 +177,7 @@ const statusLabel: Record<string, string> = { draft: '草稿', pending: '审批�
               <td style="text-align:right;white-space:nowrap">
                 <div class="row" style="justify-content:flex-end;gap:6px">
                   <button class="btn btn-sm" @click="openDetail(e)">查看</button>
+                  <button class="btn btn-sm" @click="openEdit(e)">编辑</button>
                   <button class="btn btn-sm btn-danger" @click="removeItem(e)">删除</button>
                   <template v-if="e.scope === 'personal' && e.status === 'draft'">
                   <button class="btn btn-sm" @click="submit(e.id, e.title, 'dept')">晋升部门</button>
@@ -178,6 +220,23 @@ const statusLabel: Record<string, string> = { draft: '草稿', pending: '审批�
         </div>
         <div class="modal-foot">
           <button class="btn btn-primary" @click="detailTarget = null">关闭</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 编辑弹窗：仅活动时间 + 活动效果（作者本人或 admin 可改，后端校验） -->
+    <div v-if="editTarget" class="modal-mask">
+      <div class="modal" style="width:520px">
+        <div class="modal-title"><span>编辑经验：{{ editTarget.title }}</span></div>
+        <div class="modal-body col">
+          <p class="text-muted text-sm" style="margin:0 0 4px">活动时间（YYYY-MM-DD，留空清除）</p>
+          <input class="input" type="date" v-model="editForm.event_time" />
+          <p class="text-muted text-sm" style="margin:8px 0 4px">活动效果（JSON，留空清除）</p>
+          <textarea class="textarea" v-model="editForm.result_metrics_text" rows="6" placeholder='{"gmv": 320, "roi": 5}'></textarea>
+        </div>
+        <div class="modal-foot">
+          <button class="btn btn-primary" @click="saveEdit">保存</button>
+          <button class="btn" @click="editTarget = null">取消</button>
         </div>
       </div>
     </div>

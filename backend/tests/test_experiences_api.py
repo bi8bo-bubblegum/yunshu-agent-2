@@ -99,3 +99,67 @@ async def test_experience_detail_visibility(monkeypatch):
         assert (await c.get(f"/api/experiences/{exp_id}", headers=h_other)).status_code == 404
         # 不存在 → 404
         assert (await c.get("/api/experiences/no-such-id", headers=h_owner)).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_update_experience_metrics(monkeypatch):
+    """编辑经验的活动时间与效果指标：作者本人可改，他人 403，admin 可改他人。
+    真实场景：上传/自动沉淀的经验 event_time/result_metrics 常缺失或需修正。"""
+    async def fake_embed(texts):
+        return [[0.1] * 1536] * len(texts)
+    monkeypatch.setattr("app.services.experience_service.embed_texts", fake_embed)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        for u in ("m_owner", "m_other", "m_boss"):
+            await c.post("/api/auth/register", json={"username": u, "password": "x123456", "display_name": u})
+        r = await c.post("/api/auth/login", json={"username": "m_owner", "password": "x123456"})
+        h_owner = {"Authorization": f"Bearer {r.json()['access_token']}"}
+        r = await c.post("/api/auth/login", json={"username": "m_other", "password": "x123456"})
+        h_other = {"Authorization": f"Bearer {r.json()['access_token']}"}
+        r = await c.post("/api/auth/login", json={"username": "m_boss", "password": "x123456"})
+        h_boss = {"Authorization": f"Bearer {r.json()['access_token']}"}
+
+        exp_id = (await c.post("/api/experiences", json={
+            "title": "可编辑经验", "summary": "s", "content": "c",
+        }, headers=h_owner)).json()["id"]
+
+        # 他人编辑 → 403
+        r = await c.put(f"/api/experiences/{exp_id}/metrics",
+                        json={"event_time": "2025-01-01", "result_metrics": {"gmv": 1}},
+                        headers=h_other)
+        assert r.status_code == 403
+
+        # 作者本人编辑 event_time + result_metrics → 200，字段更新
+        r = await c.put(f"/api/experiences/{exp_id}/metrics",
+                        json={"event_time": "2025-11-11", "result_metrics": {"gmv": 320, "roi": 5}},
+                        headers=h_owner)
+        assert r.status_code == 200, r.text
+        assert r.json()["event_time"] == "2025-11-11"
+        assert r.json()["result_metrics"] == {"gmv": 320, "roi": 5}
+
+        # 清空 event_time / result_metrics（null）→ 置空
+        r = await c.put(f"/api/experiences/{exp_id}/metrics",
+                        json={"event_time": None, "result_metrics": None},
+                        headers=h_owner)
+        assert r.status_code == 200
+        assert r.json()["event_time"] is None
+        assert r.json()["result_metrics"] is None
+
+        # admin 可编辑他人经验
+        from sqlalchemy import update
+        from app.models.org import User
+        from app.core.database import SessionLocal
+        async with SessionLocal() as db:
+            await db.execute(update(User).where(User.username == "m_boss").values(role_code="admin"))
+            await db.commit()
+        r = await c.put(f"/api/experiences/{exp_id}/metrics",
+                        json={"event_time": "2025-12-01", "result_metrics": {"roi": 8}},
+                        headers=h_boss)
+        assert r.status_code == 200
+        assert r.json()["event_time"] == "2025-12-01"
+
+        # 不存在 → 404
+        r = await c.put("/api/experiences/no-such-id/metrics",
+                        json={"event_time": None, "result_metrics": None},
+                        headers=h_owner)
+        assert r.status_code == 404
