@@ -211,12 +211,13 @@ async def _resume_graph_impl(db, approval_id: str, approved: bool, trace_id: str
     # 与 ChatService.stream_chat 完成路径对齐：偏好提取 / 经验提炼 / 摘要滚动 / 自动标题
     try:
         from app.services.preference_svc import maybe_extract_batch
-        from app.services.experience_svc import distill_experience, save_personal_experience
+        from app.services.experience_svc import build_experience_dialog, distill_experience, save_personal_experience
         from app.services.summary import maybe_roll_summary, schedule_title_generation
         all_msgs = await message_repo.list_by_conversation(trace.conversation_id)
         user_msg = next((m.content for m in reversed(all_msgs) if m.role == "user"), "")
-        dialog = f"用户：{user_msg}\n助手：{text}"
         await maybe_extract_batch(db, trace.user_id, trace.conversation_id)
+        # 经验提炼用多轮上下文（单轮问答缺业务过程，纯查询易误判为经验）
+        dialog = await build_experience_dialog(db, trace.conversation_id)
         exp = await distill_experience(dialog, trace.user_id, trace.id)
         if exp:
             await save_personal_experience(db, exp)
