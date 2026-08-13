@@ -42,8 +42,13 @@ class DingTalkStreamSubscriber(EventHandler):
         self.dt_client = dt_client
         super().__init__()
 
-    async def process(self, event: EventMessage) -> AckMessage:
-        """处理单个事件；统一应答 200，业务失败只记日志（定时兜底补偿）。"""
+    async def process(self, event: EventMessage):
+        """处理单个事件；统一应答 200，业务失败只记日志（定时兜底补偿）。
+
+        注意：SDK EventHandler 约定 process 返回 (code, message) 元组，
+        raw_process 会解包后构造 AckMessage；返回 AckMessage 对象会抛
+        「cannot unpack non-iterable AckMessage object」，导致确认帧
+        发不出去、钉钉反复重推事件（真实日志实证）。"""
         event_type = event.headers.event_type
         data = event.data or {}
         logger.info("收到钉钉事件: type=%s corp=%s", event_type, event.headers.event_corp_id)
@@ -58,7 +63,7 @@ class DingTalkStreamSubscriber(EventHandler):
                 logger.debug("未订阅事件类型: %s", event_type)
         except Exception as e:
             logger.warning("钉钉事件处理失败 type=%s: %s", event_type, e)
-        return AckMessage()
+        return AckMessage.STATUS_OK, "OK"
 
     # ---- M4 审批回写（approval_gateway 实现）----
     async def _handle_approval_instance(self, data: dict) -> None:
