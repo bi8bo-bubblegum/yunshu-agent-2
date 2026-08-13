@@ -16,7 +16,7 @@ tool message，token 按轮次平方级浪费。
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from app.agents.window import round_window, MAX_TOOL_CHARS, MAX_HIST_TOOL_CHARS
+from app.agents.window import round_window, MAX_TOOL_CHARS, MAX_HIST_TOOL_CHARS, RECENT_TOOL_KEEP
 
 
 def test_round_window_keeps_recent_rounds():
@@ -113,25 +113,46 @@ def test_huge_tool_message_truncated_to_budget():
 
 
 def test_historical_tool_compressed_to_small_budget():
-    """历史轮次的工具数据（已由 agent 消化成回复）压到历史预算；
-    当前轮往返（最近 RECENT_MSG_KEEP 条）保留更大单条上限。"""
-    big_hist = "h" * (MAX_HIST_TOOL_CHARS + 2000)   # 历史轮大工具返回
-    big_cur = "c" * (MAX_HIST_TOOL_CHARS + 2000)    # 当前轮同样大小（未超当前预算）
+    """超过最近 RECENT_TOOL_KEEP 条的工具结果压到历史预算；
+    最后一条 human 之前的历史轮工具始终按历史预算压缩；
+    当前轮（最近 human 之后）的工具保留更大单条上限。"""
+    big_hist = "h" * (MAX_HIST_TOOL_CHARS + 2000)   # 更早轮大工具返回
+    big_cur = "c" * (MAX_HIST_TOOL_CHARS + 2000)    # 最近轮同样大小（未超当前预算）
     msgs = [
         HumanMessage(content="第一轮"),
         AIMessage(content="第一轮回复"),
         ToolMessage(content=big_hist, tool_call_id="t1"),   # 历史轮
         HumanMessage(content="第二轮"),
         AIMessage(content="", tool_calls=[{"name": "q", "args": {}, "id": "2"}]),
-        ToolMessage(content=big_cur, tool_call_id="2"),      # 当前轮
+        ToolMessage(content=big_cur, tool_call_id="2"),      # 当前轮（最近 4 条内）
     ]
     win = round_window(msgs)
     hist_tool = win[2]
     cur_tool = win[5]
-    assert len(hist_tool.content) <= MAX_HIST_TOOL_CHARS + 100, len(hist_tool.content)
+    # 历史轮（human 之前）仍压缩到历史预算
+    assert len(hist_tool.content) <= MAX_HIST_TOOL_CHARS + 100
     assert "已截断" in hist_tool.content
-    # 当前轮大工具：超过当前预算则截断，但阈值远大于历史预算
+    # 当前轮大工具：未超当前预算，不截断
     assert "已截断" not in cur_tool.content
+
+
+def test_recent_tool_keep_limits_accumulation():
+    """单轮 ReAct 内多轮工具往返：只保留最近 RECENT_TOOL_KEEP 条完整，
+    更早的压缩到历史预算，防止 12 条 ×MAX_TOOL_CHARS 撑爆 LLM 输入
+    （真实事故：工具全部成功后最终 LLM 输出空白 → trace failed）。"""
+    big = "x" * (MAX_HIST_TOOL_CHARS + 2000)  # 每条都超过历史预算、未超当前预算
+    msgs = [HumanMessage(content="查数据")]
+    for i in range(6):  # 6 轮工具往返 = 6 条工具结果
+        msgs.append(AIMessage(content="", tool_calls=[{"name": "q", "args": {}, "id": str(i)}]))
+        msgs.append(ToolMessage(content=big, tool_call_id=str(i)))
+    win = round_window(msgs)
+    tools = [m for m in win if m.type == "tool"]
+    assert len(tools) == 6
+    # 最近 RECENT_TOOL_KEEP 条完整（未截断），更早的压缩到历史预算
+    for t in tools[:-RECENT_TOOL_KEEP]:
+        assert "已截断" in t.content, t.content[:30]
+    for t in tools[-RECENT_TOOL_KEEP:]:
+        assert "已截断" not in t.content
 
 
 def test_small_tool_message_untouched():

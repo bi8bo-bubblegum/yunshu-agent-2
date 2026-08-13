@@ -11,6 +11,11 @@ from langchain_core.messages import BaseMessage
 #   只留痕即可，压到 MAX_HIST_TOOL_CHARS。
 MAX_TOOL_CHARS = 6000       # 单条工具返回保留上限（当前轮）≈ 1.5K tokens
 MAX_HIST_TOOL_CHARS = 1000  # 历史轮次工具返回保留上限 ≈ 0.25K tokens
+# 当前轮内也只保留最近 N 条工具结果完整：ReAct 多轮时若全部工具往返都按当前轮
+# 预算保留，12 条 ×6000 字符 ≈ 18K tokens 仍会撑大 LLM 输入（真实事故：工具全部
+# 成功后最终 LLM 输出空白 → trace failed）。最近 2 轮（4 条）结果足够 agent 决策，
+# 更早的工具数据 agent 已消化成后续 tool_calls/文本，只留痕即可。
+RECENT_TOOL_KEEP = 4
 
 
 def round_window(messages: list[BaseMessage], max_rounds: int = 10) -> list[BaseMessage]:
@@ -54,10 +59,15 @@ def _bound_tool_window(msgs: list[BaseMessage]) -> list[BaseMessage]:
         if getattr(msgs[i], "type", "") == "human":
             cur_start = i
             break
+    # 当前轮内保留最近 RECENT_TOOL_KEEP 条工具结果完整，更早的按历史预算压缩
+    tool_idx = [i for i, m in enumerate(msgs)
+                if i >= cur_start and getattr(m, "type", "") == "tool"
+                and isinstance(m.content, str)]
+    keep_full = set(tool_idx[-RECENT_TOOL_KEEP:]) if tool_idx else set()
     out: list[BaseMessage] = []
     for i, m in enumerate(msgs):
         if getattr(m, "type", "") == "tool" and isinstance(m.content, str):
-            limit = MAX_TOOL_CHARS if i >= cur_start else MAX_HIST_TOOL_CHARS
+            limit = MAX_TOOL_CHARS if i in keep_full else MAX_HIST_TOOL_CHARS
             if len(m.content) > limit:
                 m = m.model_copy(update={
                     "content": m.content[:limit] + f"\n…[工具结果过长，已截断 {len(m.content)}→{limit} 字符]",

@@ -1,5 +1,6 @@
 # backend/app/tools/loader.py —— 统一工具加载器
 import asyncio
+import json
 import logging
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -7,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.tools.facade import facade, Tool
 from app.tools.mcp_adapter import mcp_registry, get_mcp_tools
 from app.tools.risk import get_mcp_risk
+from app.agents.window import MAX_TOOL_CHARS
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +18,64 @@ logger = logging.getLogger(__name__)
 # 但执行本身没有——这里给执行包 wait_for：超时抛 asyncio.TimeoutError → ToolNode 记为
 # 工具错误 → 卡片标 error，agent 继续生成而非挂死（与 stream_llm 超时降级同模式）。
 MCP_TOOL_EXEC_TIMEOUT = 20.0
+# 工具返回单条体积上限：与喂 LLM 的当前轮预算对齐。MCP 工具（query_lines/sales_overview
+# 等）不传筛选参数时返回全量数据（实测 25.6MB / 975KB），若全量进入图 state/checkpoint，
+# 每轮工具往返写几 MB 数据库（实测 checkpoint messages 通道 4.65MB），最终 LLM 输入被
+# 撑大后输出空白 → trace failed。执行完成后立即截断（保留合法 JSON 骨架），
+# checkpoint 降到 KB 级、LLM 输入受控、工具卡片落库也小。
+TOOL_RESULT_LIMIT = MAX_TOOL_CHARS
+
+
+def _truncate_struct(v, *, str_cap: int = 300, items_cap: int = 40, depth: int = 0) -> object:
+    """结构感知截断：保留 JSON 骨架（键名/数组结构），值截断，确保输出仍是合法 JSON。"""
+    if v is None or isinstance(v, (bool, int, float)):
+        return v
+    if isinstance(v, str):
+        return v[:str_cap]
+    if isinstance(v, list):
+        if depth >= 4:
+            return [f"[{len(v)} 项]"] if v else []
+        out = [_truncate_struct(x, str_cap=str_cap, items_cap=items_cap, depth=depth + 1)
+               for x in v[:items_cap]]
+        if len(v) > items_cap:
+            out.append(f"…({len(v) - items_cap} 项省略)")
+        return out
+    if isinstance(v, dict):
+        if depth >= 4:
+            return {"[省略]": f"{len(v)} 字段"}
+        out = {}
+        for k, val in list(v.items())[:items_cap]:
+            out[str(k)] = _truncate_struct(val, str_cap=str_cap, items_cap=items_cap,
+                                           depth=depth + 1)
+        if len(v) > items_cap:
+            out["…"] = f"({len(v) - items_cap} 字段省略)"
+        return out
+    return str(v)[:str_cap]
+
+
+def _bound_tool_result(value, limit: int = TOOL_RESULT_LIMIT):
+    """工具返回体积限制：字符串硬切；结构化值序列化超限时结构感知截断（合法 JSON）。"""
+    if isinstance(value, str):
+        if len(value) <= limit:
+            return value
+        return value[:limit] + f"\n…[工具结果过长，已截断 {len(value)}→{limit} 字符]"
+    try:
+        s = json.dumps(value, ensure_ascii=False, default=str)
+    except Exception:
+        return value
+    if len(s) <= limit:
+        return value
+    truncated = _truncate_struct(value)
+    # 收紧两轮（更小字符串/条目），仍超限则最终硬切兜底
+    for str_cap, items_cap in ((150, 15), (80, 8)):
+        s2 = json.dumps(truncated, ensure_ascii=False, default=str)
+        if len(s2) <= limit:
+            return truncated
+        truncated = _truncate_struct(truncated, str_cap=str_cap, items_cap=items_cap)
+    s2 = json.dumps(truncated, ensure_ascii=False, default=str)
+    if len(s2) <= limit:
+        return truncated
+    return s2[:limit] + "…[截断]"
 
 
 def _with_exec_timeout(fn, timeout: float = MCP_TOOL_EXEC_TIMEOUT):
@@ -27,8 +87,11 @@ def _with_exec_timeout(fn, timeout: float = MCP_TOOL_EXEC_TIMEOUT):
     async def wrapped(*args, **kwargs):
         coro = fn(*args, **kwargs)
         if hasattr(coro, "__await__"):
-            return await asyncio.wait_for(coro, timeout=timeout)
-        return coro
+            result = await asyncio.wait_for(coro, timeout=timeout)
+        else:
+            result = coro
+        # 执行完成后立即限制体积，防止全量数据进入图 state/checkpoint
+        return _bound_tool_result(result)
 
     return wrapped
 
