@@ -120,6 +120,35 @@ async def test_get_user_by_unionid():
     assert await client.get_user_by_unionid("union_xxx") == "u_by_union"
 
 
+async def test_get_sns_userinfo_bycode_oauth2_flow():
+    """扫码登录（新版 OAuth2）：authorization_code 换用户 token → /v1.0/contact/users/me 拿 unionId。
+
+    防止再退回到旧版 sns/getuserinfo_bycode（企业内部应用凭证签名 853004 失败）或误用
+    不存在的 /oauth2/oauth2token 接口。"""
+    seen = {}
+
+    def handler(request):
+        path = request.url.path
+        if path == "/v1.0/oauth2/userAccessToken":
+            seen["token_body"] = json.loads(request.content or b"{}")
+            return Response(200, json={"accessToken": "USER_T", "expireIn": 7200})
+        if path == "/v1.0/contact/users/me":
+            seen["user_header"] = request.headers.get("x-acs-dingtalk-access-token")
+            return Response(200, json={"unionId": "union_xxx", "nick": "张三"})
+        return Response(404, json={})
+
+    client = DingTalkClient(client_id="k", client_secret="s", transport=MockTransport(handler))
+    info = await client.get_sns_userinfo_bycode("tmp_code_abc")
+    assert info["unionId"] == "union_xxx"
+    # 换 token 请求体：clientId/clientSecret/code/grantType=authorization_code
+    assert seen["token_body"] == {
+        "clientId": "k", "clientSecret": "s",
+        "code": "tmp_code_abc", "grantType": "authorization_code",
+    }
+    # 用户信息接口必须带用户 token 请求头
+    assert seen["user_header"] == "USER_T"
+
+
 # ---------------------------------------------------------------------------
 # 错误映射
 # ---------------------------------------------------------------------------

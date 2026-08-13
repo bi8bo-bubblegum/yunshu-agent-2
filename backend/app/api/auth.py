@@ -28,7 +28,7 @@ async def dingtalk_login(body: DingTalkLoginRequest, svc: AuthService = Depends(
 
 @router.get("/dingtalk/config")
 async def dingtalk_config():
-    """钉钉扫码登录配置（公开，无鉴权）：前端登录页跳转 qrconnect 授权页需要。
+    """钉钉扫码登录配置（公开，无鉴权）：前端登录页跳转 login.dingtalk.com/oauth2/auth 需要。
     只暴露 client_id（AppKey）等非机密信息，绝不返回 client_secret。"""
     return {
         "enabled": settings.dingtalk_enabled,

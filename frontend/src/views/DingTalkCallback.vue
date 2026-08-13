@@ -1,5 +1,6 @@
 <script setup lang="ts">
-// 钉钉扫码登录回调页（M2）：qrconnect 授权后回跳到 /dingtalk/callback?code=&state=
+// 钉钉扫码登录回调页（M2，新版 OAuth2）：login.dingtalk.com/oauth2/auth 授权后
+// 回跳到 /dingtalk/callback?code=&state=，用 code 换后端 JWT
 // 用 code 换后端 JWT，成功后进工作台；state 校验防 CSRF。
 import { onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -12,20 +13,41 @@ const router = useRouter()
 onMounted(async () => {
   const code = route.query.code as string | undefined
   const state = route.query.state as string | undefined
+  const storedState = sessionStorage.getItem('dingtalk_state')
+
+  // 调试：打印参数方便排查
+  console.log('[callback] code:', code)
+  console.log('[callback] state:', state)
+  console.log('[callback] storedState:', storedState)
+  console.log('[callback] match:', state === storedState)
+
   // state 与登录页跳转前存入的一致才算合法回调
-  if (!code || !state || state !== sessionStorage.getItem('dingtalk_state')) {
-    toast('钉钉登录回调无效，请重新扫码', 'error')
+  if (!code) {
+    console.error('[callback] 缺少 code 参数')
     router.replace('/login')
     return
   }
+  if (!state || state !== storedState) {
+    console.error('[callback] state 校验失败', { state, storedState })
+    router.replace('/login')
+    return
+  }
+
   sessionStorage.removeItem('dingtalk_state')
+
   try {
     const { data } = await client.post('/auth/dingtalk', { mode: 'scan', code })
+    console.log('[callback] 登录成功:', data)
     localStorage.setItem('token', data.access_token)
     router.replace('/chat')
   } catch (e: any) {
-    toast(e.response?.data?.detail || '钉钉登录失败', 'error')
-    router.replace('/login')
+    console.error('[callback] 登录失败:', e)
+    console.error('[callback] 完整响应:', e.response)
+    const detail = e.response?.data?.detail || e.message || '钉钉登录失败'
+    toast(detail, 'error')
+    console.error('[callback] 错误详情:', detail)
+    // 延迟跳转，让用户看到错误信息
+    setTimeout(() => router.replace('/login'), 3000)
   }
 })
 </script>

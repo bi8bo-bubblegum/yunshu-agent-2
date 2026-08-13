@@ -40,6 +40,9 @@ ERROR_MESSAGES = {
     "formConverterError": "审批表单校验失败（模板字段与提交值不匹配）",
     "invalidParameter": "请求参数非法",
     "invalidAuthInfo": "企业未开通应用授权",
+    "accessdenieddetail": "无权限调用该接口",
+    "invalidCode": "授权码无效或已过期，请重新扫码登录",
+    "invalidParameter.authCode.notFound": "授权码无效或已过期，请重新扫码登录",
 }
 
 
@@ -209,28 +212,38 @@ class DingTalkClient:
         return result.get("userid")
 
     async def get_sns_userinfo_bycode(self, tmp_auth_code: str) -> dict:
-        """网页扫码登录：免登授权码换用户信息（sns/getuserinfo_bycode，官方文档确认）。
+        """网页扫码登录：授权码换用户信息（新版 OAuth2，官方「实现登录第三方网站」文档确认）。
 
-        与内部应用免登不同：不走 access_token，认证用 query 参数
-        accessKey(AppId) + timestamp(毫秒) + signature（HmacSHA256 签名，
-        签名字符串 timestamp+"\\n"+AppSecret）。返回 user_info（unionid/nick/openid，无 userid）。
+        前端 Login.vue 跳 login.dingtalk.com/oauth2/auth（scope=openid）获取 authCode 后：
+        1. POST /v1.0/oauth2/userAccessToken 用 clientId/clientSecret/code/grantType
+           换取用户级 accessToken（此接口不需要企业 accessToken 请求头）
+        2. GET /v1.0/contact/users/me，请求头 x-acs-dingtalk-access-token=用户 token，
+           返回用户信息（nick/unionId/openId；企业内部应用按权限可能含 userid/mobile）。
+
+        注意：旧版 sns/getuserinfo_bycode（qrconnect）与企业内部应用凭证不配套
+        （真实冒烟返回 853004 签名校验失败），且官方已推荐本流程，故前端授权链接
+        与后端换票必须统一走新版 OAuth2，不可混用旧接口。
         """
-        timestamp = str(int(time.time() * 1000))
-        sign_str = f"{timestamp}\n{self.client_secret}"
-        signature = base64.b64encode(
-            hmac.new(self.client_secret.encode(), sign_str.encode(), hashlib.sha256).digest()
-        ).decode()
-        async with httpx.AsyncClient(base_url="https://oapi.dingtalk.com", timeout=15,
+        # Step 1: 授权码换用户级 accessToken
+        token_body = await self._post_new(
+            "/v1.0/oauth2/userAccessToken",
+            json={
+                "clientId": self.client_id,
+                "clientSecret": self.client_secret,
+                "code": tmp_auth_code,
+                "grantType": "authorization_code",
+            },
+            use_token=False,
+        )
+        user_token = token_body.get("accessToken")
+        if not user_token:
+            raise DingTalkError("获取用户 accessToken 失败：响应缺少 accessToken 字段", "invalidParameter")
+        # Step 2: 用户 token 调 /v1.0/contact/users/me（头与企业 accessToken 相同但值不同）
+        headers = {"x-acs-dingtalk-access-token": user_token}
+        async with httpx.AsyncClient(base_url="https://api.dingtalk.com", timeout=15,
                                      transport=self._transport) as c:
-            resp = await c.post(
-                "/sns/getuserinfo_bycode",
-                params={"accessKey": self.client_id, "timestamp": timestamp, "signature": signature},
-                json={"tmp_auth_code": tmp_auth_code},
-            )
-            body = resp.json()
-            if body.get("errcode") != 0:
-                self._raise_error(body, str(body.get("errcode", "unknown")))
-            return body.get("user_info") or {}
+            resp = await c.get("/v1.0/contact/users/me", headers=headers)
+            return self._parse_new(resp)
 
     # ------------------------------------------------------------------
     # 通讯录接口（M3 组织同步，全部走旧版 OAPI）

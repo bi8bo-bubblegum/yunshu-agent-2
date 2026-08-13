@@ -12,15 +12,17 @@ from app.services.dingtalk.client import DingTalkClient
 
 
 def make_dingtalk_client(userid: str = "ding_user_a") -> DingTalkClient:
-    """Mock 钉钉登录链路：免登/扫码/unionid 换 userid 全返回同一 userid。"""
+    """Mock 钉钉登录链路：免登/扫码（新版 OAuth2）/unionid 换 userid 全返回同一 userid。"""
     def handler(request):
         path = request.url.path
         if path == "/v1.0/oauth2/accessToken":
             return Response(200, json={"accessToken": "T", "expireIn": 7200})
         if path == "/topapi/v2/user/getuserinfo":
             return Response(200, json={"errcode": 0, "result": {"userid": userid, "unionid": "union_x"}})
-        if path == "/sns/getuserinfo_bycode":
-            return Response(200, json={"errcode": 0, "user_info": {"unionid": "union_x", "nick": "张三"}})
+        if path == "/v1.0/oauth2/userAccessToken":
+            return Response(200, json={"accessToken": "USER_T", "expireIn": 7200})
+        if path == "/v1.0/contact/users/me":
+            return Response(200, json={"unionId": "union_x", "nick": "张三"})
         if path == "/topapi/user/getbyunionid":
             return Response(200, json={"errcode": 0, "result": {"userid": userid}})
         return Response(404, json={})

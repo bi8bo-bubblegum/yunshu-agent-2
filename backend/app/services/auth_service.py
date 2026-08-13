@@ -45,9 +45,13 @@ class AuthService:
                 info = await self.dt_client.get_userinfo_by_code(code)
                 userid = info.get("userid")
             elif mode == "scan":
+                # 新版 OAuth2 扫码：授权码 → 用户信息（/v1.0/contact/users/me）。
+                # 企业内部应用可能直接返回 userid；否则回退 unionId → userid。
                 user_info = await self.dt_client.get_sns_userinfo_bycode(code)
-                unionid = user_info.get("unionid")
-                userid = await self.dt_client.get_user_by_unionid(unionid) if unionid else None
+                userid = user_info.get("userid")
+                if not userid:
+                    unionid = user_info.get("unionid") or user_info.get("unionId")
+                    userid = await self.dt_client.get_user_by_unionid(unionid) if unionid else None
             else:
                 raise HTTPException(status_code=400, detail="不支持的钉钉登录方式")
         except DingTalkError as e:

@@ -12,9 +12,20 @@ const displayName = ref('')
 const loading = ref(false)
 const showPwd = ref(false)
 
-// 钉钉扫码登录（M2）：enabled 时才显示入口；跳转 qrconnect 授权页后回跳 /dingtalk/callback
+// 钉钉扫码登录（M2，新版 OAuth2）：enabled 时才显示入口；跳 login.dingtalk.com/oauth2/auth
+// 授权页后回跳 /dingtalk/callback（scope=openid，与后端 userAccessToken + users/me 配套）
+// 注意：redirectUri 需要改成 NATApp 穿透后的公网地址（如 https://s689c622.natappfree.cc）
 const dingtalkEnabled = ref(false)
 const dingtalkClientId = ref('')
+// 钉钉回调的公网域名（NATApp 穿透地址），本地开发时手动填入
+const DINGTALK_PUBLIC_HOST = ''
+
+function getRedirectUri(): string {
+  // 优先用公网域名（供钉钉服务器回跳），否则降级到 localhost
+  if (DINGTALK_PUBLIC_HOST) return `${DINGTALK_PUBLIC_HOST}/dingtalk/callback`
+  return `${window.location.origin}/dingtalk/callback`
+}
+
 onMounted(async () => {
   try {
     const { data } = await client.get('/auth/dingtalk/config')
@@ -27,15 +38,17 @@ function dingtalkLogin() {
   // state 随机串存 sessionStorage，回调页校验防止 CSRF
   const state = Math.random().toString(36).slice(2)
   sessionStorage.setItem('dingtalk_state', state)
-  const redirectUri = `${window.location.origin}/dingtalk/callback`
+  const redirectUri = getRedirectUri()
   const params = new URLSearchParams({
-    appid: dingtalkClientId.value,
-    response_type: 'code',
-    scope: 'snsapi_login',
-    state,
     redirect_uri: redirectUri,
+    response_type: 'code',
+    client_id: dingtalkClientId.value,
+    scope: 'openid',
+    state,
+    prompt: 'consent',
   })
-  location.href = `https://oapi.dingtalk.com/connect/qrconnect?${params}`
+  // 新版 OAuth2 扫码登录（与后端 /v1.0/oauth2/userAccessToken + /v1.0/contact/users/me 配套）
+  location.href = `https://login.dingtalk.com/oauth2/auth?${params}`
 }
 
 async function submit() {

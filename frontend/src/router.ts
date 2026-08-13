@@ -7,7 +7,7 @@ const router = createRouter({
   routes: [
     { path: '/', redirect: '/chat' },
     { path: '/login', component: () => import('./views/Login.vue'), meta: { public: true } },
-    // 钉钉扫码登录回调页：qrconnect 授权后回跳，换取 token 后进工作台
+    // 钉钉扫码登录回调页（新版 OAuth2）：login.dingtalk.com/oauth2/auth 授权后回跳，换取 token 后进工作台
     { path: '/dingtalk/callback', component: () => import('./views/DingTalkCallback.vue'), meta: { public: true } },
     { path: '/chat', component: () => import('./views/Chat.vue') },
     { path: '/knowledge', component: () => import('./views/Knowledge.vue') },
