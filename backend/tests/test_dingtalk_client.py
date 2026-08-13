@@ -264,3 +264,44 @@ async def test_get_process_instance_returns_result():
     result = await client.get_process_instance("inst_123")
     assert result["status"] == "RUNNING"
     assert result["tasks"][0]["mobileUrl"] == "https://m"
+
+
+async def test_get_form_schema_parses_schema_content_items():
+    """审批模板 schema：按实测结构解析 schemaContent.items + componentName + DDSelectField。
+
+    真实接口不返回 formComponentList，控件在 result.schemaContent.items，类型字段是
+    componentName，下拉为 DDSelectField，options 为 JSON 字符串数组。
+    """
+    schema = {
+        "result": {
+            "formUuid": "form-uuid",
+            "schemaContent": {
+                "title": "经验晋升",
+                "items": [
+                    {"componentName": "TextField",
+                     "props": {"id": "TextField_1", "label": "经验标题",
+                               "required": True, "placeholder": "请输入"}},
+                    {"componentName": "DDSelectField",
+                     "props": {"id": "DDSelect_1", "label": "当前层级", "required": True,
+                               "options": ['{"value":"个人","key":"option_0"}',
+                                           '{"value":"部门","key":"option_1"}']}},
+                    {"componentName": "TextareaField",
+                     "props": {"id": "Textarea_1", "label": "晋升理由", "required": False}},
+                    {"componentName": "DDAttachment",
+                     "props": {"id": "Att_1", "label": "附件", "required": False}},
+                ],
+            },
+        }
+    }
+    client = build_client({**TOKEN_RESP, "/v1.0/workflow/forms/schemas/processCodes":
+                           Response(200, json=schema)})
+    out = await client.get_form_schema("PROC-X")
+    assert out["title"] == "经验晋升"
+    assert [f["id"] for f in out["fields"]] == ["TextField_1", "DDSelect_1", "Textarea_1"]
+    # DDSelectField 归一化为 SingleChoiceField，options 从 JSON 字符串解析
+    select = next(f for f in out["fields"] if f["id"] == "DDSelect_1")
+    assert select["type"] == "SingleChoiceField"
+    assert select["options"] == [{"key": "option_0", "value": "个人"},
+                                 {"key": "option_1", "value": "部门"}]
+    # 不支持的控件（DDAttachment）被跳过
+    assert all(f["id"] != "Att_1" for f in out["fields"])

@@ -171,7 +171,10 @@ async def test_list_shows_requester_and_approver_username(db_session):
 
 @pytest.mark.asyncio
 async def test_approve_experience_promotion_via_dingtalk(db_session, monkeypatch, mock_dingtalk_push):
-    """经验晋升审批（钉钉 agree 事件回写）：dept_owner 审批单通过后经验层级晋升。"""
+    """经验晋升审批（钉钉 agree 事件回写）：dept_owner 审批单通过后经验层级晋升。
+
+    M5 手动提交模式：创建审批单后需 POST /{id}/submit 推钉钉。
+    """
     async def fake_embed(texts):
         return [[0.1] * 1536] * len(texts)
     monkeypatch.setattr("app.services.experience_service.embed_texts", fake_embed)
@@ -181,9 +184,13 @@ async def test_approve_experience_promotion_via_dingtalk(db_session, monkeypatch
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         exp_id = (await c.post("/api/experiences", json={"title": "t", "summary": "s"}, headers=h)).json()["id"]
         await c.post(f"/api/experiences/{exp_id}/submit", json={"to_scope": "dept"}, headers=h)
+        # 创建 pending 单后，手动提交到钉钉
         r = await c.get("/api/approvals?status=pending", headers=h)
         assert r.status_code == 200
         ap_id = r.json()[0]["id"]
+        # 提交审批
+        await c.post(f"/api/approvals/{ap_id}/submit", headers=h)
+        r = await c.get("/api/approvals?status=pending", headers=h)
         assert r.json()[0]["push_status"] == "pushed"
         # 钉钉审批通过 → 经验晋升
         pid = (await db_session.scalars(
@@ -197,7 +204,7 @@ async def test_approve_experience_promotion_via_dingtalk(db_session, monkeypatch
 async def test_reject_promotion_restores_status_via_dingtalk(db_session, monkeypatch, mock_dingtalk_push):
     """经验晋升被钉钉驳回 → 恢复审批前状态（personal 回 draft），可再次晋升。
 
-    真实事故：驳回后经验 status 卡在 pending，前端永远显示「审批中」，无法再晋升。"""
+    M5 手动提交模式：创建审批单后需 POST /{id}/submit 推钉钉。"""
     async def fake_embed(texts):
         return [[0.1] * 1536] * len(texts)
     monkeypatch.setattr("app.services.experience_service.embed_texts", fake_embed)
@@ -210,6 +217,8 @@ async def test_reject_promotion_restores_status_via_dingtalk(db_session, monkeyp
         await c.post(f"/api/experiences/{exp_id}/submit", json={"to_scope": "dept"}, headers=h)
         r = await c.get("/api/approvals?status=pending", headers=h)
         ap_id = r.json()[0]["id"]
+        # 提交审批到钉钉
+        await c.post(f"/api/approvals/{ap_id}/submit", headers=h)
         pid = (await db_session.scalars(
             select(ApprovalBinding).where(ApprovalBinding.approval_id == ap_id))).first().process_instance_id
         # 钉钉驳回 → 经验恢复 personal/draft

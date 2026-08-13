@@ -14,6 +14,7 @@ import asyncio
 import base64
 import hashlib
 import hmac
+import json
 import logging
 import time
 
@@ -328,6 +329,108 @@ class DingTalkClient:
         resp = await self._get_new("/v1.0/workflow/processInstances",
                                    params={"processInstanceId": process_instance_id})
         return resp.get("result") or {}
+
+    async def get_form_schema(self, process_code: str) -> dict:
+        """获取审批模板 schema（GET /v1.0/workflow/forms/schemas/processCodes，官方文档确认）。
+
+        用于手动发起审批时动态渲染表单。返回扁平化的字段结构，供前端根据控件类型渲染表单。
+
+        实测返回结构（2026-08 真实接口）：控件在 result.schemaContent.items[]，
+        控件类型字段是 componentName（TextField/TextareaField/DDSelectField/DDMultiSelectField/
+        MoneyField/NumberField/DateField/TableField 等），props 里含 id/label/required/
+        placeholder/options；options 为 JSON 字符串数组（如 '{"value":"个人","key":"option_0"}'）。
+        DDSelectField/DDMultiSelectField 分别归一化为 SingleChoiceField/MultiChoiceField 输出；
+        不支持的控件（DDAttachment/ContactField/DDPhotoField 等）跳过。
+        同时兼容旧结构（result.formComponentList + componentType）。
+
+        返回结构：
+        {
+            "processCode": str,
+            "title": str,        # 模板展示名称
+            "fields": [
+                {
+                    "id": str,               # props.id（如 TextField-abc）
+                    "type": str,             # componentType
+                    "label": str,            # props.label
+                    "required": bool,        # props.required
+                    "placeholder": str|None, # props.placeholder
+                    "options": list[dict]|None,  # props.options（单选/多选）
+                    "format": str|None,      # props.format（日期）
+                    "children": list[dict]|None,  # TableField 子控件（递归）
+            }
+        ]
+        }
+        """
+        resp = await self._get_new(
+            "/v1.0/workflow/forms/schemas/processCodes",
+            params={"processCode": process_code},
+        )
+        result = resp.get("result") or {}
+        schema_content = result.get("schemaContent") or {}
+        # 实测新结构：schemaContent.items；旧结构兜底：formComponentList
+        form_list = schema_content.get("items") or result.get("formComponentList") or []
+        # 钉钉实际控件名 → 前端/提交统一类型
+        TYPE_MAP = {
+            "TextField": "TextField",
+            "TextareaField": "TextareaField",
+            "DDSelectField": "SingleChoiceField",
+            "DDMultiSelectField": "MultiChoiceField",
+            "SingleChoiceField": "SingleChoiceField",
+            "MultiChoiceField": "MultiChoiceField",
+            "MoneyField": "MoneyField",
+            "NumberField": "NumericField",
+            "NumericField": "NumericField",
+            "DateField": "DatePickerField",
+            "DatePickerField": "DatePickerField",
+            "TableField": "TableField",
+        }
+
+        def _flatten_component(comp: dict) -> dict:
+            """递归转换钉钉原始控件结构为前端可用的扁平结构。"""
+            props = comp.get("props") or {}
+            ctype = TYPE_MAP.get(comp.get("componentName") or comp.get("componentType") or "")
+            if ctype is None:
+                return None  # 跳过不支持的控件类型
+            out = {
+                "id": props.get("id", ""),
+                "type": ctype,
+                "label": props.get("label", ""),
+                "required": bool(props.get("required")),
+                "placeholder": props.get("placeholder"),
+                "options": None,
+                "format": props.get("format"),
+                "children": None,
+            }
+            # 单选/多选控件需要选项列表
+            if ctype in ("SingleChoiceField", "MultiChoiceField"):
+                opts = props.get("options") or props.get("optionList")
+                if opts:
+                    parsed = []
+                    for o in opts:
+                        if isinstance(o, dict):
+                            parsed.append({"key": str(o.get("key", "")), "value": str(o.get("value", ""))})
+                        elif isinstance(o, str):
+                            # 实测是 JSON 字符串数组：'{"value":"个人","key":"option_0"}'
+                            try:
+                                obj = json.loads(o)
+                                parsed.append({"key": str(obj.get("key", "")), "value": str(obj.get("value", ""))})
+                            except (ValueError, TypeError):
+                                parsed.append({"key": o, "value": o})
+                    out["options"] = parsed
+            # 明细表需要递归处理子控件
+            if ctype == "TableField":
+                children = comp.get("children") or []
+                filtered_children = [_flatten_component(c) for c in children]
+                out["children"] = [c for c in filtered_children if c is not None]
+            return out
+
+        flat_fields = [_flatten_component(comp) for comp in form_list]
+        flat_fields = [f for f in flat_fields if f is not None]
+        return {
+            "processCode": result.get("processCode") or result.get("formCode") or process_code,
+            "title": schema_content.get("title") or result.get("processName") or result.get("name") or "",
+            "fields": flat_fields,
+        }
 
 
 # 进程内共享单例（避免各模块各自建 client、重复缓存 token）

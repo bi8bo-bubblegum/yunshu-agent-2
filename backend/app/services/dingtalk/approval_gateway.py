@@ -42,8 +42,60 @@ CONTROL_DETAIL = "审批详情"     # TextareaField：工具参数/经验摘要 
 _bg_tasks: set[asyncio.Task] = set()
 
 
-def build_form_values(approval) -> list[dict]:
-    """把本地审批单映射成钉钉表单值（context 序列化 JSON 展示工具参数/经验摘要）。"""
+def _convert_form_value(label: str, ctype: str, value, children: list[dict] | None = None) -> dict:
+    """把前端表单值转换为钉钉 formComponentValues 单项（name=控件 label，按类型处理值）。"""
+    # 明细表：value 为行数组，每行 {childId: value} → [{name: 子label, value: ...}]
+    if ctype == "TableField":
+        rows: list[dict] = []
+        child_meta = {c["id"]: c for c in (children or [])}
+        if isinstance(value, list):
+            for row in value:
+                if not isinstance(row, dict):
+                    continue
+                converted = {}
+                for cid, cval in row.items():
+                    if cid == "__rowId":
+                        continue
+                    cf = child_meta.get(cid)
+                    converted["name"] = cf["label"] if cf else cid
+                    converted["value"] = "" if cval is None else str(cval)
+                rows.append(converted)
+        return {"name": label, "value": rows, "componentType": ctype}
+    # 多选：value 为选项文本数组
+    if ctype == "MultiChoiceField":
+        values = [str(x) for x in value] if isinstance(value, list) else []
+        return {"name": label, "value": values, "componentType": ctype}
+    # 其余控件统一字符串值（金额/数字/日期/单选/文本）
+    return {"name": label, "value": "" if value is None else str(value), "componentType": ctype}
+
+
+async def build_form_values(approval, process_code: str | None = None) -> list[dict]:
+    """把本地审批单映射成钉钉表单值。
+
+    优先使用 approval.form_values（手动表单审批，fieldId→value 映射）：先拉模板 schema
+    把 fieldId 映射回控件 label（钉钉 formComponentValues.name 取 label，不能传 id），
+    并按控件类型转换值（多选数组 / 明细表行结构 / 普通字符串）。
+    拉 schema 失败时降级用原始键名（保证请求能发出，错误交由钉钉侧提示）。
+    若 form_values 为空则 fallback 到写死约定控件（context JSON 展示）。
+    """
+    form_values = approval.form_values
+    if form_values and isinstance(form_values, dict) and form_values:
+        fields: list[dict] = []
+        if process_code:
+            try:
+                schema = await dingtalk_client.get_form_schema(process_code)
+                fields = schema.get("fields") or []
+            except Exception as e:
+                logger.warning("构建表单值时拉取模板 schema 失败，降级使用原始键名: %s", e)
+        meta = {f["id"]: f for f in fields}
+        out: list[dict] = []
+        for k, v in form_values.items():
+            f = meta.get(k)
+            label = f["label"] if f else str(k)
+            ctype = f["type"] if f else "TextField"
+            out.append(_convert_form_value(label, ctype, v, f.get("children") if f else None))
+        return out
+    # Fallback：自动审批模式（历史遗留），写死约定控件
     return [
         {"name": CONTROL_TITLE, "value": approval.title, "componentType": "TextField"},
         {"name": CONTROL_DETAIL,
@@ -79,7 +131,7 @@ async def push_approval_to_dingtalk(db, approval) -> ApprovalBinding:
     try:
         instance_id = await dingtalk_client.create_process_instance(
             originator_user_id=originator_user_id, process_code=process_code,
-            dept_id=dept_id, form_component_values=build_form_values(approval),
+            dept_id=dept_id, form_component_values=await build_form_values(approval, process_code),
             microapp_agent_id=microapp_agent_id)
     except DingTalkError as e:
         raise HTTPException(502, f"钉钉审批发起失败：{e.message}") from e

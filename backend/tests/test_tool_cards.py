@@ -254,10 +254,10 @@ async def test_interrupt_no_tool_rows_until_terminal(db_session, monkeypatch, mo
         msgs = (await c.get(f"/api/conversations/{conv_id}/messages", headers=h_user)).json()
         assert [m["role"] for m in msgs] == ["user"], msgs
 
-        # 3. 钉钉审批通过事件回写（本地 decide 已下线）→ 后台恢复 → 终态一次性落库
-        binding = (await db_session.scalars(
-            select(ApprovalBinding).where(ApprovalBinding.approval_id == approval_id))).first()
-        assert binding is not None
+        # 3. 手动提交审批到钉钉 → 钉钉审批通过事件回写 → 后台恢复 → 终态一次性落库
+        from app.services.approval_service import ApprovalService
+        svc = ApprovalService(db_session)
+        binding = await svc.submit_to_dingtalk(approval_id=approval_id)
         from app.services.dingtalk.approval_gateway import handle_approval_instance_change
         await handle_approval_instance_change({"processInstanceId": binding.process_instance_id,
                                                "type": "finish", "result": "agree",

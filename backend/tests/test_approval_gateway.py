@@ -163,10 +163,57 @@ async def test_push_dingtalk_error_raises_502(monkeypatch, enable_dingtalk, db_s
 async def test_build_form_values_contains_controls(db_session):
     """表单映射：标题 TextField + 详情 TextareaField（context 序列化 JSON）。"""
     ap = await _make_context(db_session)
-    vals = build_form_values(ap)
+    vals = await build_form_values(ap)
     assert vals[0] == {"name": "审批标题", "value": "测试审批", "componentType": "TextField"}
     assert vals[1]["name"] == "审批详情" and vals[1]["componentType"] == "TextareaField"
     assert "tool" in json.loads(vals[1]["value"])
+
+
+async def test_build_form_values_manual_maps_id_to_label(monkeypatch, db_session):
+    """手动表单：fieldId 通过 schema 映射回控件 label，并按类型转换值。"""
+    async def fake_get_form_schema(process_code):
+        return {
+            "processCode": "PROC_TOOL",
+            "title": "工具审批",
+            "fields": [
+                {"id": "TextField_1", "type": "TextField", "label": "标题", "required": True},
+                {"id": "DDSelect_1", "type": "SingleChoiceField", "label": "级别", "required": True,
+                 "options": [{"key": "option_0", "value": "个人"}]},
+                {"id": "Multi_1", "type": "MultiChoiceField", "label": "渠道", "required": False},
+                {"id": "Table_1", "type": "TableField", "label": "明细", "required": False,
+                 "children": [{"id": "Child_1", "type": "TextField", "label": "子项"}]},
+            ],
+        }
+
+    monkeypatch.setattr("app.services.dingtalk.approval_gateway.dingtalk_client.get_form_schema",
+                        fake_get_form_schema)
+    ap = await _make_context(db_session)
+    ap.form_values = {
+        "TextField_1": "测试标题",
+        "DDSelect_1": "个人",
+        "Multi_1": ["微信", "抖音"],
+        "Table_1": [{"__rowId": "r1", "Child_1": "明细值"}],
+    }
+    vals = await build_form_values(ap, "PROC_TOOL")
+    by_name = {v["name"]: v for v in vals}
+    assert by_name["标题"] == {"name": "标题", "value": "测试标题", "componentType": "TextField"}
+    assert by_name["级别"] == {"name": "级别", "value": "个人", "componentType": "SingleChoiceField"}
+    assert by_name["渠道"] == {"name": "渠道", "value": ["微信", "抖音"], "componentType": "MultiChoiceField"}
+    assert by_name["明细"] == {"name": "明细", "value": [{"name": "子项", "value": "明细值"}],
+                               "componentType": "TableField"}
+
+
+async def test_build_form_values_manual_falls_back_without_schema(monkeypatch, db_session):
+    """拉 schema 失败时降级：用原始键名继续构建（不阻断推送）。"""
+    async def fake_get_form_schema(process_code):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr("app.services.dingtalk.approval_gateway.dingtalk_client.get_form_schema",
+                        fake_get_form_schema)
+    ap = await _make_context(db_session)
+    ap.form_values = {"unknown_field": "x"}
+    vals = await build_form_values(ap, "PROC_TOOL")
+    assert vals == [{"name": "unknown_field", "value": "x", "componentType": "TextField"}]
 
 
 # ---------------------------------------------------------------------------

@@ -131,10 +131,12 @@ async def test_critical_approval_flow(db_session, monkeypatch, mock_dingtalk_pus
         approval_id = body["payload"]["approval_id"]
         assert approval_id
 
-        # 3. 钉钉审批通过事件回写（本地 decide 已下线）→ 图恢复在后台执行后落库
-        binding = (await db_session.scalars(
-            select(ApprovalBinding).where(ApprovalBinding.approval_id == approval_id))).first()
-        assert binding is not None
+        # 3. 手动提交审批到钉钉 → 钉钉审批通过事件回写 → 图恢复在后台执行后落库
+        # M5 手动模式：创建审批单后需 POST /{id}/submit 推钉钉
+        # 用 mock_dingtalk_push 的 fake_push 创建 binding（不触网）
+        from app.services.approval_service import ApprovalService
+        svc = ApprovalService(db_session)
+        binding = await svc.submit_to_dingtalk(approval_id=approval_id)
         from app.services.dingtalk.approval_gateway import handle_approval_instance_change
         await handle_approval_instance_change({"processInstanceId": binding.process_instance_id,
                                                "type": "finish", "result": "agree",
@@ -188,10 +190,10 @@ async def test_critical_rejection_still_replies(db_session, monkeypatch, mock_di
         r = await c.post("/api/chat/resume", json={"conversation_id": conv_id, "approved": True}, headers=h_user)
         approval_id = r.json()["payload"]["approval_id"]
 
-        # 驳回：钉钉 refuse 事件回写，图恢复在后台执行后落库，轮询等待
-        binding = (await db_session.scalars(
-            select(ApprovalBinding).where(ApprovalBinding.approval_id == approval_id))).first()
-        assert binding is not None
+        # 驳回：手动提交审批到钉钉 → 钉钉 refuse 事件回写，图恢复在后台执行后落库，轮询等待
+        from app.services.approval_service import ApprovalService
+        svc = ApprovalService(db_session)
+        binding = await svc.submit_to_dingtalk(approval_id=approval_id)
         from app.services.dingtalk.approval_gateway import handle_approval_instance_change
         await handle_approval_instance_change({"processInstanceId": binding.process_instance_id,
                                                "type": "finish", "result": "refuse",

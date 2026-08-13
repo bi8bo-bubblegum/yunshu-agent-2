@@ -62,6 +62,7 @@ class ApprovalService:
                           "approver_name": users.get(a.approver_id) if a.approver_id else None,
                           "submitted_at": a.submitted_at.isoformat() if a.submitted_at else None,
                           "decided_at": a.decided_at.isoformat() if a.decided_at else None,
+                          "form_values": a.form_values,
                           # 钉钉绑定信息（「去钉钉处理」跳转 + 推送状态展示）
                           "process_instance_id": b.process_instance_id if b else None,
                           "push_status": b.status if b else None,
@@ -73,13 +74,18 @@ class ApprovalService:
                               ref_type: str, ref_id: str, title: str,
                               context: dict | None, requester_id: str,
                               approver_role: str | None = None,
-                              approval_id: str | None = None) -> str:
-        """创建审批单并推送钉钉 OA，返回审批单 ID。
+                              approval_id: str | None = None,
+                              push_dingtalk: bool = True,
+                              form_values: dict | None = None) -> str:
+        """创建审批单。
 
-        M4 起全走钉钉审批：本地单创建（add+flush）后同事务推送钉钉（add binding），
-        再统一 commit。推送失败抛 HTTPException → 调用方会话回滚（图不冻结/经验回 draft）。
-        供 facade.guarded_critical 和 ExperienceService.submit 调用。
+        push_dingtalk=True（默认）：同事务推送钉钉 OA（add binding），
+          推送失败抛 HTTPException → 调用方会话回滚。
+          供 facade.guarded_critical 和 ExperienceService.submit 调用。
+        push_dingtalk=False：仅创建 pending 单，不推送钉钉。
+          供手动审批发起（用户确认后调 submit_to_dingtalk）。
         approval_id 用于 critical 工具场景传入确定性 ID（interrupt 恢复重放时幂等，避免重复建单）。
+        form_values 为用户填写的表单值（手动审批模式用）。
         """
         if approval_id:
             existing = await self.approval_repo.get(approval_id)
@@ -97,13 +103,39 @@ class ApprovalService:
             category=category, risk=risk, mode=mode,
             ref_type=ref_type, ref_id=ref_id, title=title,
             context=context, status="pending", requester_id=requester_id,
-            approver_role=approver_role,
+            approver_role=approver_role, form_values=form_values,
         )
         await self.approval_repo.add(approval)
-        binding = await self._push_or_raise(approval)   # add(binding)，推送失败抛异常会话回滚
-        await self.approval_repo.commit()               # 审批单 + binding 同事务提交
-        self._schedule_binding_enrich(binding)          # 落库后调度回填跳转 URL（独立 session 可见）
+        if push_dingtalk:
+            binding = await self._push_or_raise(approval)   # add(binding)，推送失败抛异常会话回滚
+            await self.approval_repo.commit()               # 审批单 + binding 同事务提交
+            self._schedule_binding_enrich(binding)          # 落库后调度回填跳转 URL（独立 session 可见）
+        else:
+            await self.approval_repo.commit()               # 仅审批单落库（不推送钉钉）
         return approval.id
+
+    async def submit_to_dingtalk(self, approval_id: str, form_values_override: dict | None = None,
+                                  current_user_id: str | None = None) -> ApprovalBinding:
+        """确认提交审批到钉钉（手动模式）。
+
+        查询 pending 状态的 approval → 合并 form_values（override 可选）→ 推送钉钉。
+        同事务推送钉钉，失败抛异常回滚。
+        """
+        approval = await self.approval_repo.get(approval_id)
+        if not approval:
+            raise ValueError("审批单不存在")
+        if approval.status != "pending":
+            raise ValueError(f"审批单状态为 {approval.status}，无法提交审批")
+        # 权限校验：当前用户必须是发起人（或 admin）
+        if current_user_id and approval.requester_id != current_user_id:
+            raise PermissionError("只有审批发起人可以提交审批")
+        # 合并 form_values
+        if form_values_override:
+            approval.form_values = form_values_override
+        binding = await self._push_or_raise(approval)
+        await self.approval_repo.commit()
+        self._schedule_binding_enrich(binding)
+        return binding
 
     async def _push_or_raise(self, approval: Approval) -> ApprovalBinding:
         """推送钉钉 OA 返回 binding（懒加载网关避免循环导入：gateway 顶层 import 本模块）。"""

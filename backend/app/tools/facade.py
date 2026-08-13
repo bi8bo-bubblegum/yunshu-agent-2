@@ -87,6 +87,7 @@ class DataFacade:
                             context={"tool": name, "args": kwargs, "reason": tool.description},
                             requester_id=eff_requester, approver_role="admin",
                             approval_id=approval_id,
+                            push_dingtalk=False,  # 手动模式：不自动推送钉钉，由用户确认提交后调用 submit_to_dingtalk
                         )
                 # interrupt 冻结图，等待钉钉 OA 审批事件回写（handle_approval_instance_change）后 resume
                 result = interrupt({

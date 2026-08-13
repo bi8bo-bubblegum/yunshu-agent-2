@@ -92,11 +92,37 @@ export interface ApprovalItem {
   approver_name: string | null
   submitted_at: string | null
   decided_at: string | null
+  form_values: Record<string, unknown> | null  // 用户填写的表单值
   // M4 钉钉 OA 审批绑定信息（「去钉钉处理」跳转 + 推送状态）
   process_instance_id: string | null
   push_status: string | null   // pushed/synced；null=未推送（历史单/推送失败）
   pc_url: string | null
   mobile_url: string | null
+}
+
+export interface FormSchemaField {
+  id: string
+  type: string
+  label: string
+  required: boolean
+  placeholder?: string | null
+  options?: Array<{ key: string; value: string }> | null
+  format?: string | null
+  children?: FormSchemaField[] | null
+}
+
+export interface DingTalkFormSchema {
+  processCode: string
+  title: string
+  fields: FormSchemaField[]
+}
+
+export interface DingTalkStatusResponse {
+  enabled: boolean
+  stream_enabled: boolean
+  corp_id: string | null
+  last_synced_at: string | null
+  process_codes: Record<string, string>
 }
 
 export interface Department {
