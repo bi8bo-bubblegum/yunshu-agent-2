@@ -1,0 +1,60 @@
+<!-- 钉钉扫码登录回调页：由后端在 /dingtalk/callback 静态提供 -->
+<!-- 不需要前端 Vite 服务，NATApp 穿透 8090 即可 -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>钉钉登录中…</title>
+  <style>
+    body {
+      min-height: 100vh; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 16px;
+      background: #fff; color: #666; font-family: -apple-system, sans-serif;
+    }
+    .spinner {
+      width: 28px; height: 28px; border-radius: 50%;
+      border: 2px solid #e0e0e0; border-top-color: #1890ff;
+      animation: spin .8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg) } }
+    .error { color: #e5484d; text-align: center; max-width: 300px; }
+  </style>
+</head>
+<body>
+  <div class="spinner"></div>
+  <p>钉钉登录中…</p>
+
+  <script>
+    const params = new URLSearchParams(window.location.search)
+    const code = params.get('code')
+    const state = params.get('state')
+    const expectedState = sessionStorage.getItem('dingtalk_state')
+
+    if (!code || !state || state !== expectedState) {
+      document.body.innerHTML = '<div class="error"><h3>登录失败</h3><p>回调无效，请重新扫码</p><button onclick="history.back()">返回</button></div>'
+      sessionStorage.removeItem('dingtalk_state')
+    } else {
+      sessionStorage.removeItem('dingtalk_state')
+      fetch('/api/auth/dingtalk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: 'scan', code }),
+      })
+        .then(async (res) => {
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}))
+            throw new Error(err.detail || '登录失败')
+          }
+          const data = await res.json()
+          localStorage.setItem('token', data.access_token)
+          // 登录成功，跳回主站（注意：这里需要填你的公网域名）
+          window.location.href = 'http://localhost:5173/chat'
+        })
+        .catch((err) => {
+          document.body.innerHTML = `<div class="error"><h3>登录失败</h3><p>${err.message}</p><button onclick="history.back()">返回</button></div>`
+        })
+    }
+  </script>
+</body>
+</html>
