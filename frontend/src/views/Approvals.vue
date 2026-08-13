@@ -68,6 +68,71 @@ const categoryLabels: Record<string, string> = {
   experience_promotion: '经验晋升审批',
 }
 
+// 经验层级英文 code → 模板选项中文（自动预填单选字段用）
+const SCOPE_LABELS: Record<string, string> = {
+  personal: '个人',
+  dept: '部门',
+  company: '公司',
+}
+
+/**
+ * 从审批单上下文/标题启发式预填字段值：
+ * - experience_promotion：「当前层级」= from_scope、「晋升目标」= to_scope、
+ *   「经验标题」= title、「经验详情」= summary
+ * - tool_call：「工具」= tool、「参数」= args JSON、「原因」= reason
+ * 单选字段值必须命中模板选项才填，避免提交 formConverterError。
+ */
+function autoFillValue(field: FormSchemaField, approval: ApprovalItem): unknown {
+  const ctx = (approval.context || {}) as Record<string, unknown>
+  const args = (ctx.args || {}) as Record<string, unknown>
+  const label = field.label || ''
+  let raw: unknown
+
+  // ---- 活动创建/发布审批（tool_call：args 带活动数据）----
+  // 放最前：字段名更具体（活动名称/预算/渠道/日期），避免被通用「标题」规则抢占
+  if (label.includes('活动名称') || label.includes('活动标题')) {
+    raw = args.name
+  } else if (label.includes('预算')) {
+    raw = args.budget
+  } else if (label.includes('渠道')) {
+    // 发布渠道是数组，转成逗号分隔文本
+    raw = Array.isArray(args.channels) ? args.channels.join('、') : args.channel
+  } else if (label.includes('开始日期')) {
+    raw = args.start_date
+  } else if (label.includes('结束日期')) {
+    raw = args.end_date
+  } else if (label.includes('活动') && label.includes('ID')) {
+    raw = args.campaign_id
+  }
+  // ---- 经验晋升审批 ----
+  else if (label.includes('当前层级')) {
+    raw = SCOPE_LABELS[String(ctx.from_scope ?? ctx.fromScope ?? '')]
+  } else if (label.includes('晋升目标')) {
+    raw = SCOPE_LABELS[String(ctx.to_scope ?? ctx.toScope ?? '')]
+  } else if (label.includes('标题')) {
+    raw = String(approval.title || '').replace(/^经验晋升[:：]\s*/, '') || ctx.title
+  } else if (label.includes('详情')) {
+    raw = ctx.summary
+  } else if (label.includes('理由')) {
+    raw = ctx.reason || (ctx.from_scope ? '经验晋升申请' : '')
+  }
+  // ---- 通用工具审批 ----
+  else if (label.includes('工具')) {
+    raw = ctx.tool
+  } else if (label.includes('参数')) {
+    raw = ctx.args ? JSON.stringify(ctx.args, null, 2) : ''
+  } else if (label.includes('原因')) {
+    raw = ctx.reason
+  }
+
+  if (raw === undefined || raw === '') return undefined
+  // 单选：必须命中模板选项，否则不填（避免提交时钉钉校验失败）
+  if (field.type === 'SingleChoiceField' && field.options) {
+    return field.options.some(o => o.value === raw) ? raw : undefined
+  }
+  return raw
+}
+
 function initFieldValue(field: FormSchemaField): unknown {
   if (field.type === 'TableField' && field.children) {
     return [{ __rowId: genRowId(), ...initChildValues(field.children) }]
@@ -126,6 +191,9 @@ async function openFormModal(approval: ApprovalItem) {
         formModal.value.formValues[f.id] = existing[f.id]
       } else {
         formModal.value.formValues[f.id] = initFieldValue(f)
+        // 智能预填：用审批单上下文/标题匹配字段，减少手动输入
+        const auto = autoFillValue(f, approval)
+        if (auto !== undefined) formModal.value.formValues[f.id] = auto
       }
     }
   } catch (err: any) {

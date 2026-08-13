@@ -212,8 +212,8 @@ async def test_tool_card_persisted(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_interrupt_no_tool_rows_until_terminal(db_session, monkeypatch, mock_dingtalk_push):
-    """多级 interrupt：初始 stream 与 resume（二次 interrupt）都不落库（避免 resume 重放重复卡片），
-    审批通过后终态一次性落 2 条工具卡片（create + publish，均 success）。"""
+    """双 critical 审批链：create 与 publish 各建审批单 interrupt，中途不落库，
+    两次审批通过后终态一次性落 2 条工具卡片（create + publish，均 success）。"""
     await _stubs_critical(monkeypatch)
     seq = SequencedLLM()
     monkeypatch.setattr("app.agents.marketing.agent.ModelFactory.get_llm", lambda k: seq)
@@ -231,7 +231,7 @@ async def test_interrupt_no_tool_rows_until_terminal(db_session, monkeypatch, mo
 
         conv_id = (await c.post("/api/conversations", json={}, headers=h_user)).json()["id"]
 
-        # 1. 初始 stream：create(high) interrupt，仅 user 消息（工具卡片终态才落库）
+        # 1. 初始 stream：create(critical) interrupt，仅 user 消息（工具卡片终态才落库）
         events = []
         async with c.stream("POST", "/api/chat/completions",
                             json={"conversation_id": conv_id, "message": "策划并发布国庆活动"},
@@ -241,24 +241,34 @@ async def test_interrupt_no_tool_rows_until_terminal(db_session, monkeypatch, mo
                 if line.startswith("data: "):
                     events.append(json.loads(line[6:]))
         assert "confirm_required" in [e["event"] for e in events], events
+        create_approval_id = next(
+            e["payload"]["approval_id"] for e in events if e["event"] == "confirm_required")
         msgs = (await c.get(f"/api/conversations/{conv_id}/messages", headers=h_user)).json()
         assert [m["role"] for m in msgs] == ["user"], msgs
 
-        # 2. resume：create 确认执行成功，但 publish(critical) 二次 interrupt，仍不落库
-        r = await c.post("/api/chat/resume", json={"conversation_id": conv_id, "approved": True}, headers=h_user)
-        assert r.status_code == 200
-        body = r.json()
-        assert body.get("ok") is False, body
-        approval_id = body["payload"]["approval_id"]
-        assert approval_id
-        msgs = (await c.get(f"/api/conversations/{conv_id}/messages", headers=h_user)).json()
-        assert [m["role"] for m in msgs] == ["user"], msgs
-
-        # 3. 手动提交审批到钉钉 → 钉钉审批通过事件回写 → 后台恢复 → 终态一次性落库
+        # 2. create 审批通过 → 后台恢复 → publish(critical) 建第二个审批单，仍不落库
         from app.services.approval_service import ApprovalService
         svc = ApprovalService(db_session)
-        binding = await svc.submit_to_dingtalk(approval_id=approval_id)
+        binding = await svc.submit_to_dingtalk(approval_id=create_approval_id)
         from app.services.dingtalk.approval_gateway import handle_approval_instance_change
+        await handle_approval_instance_change({"processInstanceId": binding.process_instance_id,
+                                               "type": "finish", "result": "agree",
+                                               "staffId": "ic_admin_ding"})
+        t0 = time.monotonic()
+        while time.monotonic() - t0 < 10.0:
+            pendings = (await c.get("/api/approvals", params={"status": "pending"},
+                                    headers=h_user)).json()
+            others = [p for p in pendings if p["id"] != create_approval_id]
+            if others:
+                break
+            await asyncio.sleep(0.2)
+        assert others, f"等待 publish 审批单超时: {pendings}"
+        publish_approval_id = others[0]["id"]
+        msgs = (await c.get(f"/api/conversations/{conv_id}/messages", headers=h_user)).json()
+        assert [m["role"] for m in msgs] == ["user"], msgs
+
+        # 3. publish 审批通过 → 后台恢复 → 终态一次性落 2 条工具卡片 + 最终回复
+        binding = await svc.submit_to_dingtalk(approval_id=publish_approval_id)
         await handle_approval_instance_change({"processInstanceId": binding.process_instance_id,
                                                "type": "finish", "result": "agree",
                                                "staffId": "ic_admin_ding"})

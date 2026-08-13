@@ -32,9 +32,11 @@ def test_to_langchain_tool_high_risk():
     """high 风险工具：包装为 interrupt 即时确认。"""
     facade = DataFacade()
     register_builtin_tools(facade)
-    tool = facade.to_langchain_tool("create_marketing_campaign")
+    tool = facade.to_langchain_tool("adjust_schedule")
     # 包装后函数不是原始 fn，而是 guarded_high
-    assert tool.name == "create_marketing_campaign"
+    assert tool.name == "adjust_schedule"
+    assert tool.func is None  # guarded_high 是协程（config 注入）
+    assert tool.coroutine is not None
 
 def test_to_langchain_tool_critical_risk():
     """critical 风险工具：包装为审批中心流程。"""

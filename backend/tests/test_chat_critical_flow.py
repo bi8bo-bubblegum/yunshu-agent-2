@@ -1,7 +1,9 @@
-"""回归：流式聊天 + high/critical 多级 interrupt 全链路。
+"""回归：流式聊天 + critical 双审批链全链路。
 
-用 FakeLLM 强制触发 create(high) → publish(critical) 工具链，验证：
-SSE confirm_required → resume → 钉钉审批事件回写（本地 decide 已下线）→ 图恢复 → 回复落库。
+create_marketing_campaign 已从 high（即时确认）改为 critical（创建活动 = 提交 OA 审批表单），
+publish_campaign 保持 critical。用 FakeLLM 强制触发 create(critical) → publish(critical)
+工具链，验证：SSE confirm_required → 逐个钉钉审批事件回写（本地 decide 已下线）→
+后台图恢复 → 两个工具卡片 + 最终回复落库。
 """
 import asyncio
 import json
@@ -30,10 +32,12 @@ async def _wait_assistant(c, conv_id, h, timeout=5.0):
 
 
 class SequencedLLM:
-    """按调用顺序返回：create 工具调用 → publish 工具调用 → 最终方案。"""
+    """按调用顺序返回：create 工具调用 → publish 工具调用 → 最终方案（双 critical 审批链）。"""
 
-    def __init__(self):
+    def __init__(self, reject_after_create: bool = False):
         self.calls = 0
+        # 驳回场景：create 被拒后第二次直接输出最终方案，不再调 publish
+        self.reject_after_create = reject_after_create
 
     def bind_tools(self, tools):
         return self
@@ -47,6 +51,8 @@ class SequencedLLM:
                          "start_date": "2024-10-01", "end_date": "2024-10-07"},
                 "id": "c1", "type": "tool_call",
             }])
+        if self.reject_after_create:
+            return AIMessage(content="最终方案已生成")
         if self.calls == 2:
             return AIMessage(content="", tool_calls=[{
                 "name": "publish_campaign",
@@ -90,6 +96,29 @@ async def _stubs(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def _submit_and_approve(db_session, approval_id, staff="flow_admin_ding"):
+    """手动提交审批单到钉钉并模拟审批通过事件回写（复用 mock_dingtalk_push 的 fake push）。"""
+    from app.services.approval_service import ApprovalService
+    svc = ApprovalService(db_session)
+    binding = await svc.submit_to_dingtalk(approval_id=approval_id)
+    from app.services.dingtalk.approval_gateway import handle_approval_instance_change
+    await handle_approval_instance_change({"processInstanceId": binding.process_instance_id,
+                                           "type": "finish", "result": "agree", "staffId": staff})
+
+
+async def _wait_next_approval(c, h, exclude_id, timeout=10.0):
+    """轮询等待除 exclude_id 外出现新的 pending 审批单（后台恢复图新建的后续审批单）。"""
+    t0 = time.monotonic()
+    while time.monotonic() - t0 < timeout:
+        rows = (await c.get("/api/approvals", params={"status": "pending"}, headers=h)).json()
+        others = [r for r in rows if r["id"] != exclude_id]
+        if others:
+            return others[0]
+        await asyncio.sleep(0.2)
+    raise AssertionError(f"等待新审批单超时: {rows}")
+
+
+@pytest.mark.asyncio
 async def test_critical_approval_flow(db_session, monkeypatch, mock_dingtalk_push):
     await _stubs(monkeypatch)
     seq = SequencedLLM()
@@ -110,7 +139,7 @@ async def test_critical_approval_flow(db_session, monkeypatch, mock_dingtalk_pus
 
         conv_id = (await c.post("/api/conversations", json={}, headers=h_user)).json()["id"]
 
-        # 1. SSE 流：应收到 confirm_required（create，high）
+        # 1. SSE 流：create(critical) 创建审批单并 interrupt，应收到 confirm_required
         events = []
         async with c.stream("POST", "/api/chat/completions",
                             json={"conversation_id": conv_id, "message": "策划并发布国庆活动"},
@@ -122,30 +151,28 @@ async def test_critical_approval_flow(db_session, monkeypatch, mock_dingtalk_pus
         ev_names = [e["event"] for e in events]
         assert "confirm_required" in ev_names, ev_names
         assert "error" not in ev_names, events
+        create_approval_id = next(
+            e["payload"]["approval_id"] for e in events if e["event"] == "confirm_required")
+        # 审批单标题含活动名（友好化）
+        rows = (await c.get("/api/approvals", params={"status": "pending"}, headers=h_user)).json()
+        assert rows and "创建营销活动：国庆大促" in rows[0]["title"], rows
 
-        # 2. resume：high 确认后应继续走到 critical，返回 ok=False + approval_id
-        r = await c.post("/api/chat/resume", json={"conversation_id": conv_id, "approved": True}, headers=h_user)
-        assert r.status_code == 200
-        body = r.json()
-        assert body.get("ok") is False, body
-        approval_id = body["payload"]["approval_id"]
-        assert approval_id
+        # 2. 创建活动审批通过 → 后台恢复图 → create 执行 → publish(critical) 建第二个审批单
+        await _submit_and_approve(db_session, create_approval_id)
+        publish_approval = await _wait_next_approval(c, h_user, create_approval_id)
+        publish_approval_id = publish_approval["id"]
 
-        # 3. 手动提交审批到钉钉 → 钉钉审批通过事件回写 → 图恢复在后台执行后落库
-        # M5 手动模式：创建审批单后需 POST /{id}/submit 推钉钉
-        # 用 mock_dingtalk_push 的 fake_push 创建 binding（不触网）
-        from app.services.approval_service import ApprovalService
-        svc = ApprovalService(db_session)
-        binding = await svc.submit_to_dingtalk(approval_id=approval_id)
-        from app.services.dingtalk.approval_gateway import handle_approval_instance_change
-        await handle_approval_instance_change({"processInstanceId": binding.process_instance_id,
-                                               "type": "finish", "result": "agree",
-                                               "staffId": "flow_admin_ding"})
-
-        # 事件回写立即返回（图恢复后台执行），轮询等待回复落库
+        # 3. 发布审批通过 → 后台恢复图 → publish 执行 → 最终方案落库
+        await _submit_and_approve(db_session, publish_approval_id)
         assistant = await _wait_assistant(c, conv_id, h_user)
         assert assistant, "后台恢复应落库 assistant"
         assert assistant[-1]["content"] == "最终方案已生成"
+        # 两个工具卡片：create + publish 均 success
+        msgs = (await c.get(f"/api/conversations/{conv_id}/messages", headers=h_user)).json()
+        tools = [m for m in msgs if m["role"] == "tool"]
+        assert [t["metadata"]["tool"] for t in tools] == [
+            "create_marketing_campaign", "publish_campaign"], tools
+        assert all(t["metadata"]["status"] == "success" for t in tools)
 
         # trace 终态同样由后台任务更新，轮询等待
         t0 = time.monotonic()
@@ -160,9 +187,9 @@ async def test_critical_approval_flow(db_session, monkeypatch, mock_dingtalk_pus
 
 @pytest.mark.asyncio
 async def test_critical_rejection_still_replies(db_session, monkeypatch, mock_dingtalk_push):
-    """驳回 critical 审批：工具不执行，但图恢复完成并保存最终回复。"""
+    """驳回创建活动审批：create 不执行，图恢复后 agent 继续生成最终回复并落库。"""
     await _stubs(monkeypatch)
-    seq = SequencedLLM()
+    seq = SequencedLLM(reject_after_create=True)
     monkeypatch.setattr("app.agents.marketing.agent.ModelFactory.get_llm", lambda k: seq)
 
     transport = ASGITransport(app=app)
@@ -186,14 +213,13 @@ async def test_critical_rejection_still_replies(db_session, monkeypatch, mock_di
                 if line.startswith("data: "):
                     events.append(json.loads(line[6:]))
         assert "confirm_required" in [e["event"] for e in events], events
+        create_approval_id = next(
+            e["payload"]["approval_id"] for e in events if e["event"] == "confirm_required")
 
-        r = await c.post("/api/chat/resume", json={"conversation_id": conv_id, "approved": True}, headers=h_user)
-        approval_id = r.json()["payload"]["approval_id"]
-
-        # 驳回：手动提交审批到钉钉 → 钉钉 refuse 事件回写，图恢复在后台执行后落库，轮询等待
+        # 驳回创建活动审批：create 不执行，图恢复后 agent 直接给最终方案
         from app.services.approval_service import ApprovalService
         svc = ApprovalService(db_session)
-        binding = await svc.submit_to_dingtalk(approval_id=approval_id)
+        binding = await svc.submit_to_dingtalk(approval_id=create_approval_id)
         from app.services.dingtalk.approval_gateway import handle_approval_instance_change
         await handle_approval_instance_change({"processInstanceId": binding.process_instance_id,
                                                "type": "finish", "result": "refuse",
@@ -205,4 +231,4 @@ async def test_critical_rejection_still_replies(db_session, monkeypatch, mock_di
 
         # 审批单状态应为 rejected
         r = await c.get("/api/approvals", params={"status": "rejected"}, headers=h_admin)
-        assert any(a["id"] == approval_id for a in r.json()), r.text
+        assert any(a["id"] == create_approval_id for a in r.json()), r.text

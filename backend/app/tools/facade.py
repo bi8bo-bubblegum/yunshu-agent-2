@@ -79,11 +79,15 @@ class DataFacade:
                 async with SessionLocal() as db:
                     svc = ApprovalService(db)
                     if await svc.approval_repo.get(approval_id) is None:
+                        # 审批单标题友好化：活动创建类工具带 name 参数时展示活动名，
+                        # 否则回退「工具名 - 描述」（描述可能很长，截断 200 展示用）
+                        title = f"{name} - {tool.description}"[:200]
+                        if isinstance(kwargs, dict) and kwargs.get("name"):
+                            title = f"创建营销活动：{kwargs['name']}"[:200]
                         await svc.create_approval(
                             category="tool_call", risk="critical", mode="sync",
                             ref_type="trace", ref_id=eff_trace_id,
-                            # 审批单标题列限长 200，超长描述仅用于展示，截断即可
-                            title=f"{name} - {tool.description}"[:200],
+                            title=title,
                             context={"tool": name, "args": kwargs, "reason": tool.description},
                             requester_id=eff_requester, approver_role="admin",
                             approval_id=approval_id,

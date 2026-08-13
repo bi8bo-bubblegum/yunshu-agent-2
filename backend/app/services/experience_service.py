@@ -52,7 +52,10 @@ class ExperienceService:
             category="experience_promotion", risk=None, mode="async",
             ref_type="experience", ref_id=exp.id,
             title=f"经验晋升：{exp.title}",
-            context={"experience_id": exp.id, "from_scope": exp.scope, "to_scope": to_scope},
+            # 带 title/summary：审批中心动态表单打开时按 label 启发式预填
+            #（「经验标题」取 title、「经验详情」取 summary），减少手动输入
+            context={"experience_id": exp.id, "from_scope": exp.scope, "to_scope": to_scope,
+                     "title": exp.title, "summary": exp.summary},
             requester_id=user_id, approver_role=approver_role,
             push_dingtalk=False,  # 手动模式：不自动推送钉钉，由用户在审批中心确认提交后调用 submit_to_dingtalk
         )
